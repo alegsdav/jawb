@@ -11,7 +11,7 @@ import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, applyDates } from "@/components/StatusSelect";
 import { SaveStatus, useAutosave } from "@/lib/useAutosave";
 
-type Tab = "resume" | "job" | "cover";
+type Tab = "resume" | "job" | "cover" | "analysis";
 
 export default function JobPage() {
   const { id } = useParams<{ id: string }>();
@@ -163,9 +163,9 @@ export default function JobPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start gap-3">
-        <div className="flex-1 min-w-64">
+        <div className="w-full sm:flex-1 sm:min-w-64">
           <input
-            className="ghost-input w-full text-xl font-semibold"
+            className="ghost-input w-full text-lg sm:text-xl font-semibold"
             value={job.title}
             placeholder="Job title"
             onChange={(e) => patch({ title: e.target.value })}
@@ -201,18 +201,19 @@ export default function JobPage() {
 
       {error && <p className="text-sm text-bad">{error}</p>}
 
-      <div className="flex gap-1 border-b border-border">
+      <div className="flex gap-1 border-b border-border overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
         {(
           [
             ["resume", "Tailored resume"],
             ["job", "Job description"],
             ["cover", "Cover letter"],
+            ["analysis", "Analysis"],
           ] as const
         ).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`px-3 py-2 text-sm -mb-px border-b-2 ${tab === key ? "border-accent text-fg font-medium" : "border-transparent text-muted hover:text-fg"}`}
+            className={`shrink-0 px-3 py-2 text-sm -mb-px border-b-2 ${key === "analysis" ? "lg:hidden" : ""} ${tab === key ? "border-accent text-fg font-medium" : "border-transparent text-muted hover:text-fg"}`}
           >
             {label}
           </button>
@@ -220,8 +221,8 @@ export default function JobPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="min-w-0 space-y-3">
-          {tab === "resume" && (
+        <div className={`min-w-0 space-y-3 ${tab === "analysis" ? "hidden lg:block" : ""}`}>
+          {(tab === "resume" || tab === "analysis") && (
             <>
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-xs text-muted flex-1">
@@ -282,7 +283,7 @@ export default function JobPage() {
           )}
         </div>
 
-        <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <aside className={`${tab === "analysis" ? "" : "hidden"} lg:block lg:sticky lg:top-[4.5rem] lg:self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto`}>
           <AnalysisPanel
             analysis={job.analysis}
             analyzing={analyzing}

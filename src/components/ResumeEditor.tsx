@@ -46,7 +46,9 @@ function IconBtn({ title, onClick, children }: { title: string; onClick: () => v
       title={title}
       aria-label={title}
       onClick={onClick}
-      className="h-6 w-6 grid place-items-center rounded text-muted hover:text-fg hover:bg-border/60 text-xs"
+      // Keep focus in the bullet being edited so its controls stay visible on phones.
+      onPointerDown={(e) => e.preventDefault()}
+      className="h-8 w-8 sm:h-6 sm:w-6 grid place-items-center rounded text-muted hover:text-fg hover:bg-border/60 text-xs"
     >
       {children}
     </button>
@@ -62,7 +64,7 @@ export function ResumeEditor({ value, onChange, feedback, onDismissFeedback }: P
   const setBullets = (si: number, ii: number, bullets: Bullet[]) => updateItem(si, ii, { bullets });
 
   return (
-    <div className="card p-5 space-y-6">
+    <div className="card p-3 sm:p-5 space-y-6">
       <div className="text-center space-y-1">
         <input
           className="ghost-input w-full text-center text-2xl font-semibold"
@@ -86,7 +88,7 @@ export function ResumeEditor({ value, onChange, feedback, onDismissFeedback }: P
               value={section.title}
               onChange={(e) => updateSection(si, { title: e.target.value })}
             />
-            <div className="flex opacity-0 group-hover/section:opacity-100 focus-within:opacity-100">
+            <div className="flex reveal reveal-section">
               <IconBtn title="Move section up" onClick={() => setSections(move(value.sections, si, -1))}>↑</IconBtn>
               <IconBtn title="Move section down" onClick={() => setSections(move(value.sections, si, 1))}>↓</IconBtn>
               <IconBtn
@@ -126,7 +128,7 @@ export function ResumeEditor({ value, onChange, feedback, onDismissFeedback }: P
                       onChange={(e) => updateItem(si, ii, { location: e.target.value })}
                     />
                   </div>
-                  <div className="flex flex-col opacity-0 group-hover/item:opacity-100 focus-within:opacity-100">
+                  <div className="flex flex-col reveal reveal-item">
                     <IconBtn title="Move entry up" onClick={() => updateSection(si, { items: move(section.items, ii, -1) })}>↑</IconBtn>
                     <IconBtn title="Move entry down" onClick={() => updateSection(si, { items: move(section.items, ii, 1) })}>↓</IconBtn>
                     <IconBtn
@@ -194,7 +196,7 @@ export function ResumeEditor({ value, onChange, feedback, onDismissFeedback }: P
                             </div>
                           )}
                         </div>
-                        <div className="flex opacity-0 group-hover/bullet:opacity-100 focus-within:opacity-100">
+                        <div className="hidden group-focus-within/bullet:flex sm:flex reveal reveal-bullet">
                           <IconBtn title="Move bullet up" onClick={() => setBullets(si, ii, move(item.bullets, bi, -1))}>↑</IconBtn>
                           <IconBtn title="Move bullet down" onClick={() => setBullets(si, ii, move(item.bullets, bi, 1))}>↓</IconBtn>
                           <IconBtn title="Delete bullet" onClick={() => setBullets(si, ii, item.bullets.filter((_, i) => i !== bi))}>✕</IconBtn>
@@ -205,7 +207,7 @@ export function ResumeEditor({ value, onChange, feedback, onDismissFeedback }: P
                 </ul>
                 <button
                   type="button"
-                  className="text-xs text-muted hover:text-fg ml-4 opacity-0 group-hover/item:opacity-100 focus:opacity-100"
+                  className="text-xs text-muted hover:text-fg ml-4 py-1 reveal reveal-item"
                   onClick={() => setBullets(si, ii, [...item.bullets, { id: uid(), text: "" }])}
                 >
                   + bullet
@@ -215,7 +217,7 @@ export function ResumeEditor({ value, onChange, feedback, onDismissFeedback }: P
           </div>
           <button
             type="button"
-            className="mt-2 text-xs text-muted hover:text-fg"
+            className="mt-2 py-1 text-xs text-muted hover:text-fg"
             onClick={() => updateSection(si, { items: [...section.items, emptyItem()] })}
           >
             + entry

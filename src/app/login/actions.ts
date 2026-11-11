@@ -1,27 +1,67 @@
 "use server";
 
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
-export async function sendMagicLink(_: unknown, form: FormData) {
-  const email = String(form.get("email") ?? "").trim().toLowerCase();
+type State = { message: string; ok?: boolean };
+
+function checkAllowed(email: string): string | null {
   const allowed = (process.env.ALLOWED_EMAILS ?? "")
     .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  if (!email) return { message: "Enter your email." };
-  if (allowed.length && !allowed.includes(email)) {
-    return { message: "That email isn't allowed to sign in." };
+  if (!email) return "Enter your email.";
+  if (allowed.length && !allowed.includes(email)) return "That email isn't allowed to sign in.";
+  return null;
+}
+
+export async function signInWithPassword(_: State, form: FormData): Promise<State> {
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const password = String(form.get("password") ?? "");
+  const blocked = checkAllowed(email);
+  if (blocked) return { message: blocked };
+  if (!password) return { message: "Enter your password." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    return {
+      message: /invalid login/i.test(error.message)
+        ? "Wrong email or password. No password yet? Use \"Email me a sign-in link\" below, then set one under Account."
+        : error.message,
+    };
   }
+  redirect("/");
+}
+
+/** Fallback for a forgotten or never-set password: one-time sign-in link. */
+export async function sendMagicLink(_: State, form: FormData): Promise<State> {
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const blocked = checkAllowed(email);
+  if (blocked) return { message: blocked };
   const h = await headers();
   const origin = h.get("origin") ?? `https://${h.get("host")}`;
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: `${origin}/auth/callback` },
+    options: { emailRedirectTo: `${origin}/auth/callback?next=/account`, shouldCreateUser: false },
   });
-  return { message: error ? error.message : "Check your inbox for a sign-in link." };
+  return error
+    ? { message: error.message }
+    : { message: "Check your inbox. The link signs you in and opens Account so you can set a password.", ok: true };
+}
+
+export async function updatePassword(_: State, form: FormData): Promise<State> {
+  const password = String(form.get("password") ?? "");
+  const confirm = String(form.get("confirm") ?? "");
+  if (password.length < 8) return { message: "Use at least 8 characters." };
+  if (password !== confirm) return { message: "Passwords don't match." };
+  const supabase = await createClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  return error ? { message: error.message } : { message: "Password saved. You can sign in with it from now on.", ok: true };
 }
 
 export async function signOut() {
   const supabase = await createClient();
   await supabase.auth.signOut();
+  redirect("/login");
 }

@@ -76,3 +76,20 @@ body {
   .chip { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs border border-border; }
   .label { @apply text-xs font-medium uppercase tracking-wide text-muted; }
 }
+
+/* iOS zooms into any field under 16px on focus; keep fields at 16px on phones. */
+@media (max-width: 639px) {
+  input, textarea, select { font-size: 16px !important; }
+}
+
+/* On touch screens there is no hover, so hover-revealed controls stay visible. */
+@layer utilities {
+  .reveal { opacity: 1; }
+  @media (hover: hover) {
+    .reveal { opacity: 0; }
+    .group\/section:hover .reveal-section,
+    .group\/item:hover .reveal-item,
+    .group\/bullet:hover .reveal-bullet,
+    .reveal:focus-within { opacity: 1; }
+  }
+}

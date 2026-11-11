@@ -102,7 +102,7 @@ export default function TrackerPage() {
           </p>
         </div>
         <textarea
-          className="input w-full h-28"
+          className="input w-full h-24 sm:h-28"
           placeholder="https://job-boards.greenhouse.io/… or paste the description"
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -110,8 +110,8 @@ export default function TrackerPage() {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
           }}
         />
-        <div className="flex items-center gap-3">
-          <button className="btn btn-primary" disabled={busy || !input.trim()} onClick={() => submit()}>
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="btn btn-primary py-2 w-full sm:w-auto" disabled={busy || !input.trim()} onClick={() => submit()}>
             {busy ? "Reading job…" : URL_RE.test(input.trim()) ? "Fetch job" : "Add job"}
           </button>
           {error && <p className="text-sm text-bad">{error}</p>}
@@ -130,19 +130,55 @@ export default function TrackerPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap pb-1">
         {(["all", ...STATUSES.map((s) => s.value)] as const).map((s) => (
           <button
             key={s}
             onClick={() => setFilter(s)}
-            className={`chip ${filter === s ? "bg-fg text-bg border-fg" : "hover:border-fg/40"}`}
+            className={`chip shrink-0 py-1 ${filter === s ? "bg-fg text-bg border-fg" : "hover:border-fg/40"}`}
           >
             {s === "all" ? "All" : STATUSES.find((x) => x.value === s)!.label} {counts[s] ?? 0}
           </button>
         ))}
       </div>
 
-      <div className="card overflow-x-auto">
+      {/* Phones: one card per job */}
+      <div className="sm:hidden space-y-2">
+        {loading ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : shown.length === 0 ? (
+          <p className="text-sm text-muted">No jobs yet. Add one above.</p>
+        ) : (
+          shown.map((j) => (
+            <div key={j.id} className="card p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <Link href={`/jobs/${j.id}`} className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{j.title || "Untitled role"}</div>
+                  <div className="text-sm text-muted truncate">
+                    {[j.company, j.location].filter(Boolean).join(" · ")}
+                  </div>
+                </Link>
+                {j.analysis && <FitBadge score={j.analysis.fit_score} />}
+              </div>
+              <div className="flex items-center gap-2">
+                <StatusSelect
+                  value={j.status}
+                  onChange={(status) =>
+                    setField(j.id, { status, ...(status === "applied" && !j.date_applied ? applyDates() : {}) })
+                  }
+                />
+                {j.follow_up_date && j.status === "applied" && (
+                  <span className={`text-xs ${j.follow_up_date <= today ? "text-ok font-medium" : "text-muted"}`}>
+                    Follow up {j.follow_up_date.slice(5)}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="card overflow-x-auto hidden sm:block">
         <table className="w-full text-sm">
           <thead className="text-left text-muted">
             <tr className="border-b border-border">
