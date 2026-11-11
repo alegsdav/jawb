@@ -84,8 +84,8 @@ ${text.slice(0, 6000)}
 """`;
 }
 
-export function parseResumePrompt(text: string) {
-  return `Convert this resume text into JSON. Preserve the wording exactly; do not improve or invent anything.
+export function parseResumePrompt(text: string | null) {
+  return `Convert ${text === null ? "the attached resume PDF" : "this resume text"} into JSON. Preserve the wording exactly; do not improve or invent anything.
 Shape:
 {
   "header": { "name": "", "contact": "single line: location • email • phone • links" },
@@ -96,10 +96,11 @@ Shape:
 }
 For skills lines like "Languages: Python, SQL", use title "Languages", subtitle "Python, SQL", no bullets.
 For publications, put each citation as its own item with the full citation in "title".
-Return ONLY JSON.
+Keep the original section order. Drop page numbers, headers/footers and icons.
+Return ONLY JSON.${text === null ? "" : `
 
 RESUME TEXT:
 """
 ${text.slice(0, 15000)}
-"""`;
+"""`}`;
 }
