@@ -1,3 +1,6 @@
+// Pages need the signed-in user and Supabase env at request time, never at build time.
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { signOut } from "../login/actions";
 import { NavLinks } from "@/components/NavLinks";
