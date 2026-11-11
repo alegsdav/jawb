@@ -28,6 +28,6 @@ The AI is told never to invent facts or numbers. It uses `[placeholders]` and as
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Publishable / anon key (safe in the browser; RLS protects data) |
 | `ALLOWED_EMAILS` | Comma-separated emails allowed to sign in |
 | `GEMINI_API_KEY` | Server-only. Never commit it. |
-| `GEMINI_MODEL` | Optional, defaults to `gemini-2.5-flash` |
+| `GEMINI_MODEL` | Optional, defaults to `gemini-3.8-flash` |
 
 Tip: in Supabase → Authentication → Sign In / Providers, turn off "Allow new users to sign up" after your first login.

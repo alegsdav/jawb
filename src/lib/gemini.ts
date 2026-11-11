@@ -1,6 +1,6 @@
 import "server-only";
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 /** Call Gemini and parse a JSON response. Throws with a readable message on failure. */
 export type GeminiFile = { mimeType: string; data: string /* base64 */ };
@@ -46,6 +46,11 @@ export async function geminiText(
   );
   if (!res.ok) {
     const body = await res.text();
+    if (res.status === 404) {
+      throw new Error(
+        `Gemini model "${MODEL}" isn't available to your API key. Set GEMINI_MODEL in Vercel to a current model and redeploy. Google said: ${body.slice(0, 200)}`,
+      );
+    }
     throw new Error(`Gemini error ${res.status}: ${body.slice(0, 300)}`);
   }
   const data = await res.json();
