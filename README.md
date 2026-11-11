@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Job Pipeline
 
-## Getting Started
+A small, single-user web app for applying to internships and jobs:
 
-First, run the development server:
+1. **Master resume**: a structured editor (sections → entries → bullets) holding everything true about you. Import it by pasting your resume text.
+2. **Bullet bank**: extra facts, numbers and bullets that don't fit on one page. The analyzer pulls from it per job.
+3. **Add a job**: paste a link (Greenhouse, Lever, Ashby and other JSON-LD pages fetch automatically) or paste/drop the description.
+4. **Job workspace**: each job gets its own tailored copy of the master. **Analyze fit** returns a fit score, missing keywords, gaps, a strong/ok/weak rating for every bullet with one-click rewrites, and questions about the numbers it needs from you. Answer them and re-analyze.
+5. **Export**: ATS-friendly one-page PDF, plain-text copy, and an optional cover letter draft.
+6. **Tracker**: status, applied date, follow-up reminders (marking "Applied" sets a 10-day follow-up).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Stack: Next.js 15 (App Router) · Supabase (Postgres + RLS + magic-link auth) · Google Gemini · @react-pdf/renderer · Tailwind v4.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The AI is told never to invent facts or numbers. It uses `[placeholders]` and asks you instead.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Supabase**: create a project, then run `supabase/migrations/0001_init.sql` in the SQL editor.
+   Under Authentication → URL Configuration, set the Site URL to your deployed URL and add
+   `https://YOUR-APP.vercel.app/auth/callback` (and `http://localhost:3000/auth/callback`) to the redirect URLs.
+2. **Gemini key**: https://aistudio.google.com/apikey
+3. **Env vars**: copy `.env.example` to `.env.local` for local dev, and add the same keys in Vercel → Project → Settings → Environment Variables.
+4. `npm install && npm run dev`
 
-## Learn More
+| Variable | Notes |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Publishable / anon key (safe in the browser; RLS protects data) |
+| `ALLOWED_EMAILS` | Comma-separated emails allowed to sign in |
+| `GEMINI_API_KEY` | Server-only. Never commit it. |
+| `GEMINI_MODEL` | Optional, defaults to `gemini-2.5-flash` |
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Tip: in Supabase → Authentication → Sign In / Providers, turn off "Allow new users to sign up" after your first login.
