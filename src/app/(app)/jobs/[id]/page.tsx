@@ -36,6 +36,7 @@ export default function JobPage() {
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   const [error, setError] = useState("");
   const autoRan = useRef(false);
+  const [promoted, setPromoted] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -227,6 +228,20 @@ export default function JobPage() {
     }
   }
 
+  async function makeMaster() {
+    if (!resume) return;
+    if (!confirm("Replace your master resume with this tailored version? Other jobs keep their own copies.")) return;
+    const content = resume;
+    const { data: m } = await supabase.from("resumes").select("id").eq("is_master", true).maybeSingle();
+    const { error } = m
+      ? await supabase.from("resumes").update({ content }).eq("id", m.id)
+      : await supabase.from("resumes").insert({ is_master: true, name: "Master resume", content });
+    if (error) return setError(error.message);
+    setMaster(bulletTextMap(content)); // nothing differs from the master anymore
+    setPromoted(true);
+    setTimeout(() => setPromoted(false), 2500);
+  }
+
   async function deleteJob() {
     if (!confirm("Delete this job and its tailored resume?")) return;
     await supabase.from("jobs").delete().eq("id", id);
@@ -340,7 +355,10 @@ export default function JobPage() {
                 <Toggle on={showChanges} onChange={setShowChanges} label={`Changes vs master${changedCount ? ` (${changedCount})` : ""}`} />
                 <span className="hidden md:inline"><PageCount {...measure} /></span>
                 <div className="ml-auto flex flex-wrap items-center gap-1.5">
-                  <button className="btn btn-sm" onClick={resetFromMaster}>Reset</button>
+                  <button className="btn btn-sm" onClick={resetFromMaster} title="Replace this copy with your master">Reset</button>
+                  <button className="btn btn-sm" onClick={makeMaster} title="Replace your master with this copy">
+                    {promoted ? "Master updated ✓" : "Set as master"}
+                  </button>
                   <ResumeActions resume={resume} fileName={`${resume.header.name} Resume ${job.company}`} />
                 </div>
               </DocToolbar>
