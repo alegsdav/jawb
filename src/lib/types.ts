@@ -1,6 +1,12 @@
 export type Bullet = { id: string; text: string };
 
-/** One entry in a section. Skills-style lines are items with no bullets/dates. */
+/**
+ * One entry in a section, laid out Harvard-style:
+ *   title (bold)              location
+ *   subtitle (italic)         dates
+ *   • bullets
+ * Items with no bullets, dates or location render as one inline line ("Languages: Python, SQL").
+ */
 export type Item = {
   id: string;
   title: string;
@@ -13,6 +19,8 @@ export type Item = {
 export type Section = { id: string; title: string; items: Item[] };
 
 export type Resume = {
+  /** 2 = title is the organization/school (line 1), subtitle is the role/degree (line 2). */
+  version?: number;
   header: { name: string; contact: string };
   sections: Section[];
 };
@@ -38,6 +46,8 @@ export type Analysis = {
   bank_suggestions: { bank_id: string; reason: string }[];
   questions: { id: string; question: string; why: string }[];
   answers?: Record<string, string>;
+  /** Bullet ids whose suggested rewrite the user rejected. */
+  dismissed?: string[];
   analyzed_at?: string;
 };
 

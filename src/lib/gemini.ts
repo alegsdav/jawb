@@ -14,6 +14,17 @@ export async function geminiJSON<T>(
   try {
     return JSON.parse(cleaned) as T;
   } catch {
+    // Some models add prose around the JSON; fall back to the outermost {...}.
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1)) as T;
+      } catch {
+        /* fall through */
+      }
+    }
+    console.error("Gemini returned non-JSON:", cleaned.slice(0, 500));
     throw new Error("The AI returned malformed JSON. Try again.");
   }
 }
@@ -51,10 +62,18 @@ export async function geminiText(
         `Gemini model "${MODEL}" isn't available to your API key. Set GEMINI_MODEL in Vercel to a current model and redeploy. Google said: ${body.slice(0, 200)}`,
       );
     }
+    console.error("Gemini error", res.status, body.slice(0, 500));
     throw new Error(`Gemini error ${res.status}: ${body.slice(0, 300)}`);
   }
   const data = await res.json();
-  const out = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("");
-  if (!out) throw new Error("Gemini returned an empty response.");
+  const out = data?.candidates?.[0]?.content?.parts
+    ?.filter((p: { thought?: boolean }) => !p.thought) // skip thinking-model thought summaries
+    .map((p: { text?: string }) => p.text ?? "")
+    .join("");
+  if (!out) {
+    const reason = data?.candidates?.[0]?.finishReason ?? data?.promptFeedback?.blockReason ?? "unknown";
+    console.error("Gemini empty response", JSON.stringify(data).slice(0, 500));
+    throw new Error(`Gemini returned an empty response (reason: ${reason}).`);
+  }
   return out;
 }

@@ -79,17 +79,86 @@ body {
 
 /* iOS zooms into any field under 16px on focus; keep fields at 16px on phones. */
 @media (max-width: 639px) {
-  input, textarea, select { font-size: 16px !important; }
+  input:not(.doc-field), textarea:not(.doc-field), select { font-size: 16px !important; }
 }
 
-/* On touch screens there is no hover, so hover-revealed controls stay visible. */
-@layer utilities {
-  .reveal { opacity: 1; }
-  @media (hover: hover) {
-    .reveal { opacity: 0; }
-    .group\/section:hover .reveal-section,
-    .group\/item:hover .reveal-item,
-    .group\/bullet:hover .reveal-bullet,
-    .reveal:focus-within { opacity: 1; }
-  }
+/* ---------- Resume "document" (Harvard single-page layout on paper) ---------- */
+@layer components {
+.doc-canvas {
+  background: #e9e9e6;
+  border-radius: 12px;
+  padding: 28px 12px 40px;
+  overflow-x: hidden;
+}
+.doc-page {
+  position: relative;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 816px;            /* 8.5in */
+  min-height: 1056px;          /* 11in */
+  padding: 58px;               /* 0.6in */
+  background: #fff;
+  color: #111;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12), 0 6px 24px rgb(0 0 0 / 0.06);
+  font-family: "Times New Roman", Times, "Liberation Serif", serif;
+  font-size: 14.67px;          /* 11pt */
+  line-height: 1.25;
+}
+.doc-content { position: relative; }
+.doc-pagebreak {
+  position: absolute; left: 0; right: 0; height: 0;
+  border-top: 1px dashed #b9b9b4;
+  pointer-events: none;
+}
+.doc-pagebreak span {
+  position: absolute; right: 8px; top: 4px;
+  font: 11px/1 var(--font-geist-sans), system-ui, sans-serif; color: #9a9a95;
+}
+.doc-field {
+  background: transparent; color: inherit; outline: none;
+  border-radius: 2px; padding: 0 2px; margin: 0 -2px;
+  line-height: inherit;
+}
+.doc-field:hover { background: rgb(0 0 0 / 0.035); }
+.doc-field:focus { background: rgb(47 91 211 / 0.07); }
+.doc-field::placeholder { color: #b0b0aa; }
+.doc-entry:not(.is-active) .doc-field::placeholder,
+.doc-section .doc-field:not(:focus)::placeholder { color: transparent; }
+.doc-entry:not(.is-active) .doc-optional { display: none; }
+.doc-name { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.doc-contact { font-size: 13.3px; margin-top: 2px; }
+.doc-section { margin-top: 12px; }
+.doc-section-title {
+  display: block; width: 100%;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  border-bottom: 1px solid #111; border-radius: 0; padding-bottom: 1px; margin-bottom: 5px;
+}
+.doc-entry { margin-bottom: 6px; }
+.doc-entry.is-active { outline: 1px solid rgb(47 91 211 / 0.25); outline-offset: 4px; border-radius: 2px; }
+.doc-bullets { margin-top: 1px; padding-left: 10px; }
+.doc-bullets li + li { margin-top: 1px; }
+.doc-ui { font-family: var(--font-geist-sans), system-ui, sans-serif; }
+.doc-comment {
+  margin: 6px 0 8px 18px; padding: 10px 12px;
+  font-size: 13px; line-height: 1.4; color: #1b1b1a;
+  background: #fff; border: 1px solid #e2e2de; border-left: 3px solid #2f5bd3;
+  border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.08);
+}
+.doc-dot { left: -26px; }
+.doc-changebar { right: -22px; }
+@media (max-width: 900px) {
+  .doc-pagebreak { display: none; }
+}
+@media (max-width: 639px) {
+  /* Phones get a reflowed page, like Google Docs' mobile view. */
+  .doc-canvas { padding: 10px 0 24px; background: transparent; }
+  .doc-page { min-height: 0; padding: 20px 16px; font-size: 16px; }
+  .doc-name { font-size: 24px; }
+  .doc-contact { font-size: 14px; }
+  .doc-bullets { padding-left: 2px; }
+  .doc-comment { margin-left: 0; }
+  .doc-dot { left: -12px; }
+  .doc-changebar { right: -10px; }
+}
+
 }

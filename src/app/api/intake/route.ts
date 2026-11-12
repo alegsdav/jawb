@@ -4,7 +4,8 @@ import { fetchJobFromUrl } from "@/lib/fetch-job";
 import { geminiJSON } from "@/lib/gemini";
 import { extractJobMetaPrompt } from "@/lib/prompts";
 
-export const maxDuration = 60;
+// AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
+export const maxDuration = 120;
 
 /** Create a job from a URL and/or pasted description. Returns { id }. */
 export async function POST(req: Request) {
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
       }
     }
   } catch (e) {
+    console.error("intake failed:", e);
     return NextResponse.json({ error: (e as Error).message }, { status: 422 });
   }
 

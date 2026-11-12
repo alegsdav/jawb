@@ -13,6 +13,9 @@ type Props = {
   bank: BankBullet[];
   resume: Resume;
   onInsertBullet: (itemId: string, text: string) => void;
+  pendingCount: number;
+  onReview: () => void;
+  onAcceptAll: () => void;
 };
 
 const SEVERITY: Record<string, string> = { high: "text-bad", medium: "text-ok", low: "text-muted" };
@@ -53,11 +56,22 @@ export function AnalysisPanel(p: Props) {
         </div>
         {!a && !p.analyzing && (
           <p className="text-sm text-muted">
-            Compares this tailored resume against the job: fit score, missing keywords, a rating for every bullet with
-            suggested rewrites, and questions for anything it needs from you.
+            Compares this tailored copy against the job: fit score, missing keywords, a rating for every bullet with
+            suggested rewrites, and questions for anything it needs from you. Usually takes 20–60 seconds.
           </p>
         )}
         {a && <p className="text-sm">{a.verdict}</p>}
+        {a && p.pendingCount > 0 && (
+          <div className="rounded-lg bg-accent/5 border border-accent/30 p-3 space-y-2">
+            <p className="text-sm">
+              <strong>{p.pendingCount} suggested edit{p.pendingCount > 1 ? "s" : ""}</strong> to tailor your resume for this job.
+            </p>
+            <div className="flex gap-1.5">
+              <button className="btn btn-sm" onClick={p.onReview}>Review one by one</button>
+              <button className="btn btn-sm btn-primary" onClick={p.onAcceptAll}>Accept all</button>
+            </div>
+          </div>
+        )}
         {a?.analyzed_at && (
           <p className="text-xs text-muted">Last run {new Date(a.analyzed_at).toLocaleString()}. Edits since then aren&apos;t reflected until you re-analyze.</p>
         )}

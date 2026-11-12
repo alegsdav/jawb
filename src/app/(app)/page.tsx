@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { postApi } from "@/lib/api";
 import { STATUSES, type Job, type JobStatus } from "@/lib/types";
 import { FitBadge, StatusSelect, applyDates } from "@/components/StatusSelect";
 
@@ -39,14 +40,10 @@ export default function TrackerPage() {
     setBusy(true);
     setError("");
     const isUrl = URL_RE.test(value);
-    const res = await fetch("/api/intake", {
-      method: "POST",
-      body: JSON.stringify(isUrl ? { url: value } : { text: value }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
+    const { data: json, error } = await postApi<{ id: string }>("/api/intake", isUrl ? { url: value } : { text: value });
+    if (error || !json) {
       setBusy(false);
-      setError(json.error ?? "Something went wrong.");
+      setError(error ?? "Something went wrong.");
       return;
     }
     router.push(`/jobs/${json.id}`);

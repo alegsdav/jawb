@@ -5,7 +5,8 @@ Hard rules:
 - NEVER invent facts, numbers, tools, employers or results the candidate did not state.
 - When a rewrite needs a number you don't have, use a placeholder like [X hrs] or [N users] and add a question asking for it.
 - Keep bullets to one line where possible (~25 words max), starting with a strong past-tense verb (present tense only for current roles).
-- Be honest and specific. A weak bullet should be called weak.`;
+- Be honest and specific. A weak bullet should be called weak.
+- Tailoring means rewording, reordering and emphasizing what is already there. Never suggest adding a section the resume doesn't have.`;
 
 export function analyzePrompt(args: {
   resume: string;
@@ -90,12 +91,19 @@ Shape:
 {
   "header": { "name": "", "contact": "single line: location • email • phone • links" },
   "sections": [
-    { "title": "Education|Experience|Projects|Skills|Publications|Leadership|...",
-      "items": [ { "title": "role or degree or skill category", "subtitle": "organization / school / skill list", "location": "", "dates": "", "bullets": ["..."] } ] }
+    { "title": "section heading exactly as written (e.g. Education, Experience, Projects, Skills)",
+      "items": [ {
+        "title": "line 1, left: organization, school or project name",
+        "location": "line 1, right: city/state or Remote (\"\" if none)",
+        "subtitle": "line 2, left: job title/position, degree, or tech stack",
+        "dates": "date range or graduation date (\"\" if none)",
+        "bullets": ["..."] } ] }
   ]
 }
-For skills lines like "Languages: Python, SQL", use title "Languages", subtitle "Python, SQL", no bullets.
-For publications, put each citation as its own item with the full citation in "title".
+Only include sections that appear in the resume. Never add sections, entries or content.
+For skills lines like "Languages: Python, SQL", use title "Languages", subtitle "Python, SQL", no bullets, no dates.
+For publications or memberships, put each one as its own item with the full text in "title" and no bullets.
+Lines like "GPA: 3.85 | Dean's List" under a school go in that school's bullets.
 Keep the original section order. Drop page numbers, headers/footers and icons.
 Return ONLY JSON.${text === null ? "" : `
 

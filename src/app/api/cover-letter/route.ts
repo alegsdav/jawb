@@ -5,7 +5,8 @@ import { coverLetterPrompt } from "@/lib/prompts";
 import { normalizeResume, resumeToPlainText } from "@/lib/resume";
 import { formatAnswers } from "@/lib/answers";
 
-export const maxDuration = 60;
+// AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   const { supabase, user } = await requireUser();
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
     await supabase.from("jobs").update({ cover_letter: letter.trim() }).eq("id", jobId);
     return NextResponse.json({ cover_letter: letter.trim() });
   } catch (e) {
+    console.error("cover-letter failed:", e);
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }
 }

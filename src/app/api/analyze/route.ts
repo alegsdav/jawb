@@ -5,8 +5,10 @@ import { analyzePrompt } from "@/lib/prompts";
 import { normalizeResume, resumeToPromptText } from "@/lib/resume";
 import type { Analysis } from "@/lib/types";
 import { formatAnswers } from "@/lib/answers";
+import { normalizeAnalysis } from "@/lib/analysis";
 
-export const maxDuration = 60;
+// AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   const { supabase, user } = await requireUser();
@@ -23,28 +25,30 @@ export async function POST(req: Request) {
 
   const prev = job.analysis as Analysis | null;
   try {
-    const result = await geminiJSON<Analysis>(
+    const result = normalizeAnalysis(await geminiJSON<unknown>(
       analyzePrompt({
         resume: resumeToPromptText(normalizeResume(resume.content)),
         job: `${job.title} at ${job.company} (${job.location})\n\n${job.description}`,
         bank: (bank ?? []).map((b) => `[bank:${b.id}] (${b.source}) ${b.text}`).join("\n"),
         answers: formatAnswers(prev),
       }),
-    );
+    ));
     // Keep earlier answers (and their questions) so they keep informing future runs.
     const oldAnswered = (prev?.questions ?? []).filter((q) => prev?.answers?.[q.id]?.trim());
     const analysis: Analysis = {
       ...result,
       questions: [
         ...oldAnswered,
-        ...(result.questions ?? []).map((q, i) => ({ ...q, id: `q${Date.now()}_${i}` })),
+        ...result.questions.map((q, i) => ({ ...q, id: `q${Date.now()}_${i}` })),
       ],
       answers: prev?.answers ?? {},
       analyzed_at: new Date().toISOString(),
     };
-    await supabase.from("jobs").update({ analysis }).eq("id", jobId);
+    const { error: saveError } = await supabase.from("jobs").update({ analysis }).eq("id", jobId);
+    if (saveError) console.error("analyze: saving result failed:", saveError.message);
     return NextResponse.json({ analysis });
   } catch (e) {
+    console.error("analyze failed:", e);
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }
 }

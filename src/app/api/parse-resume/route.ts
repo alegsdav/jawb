@@ -4,7 +4,8 @@ import { geminiJSON } from "@/lib/gemini";
 import { parseResumePrompt } from "@/lib/prompts";
 import { normalizeResume } from "@/lib/resume";
 
-export const maxDuration = 60;
+// AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
+export const maxDuration = 120;
 
 const MAX_PDF_BYTES = 4 * 1024 * 1024; // Vercel caps request bodies at ~4.5 MB
 
@@ -40,12 +41,13 @@ export async function POST(req: Request) {
       temperature: 0,
       files: pdf ? [{ mimeType: "application/pdf", data: pdf }] : undefined,
     });
-    const resume = normalizeResume(parsed);
+    const resume = normalizeResume({ ...(parsed as object), version: 2 }); // prompt already uses the v2 layout
     if (!resume.sections.length) {
       return NextResponse.json({ error: "Couldn't find any resume sections in that file." }, { status: 422 });
     }
     return NextResponse.json({ resume });
   } catch (e) {
+    console.error("parse-resume failed:", e);
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }
 }
