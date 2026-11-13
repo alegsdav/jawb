@@ -9,7 +9,7 @@ import {
 } from "@/lib/resume";
 import type { Analysis, Job, JobStatus, Resume } from "@/lib/types";
 import { friendlyError, postApi } from "@/lib/api";
-import { countPlaceholders, hasPlaceholder } from "@/lib/facts";
+import { countPlaceholders, hasPlaceholder, plural } from "@/lib/facts";
 import { fitOf } from "@/lib/fit";
 import {
   bulletFeedback, carryClientState, findPlaceholder, missingAnswerFacts, normalizeAnalysis, planFill, saveAnswersInOrder,
@@ -54,7 +54,6 @@ const TABS: [Tab, string, string][] = [
   ["cover", "Letter", "Cover letter"],
 ];
 
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 /** Don't re-read the rows again when `focus` and `visibilitychange` fire together. */
 const REFRESH_GAP_MS = 1500;
 
@@ -513,7 +512,7 @@ export default function JobPage() {
   const pull = useMemo(() => planPull(resume, master), [resume, master]);
   const placeholderCount = useMemo(() => (resume ? countPlaceholders(resumeTexts(resume)) : 0), [resume]);
   const missingFacts = useMemo(
-    () => (analysis && master ? missingAnswerFacts(analysis.questions, analysis.answers, master.facts) : []),
+    () => (analysis && master ? missingAnswerFacts(analysis.questions, analysis.answers, master.facts, analysis.bullets) : []),
     [analysis, master],
   );
 
@@ -840,7 +839,7 @@ export default function JobPage() {
         <p className="text-bad">{error || "Couldn't load this job."}</p>
         <div className="flex gap-2">
           <button type="button" className="btn btn-primary min-h-10 sm:min-h-0" onClick={() => window.location.reload()}>Try again</button>
-          <Link href="/" className="btn min-h-10 sm:min-h-0">Back to tracker</Link>
+          <Link href="/" className="btn min-h-10 sm:min-h-0">Back to jobs</Link>
         </div>
       </div>
     );

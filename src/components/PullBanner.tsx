@@ -1,11 +1,12 @@
 "use client";
 
+import { plural } from "@/lib/facts";
+
 import { useEffect, useRef, useState } from "react";
 import { hasPullChanges, type PullAddition, type PullPlan, type PullRemoval } from "@/lib/tailor";
 import type { MergeConflict } from "@/lib/master";
 import type { MasterRemoval, SaveAsMasterPlan } from "@/lib/jobSync";
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function additionText(a: PullAddition) {
   if (a.kind === "section") return { what: "New section", text: a.label, detail: a.items ? plural(a.items, "entry", "entries") : "" };
