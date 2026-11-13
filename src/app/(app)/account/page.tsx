@@ -35,6 +35,16 @@ export default function AccountPage() {
         </button>
         {state.message && <p className={`text-sm ${state.ok ? "text-good" : "text-bad"}`}>{state.message}</p>}
       </form>
+
+      <section className="card p-4 space-y-2">
+        <h2 className="font-semibold">Export your data</h2>
+        <p className="text-sm text-muted">
+          Downloads a JSON backup of your resumes (including extra facts) and every job you&apos;ve tracked.
+        </p>
+        <a href="/api/export" download className="btn w-full py-2.5">
+          Download backup (.json)
+        </a>
+      </section>
     </div>
   );
 }

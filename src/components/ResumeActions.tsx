@@ -3,9 +3,13 @@
 import { useState } from "react";
 import type { Resume } from "@/lib/types";
 import { resumeToPlainText } from "@/lib/resume";
-import { countMocks } from "@/lib/bank";
+import { countPlaceholders } from "@/lib/facts";
 
-export function ResumeActions({ resume, fileName }: { resume: Resume; fileName: string }) {
+/** What gets printed or copied: never the master-only `facts`. */
+const printable = (r: Resume): Resume => ({ version: r.version, header: r.header, sections: r.sections });
+
+export function ResumeActions({ resume: full, fileName }: { resume: Resume; fileName: string }) {
+  const resume = printable(full);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -13,8 +17,9 @@ export function ResumeActions({ resume, fileName }: { resume: Resume; fileName: 
     const texts = [resume.header.name, resume.header.contact, ...resume.sections.flatMap((sec) => [
       sec.title, ...sec.items.flatMap((it) => [it.title, it.subtitle, it.location, it.dates, ...it.bullets.map((b) => b.text)]),
     ])];
-    const mocks = countMocks(texts);
-    if (mocks && !confirm(`This resume still has ${mocks} [bracketed] example value${mocks > 1 ? "s" : ""}. Download anyway?`)) return;
+    const n = countPlaceholders(texts);
+    const msg = `This resume still has ${n} [bracketed] placeholder${n > 1 ? "s" : ""} where a real number or detail should go. Download anyway?`;
+    if (n && !confirm(msg)) return;
     setBusy(true);
     try {
       const [{ pdf }, { ResumePdf }] = await Promise.all([import("@react-pdf/renderer"), import("./ResumePdf")]);

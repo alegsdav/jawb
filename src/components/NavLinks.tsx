@@ -4,9 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/", label: "Tracker", short: "Tracker" },
-  { href: "/resume", label: "Master resume", short: "Resume" },
-  { href: "/bank", label: "Bullet bank", short: "Bank" },
+  { href: "/", label: "Tracker", short: "Tracker", desktop: true },
+  { href: "/resume", label: "Master resume", short: "Resume", desktop: true },
+  // On desktop, Account lives in the header's top-right corner instead.
+  { href: "/account", label: "Account", short: "Account", desktop: false },
 ];
 
 export function NavLinks({ mobile = false }: { mobile?: boolean }) {
@@ -30,7 +31,7 @@ export function NavLinks({ mobile = false }: { mobile?: boolean }) {
   }
   return (
     <nav className="flex gap-4 text-sm">
-      {LINKS.map((l) => (
+      {LINKS.filter((l) => l.desktop).map((l) => (
         <Link key={l.href} href={l.href} className={isActive(l.href) ? "text-fg font-medium" : "text-muted hover:text-fg"}>
           {l.label}
         </Link>

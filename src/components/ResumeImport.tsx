@@ -17,7 +17,7 @@ export function ResumeImport({
   const [error, setError] = useState("");
 
   async function run(file?: File) {
-    if (replaceWarning && !confirm("Replace your current master resume with the imported one?")) return;
+    if (replaceWarning && !confirm("Replace your current master resume with the imported one? Your extra facts are kept.")) return;
     setBusy(true);
     setError("");
     let body: FormData | { text: string };
@@ -36,7 +36,12 @@ export function ResumeImport({
 
   return (
     <div className="space-y-3">
-      {replaceWarning && <p className="text-sm"><strong>Re-importing replaces the current master.</strong></p>}
+      {replaceWarning && (
+        <p className="text-sm">
+          <strong>Re-importing replaces the current master.</strong>{" "}
+          <span className="text-muted">Your extra facts are kept.</span>
+        </p>
+      )}
       <label
         onDragOver={(e) => {
           e.preventDefault();
@@ -76,7 +81,7 @@ export function ResumeImport({
         onChange={(e) => setText(e.target.value)}
         placeholder="Paste resume text…"
       />
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => run()}>
           {busy ? "Parsing…" : "Import text"}
         </button>

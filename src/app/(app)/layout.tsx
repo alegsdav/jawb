@@ -15,7 +15,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <NavLinks />
           </div>
           <div className="ml-auto flex items-center gap-4 text-sm">
-            <Link href="/account" className="text-muted hover:text-fg">Account</Link>
+            <Link href="/account" className="hidden sm:inline text-muted hover:text-fg">Account</Link>
             <form action={signOut}>
               <button className="text-muted hover:text-fg">Sign out</button>
             </form>

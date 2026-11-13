@@ -1,6 +1,7 @@
 "use client";
 
-import { STATUSES, type JobStatus } from "@/lib/types";
+import { STATUSES, type Fit, type JobStatus } from "@/lib/types";
+import { FIT_LABEL } from "@/lib/fit";
 
 const COLORS: Record<JobStatus, string> = {
   to_apply: "",
@@ -32,7 +33,13 @@ export function applyDates() {
   return { date_applied: now.toISOString().slice(0, 10), follow_up_date: follow.toISOString().slice(0, 10) };
 }
 
-export function FitBadge({ score }: { score: number }) {
-  const cls = score >= 75 ? "text-good bg-good-bg" : score >= 50 ? "text-ok bg-ok-bg" : "text-bad bg-bad-bg";
-  return <span className={`chip border-0 font-semibold ${cls}`}>{score}</span>;
+const FIT_CLS: Record<Fit, string> = {
+  strong: "text-good bg-good-bg border-good/30",
+  possible: "text-ok bg-ok-bg border-ok/30",
+  stretch: "text-muted bg-bg border-border",
+};
+
+/** Coarse fit bucket as a colored chip. Never shows a number. */
+export function FitBadge({ fit }: { fit: Fit }) {
+  return <span className={`chip shrink-0 whitespace-nowrap font-medium ${FIT_CLS[fit]}`}>{FIT_LABEL[fit]}</span>;
 }
