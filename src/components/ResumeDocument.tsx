@@ -2,20 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  DndContext,
-  MouseSensor,
-  TouchSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type CollisionDetection,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Analysis, Bullet, Item, Resume, Section } from "@/lib/types";
 import { emptyItem, isInlineItem, uid } from "@/lib/resume";
-import { hasMock } from "@/lib/bank";
+import { hasPlaceholder } from "@/lib/facts";
 
 type Feedback = Analysis["bullets"][number];
 
@@ -36,11 +25,14 @@ type Props = {
   onMeasure?: (m: { pages: number; overflowLines: number }) => void;
   /** Element in the page toolbar where contextual actions (move/delete) render. */
   actionsSlot?: HTMLElement | null;
-  /** Called when the user accepts a suggested rewrite (so it can be saved to the bullet bank). */
-  onAccept?: (text: string, entryTitle: string) => void;
+  /**
+   * Select a bullet, scroll it into view and open its comment card. Pass a new object (e.g. with an
+   * incrementing `n`) each time. Works on iOS too, where focusing a field outside a tap is ignored.
+   */
+  reveal?: { id: string; n: number } | null;
 };
 
-/** What's selected, by id (indexes would go stale after a drag). */
+/** What's selected, by id (indexes go stale after a move). */
 type Active =
   | { kind: "section"; sid: string }
   | { kind: "item"; sid: string; iid: string }
@@ -52,70 +44,14 @@ const PAGE_H = 1056;
 const MARGIN = 58;
 const LINE = 18;
 
-// ---------- drag & drop ----------
-
-/** Start a drag from blank space or a grip, never from text you're typing in. */
-function canStartDrag(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (!el?.closest) return false;
-  if (el.closest("[data-drag-handle]")) return true;
-  return !el.closest("input, textarea, button, select, a, [data-no-drag]");
-}
-
-class DocMouseSensor extends MouseSensor {
-  static activators = [
-    { eventName: "onMouseDown" as const, handler: ({ nativeEvent }: { nativeEvent: MouseEvent }) => nativeEvent.button === 0 && canStartDrag(nativeEvent.target) },
-  ];
-}
-
-class DocTouchSensor extends TouchSensor {
-  static activators = [
-    { eventName: "onTouchStart" as const, handler: ({ nativeEvent }: { nativeEvent: TouchEvent }) => canStartDrag(nativeEvent.target) },
-  ];
-}
-
-// Ids are "sec:<id>", "item:<id>", "bul:<id>"; each list only sorts among its siblings.
-const kindOf = (id: string | number) => String(id).split(":")[0];
-const rawId = (id: string | number) => String(id).slice(String(id).indexOf(":") + 1);
-
-const siblingsOnly: CollisionDetection = (args) => {
-  const kind = kindOf(args.active.id);
-  const parent = args.active.data.current?.parent;
-  return closestCenter({
-    ...args,
-    droppableContainers: args.droppableContainers.filter(
-      (c) => kindOf(c.id) === kind && c.data.current?.parent === parent,
-    ),
-  });
-};
-
-type SortableBits = ReturnType<typeof useSortable>;
-
-function sortableStyle(s: SortableBits): React.CSSProperties {
-  const t = s.transform;
-  return {
-    transform: t ? `translate3d(0, ${Math.round(t.y)}px, 0)` : undefined,
-    transition: s.transition,
-  };
-}
-
-function Sortable({
-  id, parent, children,
-}: {
-  id: string;
-  parent: string;
-  children: (s: SortableBits) => React.ReactNode;
-}) {
-  const s = useSortable({ id, data: { parent } });
-  return <>{children(s)}</>;
-}
-
 // ---------- small building blocks ----------
 
 function move<T>(arr: T[], i: number, dir: -1 | 1): T[] {
   const j = i + dir;
   if (i < 0 || j < 0 || j >= arr.length) return arr;
-  return arrayMove(arr, i, j);
+  const next = [...arr];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
 }
 
 /** Text input that grows with its content (for right-aligned dates/locations and inline labels). */
@@ -178,7 +114,6 @@ function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => voi
 function ContextBar({ slot, label, children }: { slot?: HTMLElement | null; label: string; children: React.ReactNode }) {
   const bar = (inline: boolean) => (
     <div
-      data-no-drag
       className={`doc-ui flex flex-wrap items-center gap-0.5 ${
         inline ? "sm:hidden mt-2 rounded-lg border border-[#e2e2de] bg-[#fafaf8] px-1 py-1" : "hidden sm:flex"
       }`}
@@ -195,21 +130,6 @@ function ContextBar({ slot, label, children }: { slot?: HTMLElement | null; labe
   );
 }
 
-/** Six-dot grip in the left margin (desktop). Blank space in the block is draggable too. */
-function Grip({ s, title }: { s: SortableBits; title: string }) {
-  return (
-    <span
-      data-drag-handle
-      title={title}
-      aria-label={title}
-      className="doc-ui doc-grip"
-      {...s.listeners}
-    >
-      ⋮⋮
-    </span>
-  );
-}
-
 const RATING: Record<Feedback["rating"], { label: string; tint: string; dot: string; text: string }> = {
   strong: { label: "Strong", tint: "bg-[#e9f6ee]", dot: "bg-[#1f8a4c]", text: "text-[#1f8a4c]" },
   ok: { label: "Okay", tint: "bg-[#fdf5e2]", dot: "bg-[#c98a12]", text: "text-[#a86f05]" },
@@ -218,24 +138,41 @@ const RATING: Record<Feedback["rating"], { label: string; tint: string; dot: str
 
 const isField = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("input, textarea, button, select, a");
 
+function locateBullet(r: Resume, bid: string): { sid: string; iid: string } | null {
+  for (const s of r.sections) for (const it of s.items) if (it.bullets.some((b) => b.id === bid)) return { sid: s.id, iid: it.id };
+  return null;
+}
+
 // ---------- the document ----------
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, rejected, onReject, onMeasure, actionsSlot,
-  onAccept,
+  reveal,
 }: Props) {
   const [active, setActive] = useState<Active>(null);
   const focusNext = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  /** Whether the current press began on an input/button (see selectBlock). */
+  const downOnField = useRef(false);
 
-  const sensors = useSensors(
-    useSensor(DocMouseSensor, { activationConstraint: { distance: 5 } }),
-    // Phones: press and hold ~¼s on blank space, a grip or a bullet dot, then drag.
-    useSensor(DocTouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
-  );
+  // A reveal request selects its bullet right away (during render, so the comment card shows on the same paint).
+  const [revealed, setRevealed] = useState(reveal);
+  if (reveal !== revealed) {
+    setRevealed(reveal);
+    const loc = reveal ? locateBullet(value, reveal.id) : null;
+    if (reveal && loc) setActive({ kind: "bullet", ...loc, bid: reveal.id });
+  }
+  useEffect(() => {
+    if (!reveal) return;
+    const el = document.querySelector<HTMLTextAreaElement>(`[data-bullet="${reveal.id}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    // Desktop gets the caret too. iOS ignores this outside a tap; the selection above still shows the card.
+    el?.focus({ preventScroll: true });
+  }, [reveal]);
 
-  // Clear the selection only when the user taps/clicks or tabs outside the document and its toolbar.
+  // Clear the selection only when the user taps/clicks or tabs outside the document and its toolbar slot.
+  // (Not on blur: iOS Safari never focuses buttons, so blur/relatedTarget can't tell a toolbar tap from leaving.)
   useEffect(() => {
     const outside = (t: EventTarget | null) => {
       const n = t as Node | null;
@@ -251,7 +188,7 @@ export function ResumeDocument({
     };
   }, [actionsSlot]);
 
-  // Focus a bullet created/removed by keyboard once it's rendered.
+  // Focus a bullet created/removed/moved by keyboard once it's rendered.
   useEffect(() => {
     if (!focusNext.current) return;
     const el = document.querySelector<HTMLTextAreaElement>(`[data-bullet="${focusNext.current}"]`);
@@ -302,42 +239,16 @@ export function ResumeDocument({
   }
 
   function selectBlock(next: Active) {
+    // A press that started in a field is typing, even if layout shifted and the click landed on the block.
+    if (downOnField.current) return;
     // Selecting a whole block (not typing): drop the caret so the box selection is obvious.
     const el = document.activeElement as HTMLElement | null;
     if (el && canvasRef.current?.contains(el)) el.blur();
     setActive(next);
   }
 
-  function onDragEnd({ active: a, over }: DragEndEvent) {
-    if (!over || a.id === over.id) return;
-    const kind = kindOf(a.id);
-    const from = rawId(a.id);
-    const to = rawId(over.id);
-    if (kind === "sec") {
-      const i = value.sections.findIndex((s) => s.id === from);
-      const j = value.sections.findIndex((s) => s.id === to);
-      setSections(arrayMove(value.sections, i, j), true);
-      setActive({ kind: "section", sid: from });
-    } else if (kind === "item") {
-      const sid = String(a.data.current?.parent).slice(4);
-      updSection(sid, (s) => {
-        const i = s.items.findIndex((it) => it.id === from);
-        const j = s.items.findIndex((it) => it.id === to);
-        return { ...s, items: arrayMove(s.items, i, j) };
-      }, true);
-      setActive({ kind: "item", sid, iid: from });
-    } else if (kind === "bul") {
-      const [sid, iid] = String(a.data.current?.parent).slice(5).split("/");
-      const item = value.sections.find((s) => s.id === sid)?.items.find((it) => it.id === iid);
-      if (!item) return;
-      const i = item.bullets.findIndex((b) => b.id === from);
-      const j = item.bullets.findIndex((b) => b.id === to);
-      setBullets(sid, iid, arrayMove(item.bullets, i, j), true);
-    }
-  }
-
   return (
-    <div ref={canvasRef} className="doc-canvas">
+    <div ref={canvasRef} className="doc-canvas" onPointerDownCapture={(e) => (downOnField.current = isField(e.target))}>
       <div className="doc-page">
         {/* Page-break guide (desktop only) */}
         <div aria-hidden className="doc-pagebreak" style={{ top: PAGE_H }}>
@@ -351,82 +262,65 @@ export function ResumeDocument({
               className="doc-name text-center"
               value={value.header.name}
               placeholder="Your Name"
+              aria-label="Name"
               onChange={(e) => onChange({ ...value, header: { ...value.header, name: e.target.value } })}
             />
             <AutoTextarea
               className="doc-contact text-center"
               value={value.header.contact}
               placeholder="City, ST • email • phone • github.com/you"
+              aria-label="Contact line"
               onChange={(e) => onChange({ ...value, header: { ...value.header, contact: e.target.value } })}
             />
           </div>
 
-          <DndContext id="resume-doc" sensors={sensors} collisionDetection={siblingsOnly} onDragEnd={onDragEnd}>
-            <SortableContext items={value.sections.map((s) => `sec:${s.id}`)} strategy={verticalListSortingStrategy}>
-              {value.sections.map((section, si) => (
-                <Sortable key={section.id} id={`sec:${section.id}`} parent="root">
-                  {(ss) => {
-                    const sectionActive = active?.kind === "section" && active.sid === section.id;
-                    return (
-                      <section
-                        ref={ss.setNodeRef}
-                        style={sortableStyle(ss)}
-                        {...ss.listeners}
-                        className={`doc-section doc-block ${sectionActive ? "is-selected" : ""} ${ss.isDragging ? "is-dragging" : ""}`}
-                        onClick={(e) => {
-                          if (!isField(e.target)) selectBlock({ kind: "section", sid: section.id });
+          {value.sections.map((section, si) => {
+            const sectionActive = active?.kind === "section" && active.sid === section.id;
+            return (
+              <section
+                key={section.id}
+                className={`doc-section doc-block ${sectionActive ? "is-selected" : ""}`}
+                onClick={(e) => {
+                  if (!isField(e.target)) selectBlock({ kind: "section", sid: section.id });
+                }}
+              >
+                <div className="relative" onFocus={() => setActive({ kind: "section", sid: section.id })}>
+                  <input
+                    className="doc-field doc-section-title"
+                    value={section.title}
+                    placeholder="SECTION"
+                    aria-label="Section title"
+                    onChange={(e) => updSection(section.id, (s) => ({ ...s, title: e.target.value }))}
+                  />
+                  {sectionActive && (
+                    <ContextBar slot={actionsSlot} label="Section">
+                      <ToolBtn label="↑ Move" onClick={() => setSections(move(value.sections, si, -1), true)} />
+                      <ToolBtn label="↓ Move" onClick={() => setSections(move(value.sections, si, 1), true)} />
+                      <ToolBtn label="+ Entry" onClick={() => updSection(section.id, (s) => ({ ...s, items: [...s.items, emptyItem()] }), true)} />
+                      <ToolBtn
+                        label="Delete section"
+                        danger
+                        onClick={() => {
+                          if (confirm(`Delete the "${section.title}" section?`)) {
+                            setSections(value.sections.filter((s) => s.id !== section.id), true);
+                            setActive(null);
+                          }
                         }}
-                      >
-                        <Grip s={ss} title="Drag section" />
-                        <div className="relative" onFocus={() => setActive({ kind: "section", sid: section.id })}>
-                          <input
-                            className="doc-field doc-section-title"
-                            value={section.title}
-                            placeholder="SECTION"
-                            aria-label="Section title"
-                            onChange={(e) => updSection(section.id, (s) => ({ ...s, title: e.target.value }))}
-                          />
-                          {sectionActive && (
-                            <ContextBar slot={actionsSlot} label="Section">
-                              <ToolBtn label="↑ Move" onClick={() => setSections(move(value.sections, si, -1), true)} />
-                              <ToolBtn label="↓ Move" onClick={() => setSections(move(value.sections, si, 1), true)} />
-                              <ToolBtn label="+ Entry" onClick={() => updSection(section.id, (s) => ({ ...s, items: [...s.items, emptyItem()] }), true)} />
-                              <ToolBtn
-                                label="Delete section"
-                                danger
-                                onClick={() => {
-                                  if (confirm(`Delete the "${section.title}" section?`)) {
-                                    setSections(value.sections.filter((s) => s.id !== section.id), true);
-                                    setActive(null);
-                                  }
-                                }}
-                              />
-                            </ContextBar>
-                          )}
-                        </div>
+                      />
+                    </ContextBar>
+                  )}
+                </div>
 
-                        <SortableContext items={section.items.map((it) => `item:${it.id}`)} strategy={verticalListSortingStrategy}>
-                          {section.items.map((item, ii) => (
-                            <Sortable key={item.id} id={`item:${item.id}`} parent={`sec:${section.id}`}>
-                              {(is) =>
-                                renderEntry(section, item, ii, is)
-                              }
-                            </Sortable>
-                          ))}
-                        </SortableContext>
-                      </section>
-                    );
-                  }}
-                </Sortable>
-              ))}
-            </SortableContext>
-          </DndContext>
+                {section.items.map((item, ii) => renderEntry(section, item, ii))}
+              </section>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 
-  function renderEntry(section: Section, item: Item, ii: number, is: SortableBits) {
+  function renderEntry(section: Section, item: Item, ii: number) {
     const sid = section.id;
     const inline = isInlineItem(item);
     const itemActive = !!active && active.kind !== "section" && active.sid === sid && active.iid === item.id;
@@ -435,12 +329,10 @@ export function ResumeDocument({
 
     return (
       <div
-        ref={is.setNodeRef}
-        style={sortableStyle(is)}
-        {...is.listeners}
+        key={item.id}
         className={`doc-entry doc-block relative ${inline ? "doc-inline" : ""} ${itemActive ? "is-active" : ""} ${
           itemActive && !activeBid && active?.kind === "item" ? "is-selected" : ""
-        } ${is.isDragging ? "is-dragging" : ""}`}
+        }`}
         onClick={(e) => {
           e.stopPropagation(); // don't also select the section
           if (!isField(e.target)) selectBlock({ kind: "item", sid, iid: item.id });
@@ -450,8 +342,6 @@ export function ResumeDocument({
           if (!(e.target as HTMLElement).dataset.bullet) setActive({ kind: "item", sid, iid: item.id });
         }}
       >
-        <Grip s={is} title="Drag entry" />
-
         {inline ? (
           <div className="flex items-baseline">
             {item.subtitle ? (
@@ -478,15 +368,7 @@ export function ResumeDocument({
         )}
 
         {item.bullets.length > 0 && (
-          <SortableContext items={item.bullets.map((b) => `bul:${b.id}`)} strategy={verticalListSortingStrategy}>
-            <ul className="doc-bullets">
-              {item.bullets.map((b, bi) => (
-                <Sortable key={b.id} id={`bul:${b.id}`} parent={`item:${sid}/${item.id}`}>
-                  {(bs) => renderBullet(sid, item, b, bi, bs, activeBid === b.id)}
-                </Sortable>
-              ))}
-            </ul>
-          </SortableContext>
+          <ul className="doc-bullets">{item.bullets.map((b, bi) => renderBullet(sid, item, b, bi, activeBid === b.id))}</ul>
         )}
 
         {itemActive && (
@@ -516,18 +398,18 @@ export function ResumeDocument({
     );
   }
 
-  function renderBullet(sid: string, item: Item, b: Bullet, bi: number, bs: SortableBits, isActive: boolean) {
+  function renderBullet(sid: string, item: Item, b: Bullet, bi: number, isActive: boolean) {
     const fb = feedback?.[b.id];
     const original = baseline?.get(b.id);
     const isNew = !!baseline && original === undefined;
     const changed = !!baseline && original !== undefined && original !== b.text;
     const suggestion = fb?.rewrite && fb.rewrite.trim() !== b.text.trim() && !rejected?.has(b.id) ? fb.rewrite : "";
-    const mock = hasMock(b.text);
-    const tint = showHighlights && fb ? RATING[fb.rating].tint : mock ? "bg-[#fff6d6]" : "";
+    const placeholder = hasPlaceholder(b.text);
+    const tint = showHighlights && fb ? RATING[fb.rating].tint : placeholder ? "bg-[#fff6d6]" : "";
     const replace = (text: string) => setBullets(sid, item.id, item.bullets.map((x) => (x.id === b.id ? { ...x, text } : x)), true);
 
     return (
-      <li ref={bs.setNodeRef} style={sortableStyle(bs)} className={`relative ${bs.isDragging ? "is-dragging" : ""}`}>
+      <li key={b.id} className="relative">
         {showHighlights && fb && (
           <span
             aria-hidden
@@ -538,20 +420,12 @@ export function ResumeDocument({
           <span aria-hidden className="doc-ui doc-changebar absolute top-[2px] bottom-[2px] w-[3px] rounded bg-[#2f5bd3]" title={isNew ? "Added" : "Changed from master"} />
         )}
         <div className={`flex rounded-sm ${tint}`}>
-          {/* The bullet dot is the drag handle for the bullet. */}
-          <span
-            data-drag-handle
-            {...bs.attributes}
-            {...bs.listeners}
-            aria-label="Drag bullet"
-            className="doc-bullet-dot select-none pr-2 pl-1"
-          >
-            •
-          </span>
+          <span aria-hidden className="select-none pr-2 pl-1">•</span>
           <AutoTextarea
             data-bullet={b.id}
             value={b.text}
             placeholder="Accomplishment: verb + what + measurable impact"
+            aria-label="Bullet"
             onFocus={(e) => {
               e.stopPropagation();
               setActive({ kind: "bullet", sid, iid: item.id, bid: b.id });
@@ -574,11 +448,11 @@ export function ResumeDocument({
         </div>
 
         {/* Comment card for the selected bullet */}
-        {isActive && (fb || changed || isNew || mock) && (
-          <div data-no-drag className="doc-ui doc-comment">
-            {mock && (
+        {isActive && (fb || changed || isNew || placeholder) && (
+          <div className="doc-ui doc-comment">
+            {placeholder && (
               <p className="mb-2 rounded bg-[#fff6d6] px-2 py-1 text-[#5c4300]">
-                Contains example values in [brackets]. Replace them with your real numbers (or remove them) before sending.
+                The values in [brackets] are placeholders. Replace them with your real numbers (or remove them) before sending.
               </p>
             )}
             {fb && (
@@ -596,10 +470,7 @@ export function ResumeDocument({
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     className="rounded-md bg-[#2f5bd3] px-3 py-1.5 text-xs font-medium text-white"
-                    onClick={() => {
-                      replace(suggestion);
-                      onAccept?.(suggestion, item.title);
-                    }}
+                    onClick={() => replace(suggestion)}
                   >
                     ✓ Accept
                   </button>
@@ -636,4 +507,65 @@ export function ResumeDocument({
       </li>
     );
   }
+}
+
+// ---------- read-only view ----------
+
+/** The same Harvard page, not editable (e.g. the frozen copy that was submitted). */
+export function ResumeView({ value }: { value: Resume }) {
+  return (
+    <div className="doc-canvas">
+      <div className="doc-page doc-readonly">
+        <div className="doc-content">
+          <div className="text-center">
+            {value.header.name && <div className="doc-name">{value.header.name}</div>}
+            {value.header.contact && <div className="doc-contact">{value.header.contact}</div>}
+          </div>
+          {value.sections.map((section) => (
+            <section key={section.id} className="doc-section">
+              <h3 className="doc-section-title">{section.title}</h3>
+              {section.items.map((it) =>
+                isInlineItem(it) ? (
+                  <div key={it.id} className="doc-entry">
+                    {it.subtitle ? (
+                      <>
+                        <span className="font-bold">{it.title}:</span> {it.subtitle}
+                      </>
+                    ) : (
+                      it.title
+                    )}
+                  </div>
+                ) : (
+                  <div key={it.id} className="doc-entry">
+                    <div className="flex flex-wrap items-baseline gap-x-3">
+                      <span className="font-bold">{it.title}</span>
+                      <span className="ml-auto">{it.location}</span>
+                    </div>
+                    {(it.subtitle || it.dates) && (
+                      <div className="flex flex-wrap items-baseline gap-x-3">
+                        <span className="italic">{it.subtitle}</span>
+                        <span className="ml-auto">{it.dates}</span>
+                      </div>
+                    )}
+                    {it.bullets.some((b) => b.text.trim()) && (
+                      <ul className="doc-bullets">
+                        {it.bullets
+                          .filter((b) => b.text.trim())
+                          .map((b) => (
+                            <li key={b.id} className="flex">
+                              <span aria-hidden className="select-none pr-2 pl-1">•</span>
+                              <span className="min-w-0 flex-1">{b.text}</span>
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                  </div>
+                ),
+              )}
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }

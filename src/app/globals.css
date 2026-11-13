@@ -82,6 +82,12 @@ body {
   input:not(.doc-field), textarea:not(.doc-field), select { font-size: 16px !important; }
 }
 
+/* Empty contextual-actions row in the document toolbar */
+.doc-slot:empty::before {
+  content: "Click a section, entry or bullet to move or delete it.";
+  padding: 0 6px; font-size: 12px; color: var(--muted);
+}
+
 /* ---------- Resume "document" (Harvard single-page layout on paper) ---------- */
 @layer components {
 .doc-canvas {
@@ -128,26 +134,12 @@ body {
 .doc-name { font-size: 22px; font-weight: 700; line-height: 1.2; }
 .doc-contact { font-size: 13.3px; margin-top: 2px; }
 .doc-section { margin-top: 4px; padding-top: 8px; }
-/* Draggable blocks (sections, entries) */
+/* Selectable blocks (sections, entries): click blank space to select, then move/delete from the toolbar. */
 .doc-block { position: relative; border-radius: 3px; }
 .doc-block.doc-block.is-selected {
   outline: 2px solid rgb(47 91 211 / 0.55); outline-offset: 3px;
-  background: rgb(47 91 211 / 0.04); cursor: grab;
+  background: rgb(47 91 211 / 0.04);
 }
-.doc-block.is-dragging, .doc-bullets li.is-dragging {
-  z-index: 30; background: #fff; cursor: grabbing;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.18); outline: 2px solid rgb(47 91 211 / 0.55); outline-offset: 3px;
-}
-.doc-grip {
-  position: absolute; left: -44px; top: 1px; width: 22px; text-align: center;
-  font-size: 13px; line-height: 18px; letter-spacing: -3px; color: #a3a39e;
-  cursor: grab; opacity: 0; border-radius: 4px; user-select: none; touch-action: none;
-  -webkit-touch-callout: none;
-}
-.doc-section > .doc-grip { top: 9px; }
-.doc-block:hover > .doc-grip, .doc-block.is-selected > .doc-grip, .doc-block.is-active > .doc-grip { opacity: 1; }
-.doc-grip:hover { background: rgb(0 0 0 / 0.06); color: #3c3c3a; }
-.doc-bullet-dot { cursor: grab; touch-action: none; -webkit-touch-callout: none; user-select: none; }
 .doc-section-title {
   display: block; width: 100%;
   font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
@@ -158,6 +150,8 @@ body {
 .doc-bullets { margin-top: 1px; padding-left: 10px; }
 .doc-bullets li + li { margin-top: 1px; }
 .doc-ui { font-family: var(--font-geist-sans), system-ui, sans-serif; }
+/* Read-only page (submitted snapshot) */
+.doc-readonly .doc-contact, .doc-readonly .doc-entry { white-space: pre-wrap; overflow-wrap: anywhere; }
 .doc-comment {
   margin: 6px 0 8px 18px; padding: 10px 12px;
   font-size: 13px; line-height: 1.4; color: #1b1b1a;
@@ -179,7 +173,6 @@ body {
   .doc-comment { margin-left: 0; }
   .doc-dot { left: -12px; }
   .doc-changebar { right: -10px; }
-  .doc-grip { display: none; }
 }
 
 }

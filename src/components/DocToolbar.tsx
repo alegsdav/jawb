@@ -11,8 +11,9 @@ export function DocToolbar({
   return (
     <div className="sm:sticky sm:top-14 z-10 -mx-3 sm:mx-0 px-3 sm:px-2 py-2 bg-bg/95 sm:backdrop-blur border-b border-border sm:border sm:rounded-xl flex flex-wrap items-center gap-1.5">
       {children}
+      {/* Always takes the same height, so selecting something never shifts the page under the pointer. */}
       {onSlot && (
-        <div ref={onSlot} className="hidden sm:block sm:empty:hidden w-full border-t border-border pt-1.5 mt-0.5 -mb-0.5" />
+        <div ref={onSlot} className="doc-slot hidden sm:flex items-center min-h-[33px] w-full border-t border-border pt-1.5 mt-0.5 -mb-0.5" />
       )}
     </div>
   );

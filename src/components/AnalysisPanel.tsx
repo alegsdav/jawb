@@ -1,18 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import type { Analysis, BankBullet, Resume } from "@/lib/types";
+import type { Analysis } from "@/lib/types";
+import { fitOf } from "@/lib/fit";
 import { FitBadge } from "./StatusSelect";
 
 type Props = {
   analysis: Analysis | null;
   analyzing: boolean;
   onAnalyze: () => void;
-  onSaveAnswers: (answers: Record<string, string>) => Promise<void>;
-  onAnswerToBank: (question: string, answer: string) => Promise<void>;
-  bank: BankBullet[];
-  resume: Resume;
-  onInsertBullet: (itemId: string, text: string) => void;
+  /** When set, analysis can't run yet; shown in place of the usual blurb and the button is disabled. */
+  disabledReason?: string;
+  /**
+   * Store the answers on the analysis and append them to the master resume's facts.
+   * Resolves true when facts were written to the master; rejects on failure.
+   */
+  onSaveAnswers: (answers: Record<string, string>) => Promise<boolean>;
   pendingCount: number;
   onReview: () => void;
   onAcceptAll: () => void;
@@ -22,8 +25,10 @@ const SEVERITY: Record<string, string> = { high: "text-bad", medium: "text-ok", 
 
 export function AnalysisPanel(p: Props) {
   const a = p.analysis;
+  const fit = fitOf(a);
   const [answers, setAnswers] = useState<Record<string, string>>(a?.answers ?? {});
   const [savedNote, setSavedNote] = useState("");
+  const [saving, setSaving] = useState(false);
   const [lastAnalyzed, setLastAnalyzed] = useState(a?.analyzed_at);
   if (a?.analyzed_at !== lastAnalyzed) {
     // New analysis arrived: sync the answer drafts with what's stored.
@@ -31,34 +36,42 @@ export function AnalysisPanel(p: Props) {
     setAnswers(a?.answers ?? {});
   }
 
-  const items = p.resume.sections.flatMap((s) =>
-    s.items.filter((it) => it.bullets.length || it.dates).map((it) => ({ id: it.id, label: `${s.title}: ${it.title || it.subtitle}` })),
-  );
   const unanswered = a?.questions.filter((q) => !a.answers?.[q.id]?.trim()) ?? [];
   const answered = a?.questions.filter((q) => a.answers?.[q.id]?.trim()) ?? [];
   const dirty = JSON.stringify(answers) !== JSON.stringify(a?.answers ?? {});
 
   async function save() {
-    await p.onSaveAnswers(answers);
-    setSavedNote("Saved. Re-analyze to use your answers.");
-    setTimeout(() => setSavedNote(""), 4000);
+    setSaving(true);
+    try {
+      const toFacts = await p.onSaveAnswers(answers);
+      setSavedNote(toFacts ? "Saved to your master resume's facts. Re-analyze to use them." : "Saved.");
+    } catch (e) {
+      setSavedNote(`Couldn't save: ${e instanceof Error ? e.message : "try again"}`);
+    }
+    setSaving(false);
+    setTimeout(() => setSavedNote(""), 6000);
   }
 
   return (
     <div className="space-y-4">
       <div className="card p-4 space-y-3">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h2 className="font-semibold">Analysis</h2>
-          {a && <FitBadge score={a.fit_score} />}
-          <button className="btn btn-primary btn-sm ml-auto" onClick={p.onAnalyze} disabled={p.analyzing}>
+          {fit && <FitBadge fit={fit} />}
+          <button className="btn btn-primary btn-sm ml-auto" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
             {p.analyzing ? "Analyzing…" : a ? "Re-analyze" : "Analyze fit"}
           </button>
         </div>
-        {!a && !p.analyzing && (
-          <p className="text-sm text-muted">
-            Compares this tailored copy against the job: fit score, missing keywords, a rating for every bullet with
-            suggested rewrites, and questions for anything it needs from you. Usually takes 20–60 seconds.
-          </p>
+        {p.disabledReason ? (
+          <p className="text-sm text-muted">{p.disabledReason}</p>
+        ) : (
+          !a &&
+          !p.analyzing && (
+            <p className="text-sm text-muted">
+              Compares this tailored copy against the job: overall fit, missing keywords, a rating for every bullet with
+              suggested rewrites, and questions for anything it needs from you. Usually takes 20–60 seconds.
+            </p>
+          )
         )}
         {a && <p className="text-sm">{a.verdict}</p>}
         {a && p.pendingCount > 0 && (
@@ -66,7 +79,7 @@ export function AnalysisPanel(p: Props) {
             <p className="text-sm">
               <strong>{p.pendingCount} suggested edit{p.pendingCount > 1 ? "s" : ""}</strong> to tailor your resume for this job.
             </p>
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap gap-1.5">
               <button className="btn btn-sm" onClick={p.onReview}>Review one by one</button>
               <button className="btn btn-sm btn-primary" onClick={p.onAcceptAll}>Accept all</button>
             </div>
@@ -92,18 +105,21 @@ export function AnalysisPanel(p: Props) {
                     onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
                     placeholder="Your answer (rough is fine; numbers help)"
                   />
-                  {answers[q.id]?.trim() && (
-                    <button className="text-xs text-muted hover:text-fg" onClick={() => p.onAnswerToBank(q.question, answers[q.id])}>
-                      Also save to bullet bank
-                    </button>
-                  )}
                 </div>
               ))}
-              <div className="flex items-center gap-2">
-                <button className="btn btn-sm" disabled={!dirty} onClick={save}>Save answers</button>
-                {savedNote && <span className="text-xs text-muted">{savedNote}</span>}
+              <p className="text-xs text-muted">Answers are added to your master resume&apos;s facts, so other jobs can use them too.</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn btn-sm" disabled={!dirty || saving} onClick={save}>
+                  {saving ? "Saving…" : "Save answers"}
+                </button>
               </div>
             </div>
+          )}
+          {/* Outside the questions card: once everything is answered that card goes away. */}
+          {savedNote && (
+            <p role="status" className={`card px-4 py-3 text-sm ${savedNote.startsWith("Couldn't") ? "text-bad" : "text-good"}`}>
+              {savedNote}
+            </p>
           )}
 
           <div className="card p-4 space-y-2">
@@ -143,17 +159,6 @@ export function AnalysisPanel(p: Props) {
             </div>
           )}
 
-          {a.bank_suggestions.length > 0 && (
-            <div className="card p-4 space-y-3">
-              <h3 className="label">From your bullet bank</h3>
-              {a.bank_suggestions.map((s) => {
-                const b = p.bank.find((x) => x.id === s.bank_id);
-                if (!b) return null;
-                return <BankSuggestion key={s.bank_id} text={b.text} reason={s.reason} items={items} onInsert={p.onInsertBullet} />;
-              })}
-            </div>
-          )}
-
           {answered.length > 0 && (
             <details className="card p-4 text-sm">
               <summary className="label cursor-pointer">Your answers ({answered.length})</summary>
@@ -169,39 +174,6 @@ export function AnalysisPanel(p: Props) {
           )}
         </>
       )}
-    </div>
-  );
-}
-
-function BankSuggestion({
-  text, reason, items, onInsert,
-}: {
-  text: string;
-  reason: string;
-  items: { id: string; label: string }[];
-  onInsert: (itemId: string, text: string) => void;
-}) {
-  const [target, setTarget] = useState(items[0]?.id ?? "");
-  const [done, setDone] = useState(false);
-  return (
-    <div className="text-sm space-y-1">
-      <p>{text}</p>
-      <p className="text-xs text-muted">{reason}</p>
-      <div className="flex gap-1.5">
-        <select className="input py-1 text-xs flex-1 min-w-0" value={target} onChange={(e) => setTarget(e.target.value)}>
-          {items.map((it) => <option key={it.id} value={it.id}>{it.label}</option>)}
-        </select>
-        <button
-          className="btn btn-sm"
-          disabled={!target || done}
-          onClick={() => {
-            onInsert(target, text);
-            setDone(true);
-          }}
-        >
-          {done ? "Added" : "Add"}
-        </button>
-      </div>
     </div>
   );
 }
