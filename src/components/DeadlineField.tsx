@@ -2,9 +2,6 @@
 
 import { daysUntil, localToday, shortDate } from "@/lib/dates";
 
-// The date helpers live in @/lib/dates; re-exported so existing imports keep working.
-export { daysUntil, localToday };
-
 export type Urgency = "overdue" | "soon" | null;
 
 /** Flag only jobs still to apply: overdue, or due within 3 days (today included). */

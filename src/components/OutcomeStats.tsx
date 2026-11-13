@@ -1,7 +1,6 @@
 "use client";
 
-import type { Job } from "@/lib/types";
-import { tailoringStats } from "@/lib/outcomes";
+import { tailoringStats, type StatsJob } from "@/lib/outcomes";
 
 type Counts = { applied: number; interviews: number };
 
@@ -25,7 +24,7 @@ function Bucket({ label, c }: { label: string; c: Counts }) {
 }
 
 /** Small "does tailoring help?" card. Renders nothing until at least one application has a saved snapshot. */
-export function OutcomeStats({ jobs }: { jobs: Pick<Job, "status" | "submitted_at" | "submitted_tailored">[] }) {
+export function OutcomeStats({ jobs }: { jobs: StatsJob[] }) {
   if (!jobs.some((j) => j.submitted_at)) return null;
   const s = tailoringStats(jobs);
   const tooFew = s.tailored.applied < MIN_TO_COMPARE || s.untailored.applied < MIN_TO_COMPARE;
@@ -41,9 +40,9 @@ export function OutcomeStats({ jobs }: { jobs: Pick<Job, "status" | "submitted_a
         <span className="ml-auto text-xs text-muted group-open:hidden" aria-hidden>ⓘ</span>
       </summary>
       <p className="mt-1 text-xs text-muted">
-        Counts jobs marked Applied (or later) here; a copy of the resume you sent is saved then. Tailored = the copy
-        differed from your master resume. Reaching Interview or Offer counts as a yes. Percentages appear once a group has
-        {" "}{MIN_TO_COMPARE} applications.
+        Counts every job you&apos;ve marked Applied or later (a copy of the resume you sent is saved then). Tailored = that
+        copy differed from your master resume. A job that reached Interview or Offer at any point counts as a yes, even if
+        it later ended in Rejected. Percentages appear once a group has {MIN_TO_COMPARE} applications.
       </p>
     </details>
   );

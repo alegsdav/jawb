@@ -9,6 +9,16 @@ import { Bookmarklet } from "./Bookmarklet";
 const URL_RE = /^https?:\/\/\S+$/i;
 const PENDING_KEY = "jp:pending-capture";
 
+/** A full http(s) address that the browser can parse (the server checks again). */
+function isHttpUrl(s: string): boolean {
+  if (!URL_RE.test(s)) return false;
+  try {
+    return /^https?:$/.test(new URL(s).protocol);
+  } catch {
+    return false;
+  }
+}
+
 type Capture = { url?: string; title?: string; text?: string };
 
 function parseCapture(raw: string): Capture | null {
@@ -120,7 +130,7 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
     if (busy) return;
     if (mode === "paste") {
       const url = link.trim();
-      if (url && !URL_RE.test(url)) return setError("The job link should start with https://");
+      if (url && !isHttpUrl(url)) return setError("That doesn't look like a link. Paste the full address starting with https://");
       if (!desc.trim()) return setError("Paste the job description first.");
       return send({ ...(url ? { url } : {}), text: desc.trim() }, null);
     }

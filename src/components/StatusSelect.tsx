@@ -3,9 +3,8 @@
 import { STATUSES, type Fit, type JobStatus } from "@/lib/types";
 import { FIT_LABEL } from "@/lib/fit";
 
-// Kept here so existing `import { applyDates } from "@/components/StatusSelect"` keeps working.
+// Kept for the job page's `import { applyDates } from "@/components/StatusSelect"`; new code imports @/lib/dates.
 export { applyDates } from "@/lib/dates";
-export { statusChangePatch } from "@/lib/status";
 
 const COLORS: Record<JobStatus, string> = {
   to_apply: "",

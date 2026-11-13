@@ -1,40 +1,23 @@
-"use client";
+import type { Metadata } from "next";
+import { requireUser } from "@/lib/supabase/server";
+import { PasswordForm } from "@/components/PasswordForm";
 
-import { useActionState } from "react";
-import { updatePassword } from "../../login/actions";
+export const metadata: Metadata = { title: "Account · Job Pipeline" };
 
-export default function AccountPage() {
-  const [state, action, pending] = useActionState(updatePassword, { message: "" });
+export default async function AccountPage() {
+  const { user } = await requireUser();
   return (
     <div className="max-w-sm mx-auto space-y-4">
       <div>
         <h1 className="text-xl font-semibold">Account</h1>
+        {user?.email && (
+          <p className="text-sm">
+            Signed in as <strong className="break-all">{user.email}</strong>
+          </p>
+        )}
         <p className="text-sm text-muted">Set or change the password you sign in with.</p>
       </div>
-      <form action={action} className="card p-4 space-y-3">
-        <input
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          minLength={8}
-          required
-          placeholder="New password (8+ characters)"
-          className="input w-full"
-        />
-        <input
-          name="confirm"
-          type="password"
-          autoComplete="new-password"
-          minLength={8}
-          required
-          placeholder="Confirm password"
-          className="input w-full"
-        />
-        <button disabled={pending} className="btn btn-primary w-full py-2.5">
-          {pending ? "Saving…" : "Save password"}
-        </button>
-        {state.message && <p className={`text-sm ${state.ok ? "text-good" : "text-bad"}`}>{state.message}</p>}
-      </form>
+      <PasswordForm />
 
       <section className="card p-4 space-y-2">
         <h2 className="font-semibold">Export your data</h2>

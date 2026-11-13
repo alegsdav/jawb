@@ -6,15 +6,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { emptyResume, emptySection, isEmptyResume, normalizeResume, reconcileIds } from "@/lib/resume";
 import { addFacts } from "@/lib/facts";
-import { isUniqueViolation } from "@/lib/db";
-import { saveMasterDocument } from "@/lib/master";
+import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
+import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import type { Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
 import { ResumeActions } from "@/components/ResumeActions";
 import { DocToolbar, PageCount, UndoRedo } from "@/components/DocToolbar";
 import { ResumeImport } from "@/components/ResumeImport";
 import { FactsPanel } from "@/components/FactsPanel";
-import { SaveErrorToast, SaveStatus, useAutosave } from "@/lib/useAutosave";
+import { SaveErrorToast, SaveStatus, useAutosaveWithRetry } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
 
 // LEGACY bullet bank (retired): a one-time offer to move the user's own notes into facts. Intentional
@@ -48,11 +48,69 @@ async function loadOrCreateMaster(supabase: SupabaseClient): Promise<MasterRow> 
   return again.data as MasterRow;
 }
 
+type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConflict[] };
+
+/** "Your master resume was changed elsewhere": autosave is paused until the user picks a side. */
+function ConflictBanner({
+  conflict, busy, onReload, onKeepMine,
+}: { conflict: Conflict; busy: boolean; onReload: () => void; onKeepMine: () => void }) {
+  const shown = conflict.conflicts.slice(0, 3);
+  const more = conflict.conflicts.length - shown.length;
+  return (
+    <div
+      role="alert"
+      className="fixed z-40 inset-x-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:inset-x-auto sm:right-4 sm:bottom-4 sm:max-w-md rounded-xl border border-bad/50 bg-surface p-4 text-sm shadow-lg space-y-2 max-h-[70dvh] overflow-y-auto"
+    >
+      <p className="font-semibold text-bad">Your master resume was changed elsewhere</p>
+      <p className="text-muted">
+        Another tab or device changed the same {conflict.conflicts.length === 1 ? "line" : "lines"}. Nothing here is saved
+        until you choose.
+      </p>
+      <ul className="space-y-1">
+        {shown.map((c, i) => (
+          <li key={i} className="break-words">
+            <span className="font-medium">{c.where}</span>
+            {(c.local || c.server) && (
+              <span className="block text-xs text-muted">
+                Yours: “{c.local || "(empty)"}” · Theirs: “{c.server || "(empty)"}”
+              </span>
+            )}
+          </li>
+        ))}
+        {more > 0 && <li className="text-xs text-muted">and {more} more</li>}
+      </ul>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <button type="button" className="btn min-h-10 sm:min-h-0 flex-1 sm:flex-none" disabled={busy} onClick={onReload}>
+          Reload theirs
+        </button>
+        <button type="button" className="btn btn-primary min-h-10 sm:min-h-0 flex-1 sm:flex-none" disabled={busy} onClick={onKeepMine}>
+          Keep mine (overwrite)
+        </button>
+      </div>
+      <p className="text-xs text-muted">
+        Reload theirs shows their version and drops your unsaved edits here. Keep mine saves your version of these lines
+        over theirs and keeps their other changes.
+      </p>
+    </div>
+  );
+}
+
 export default function MasterResumePage() {
   const supabase = useMemo(() => createClient(), []);
   const [id, setId] = useState<string | null>(null);
-  /** The row's updated_at as of our last load/save; every save is conditional on it (see saveMasterDocument). */
-  const known = useRef<string | null>(null);
+  /**
+   * The content and updated_at as of our last load/save: the merge base. Every save is conditional on
+   * this updated_at; if the row changed elsewhere, saveMasterDocument three-way merges against it.
+   */
+  const base = useRef<{ content: Resume; updatedAt: string } | null>(null);
+  /** Set while both sides changed the same thing: autosave is paused until the user picks a side. */
+  const [conflict, setConflictState] = useState<Conflict | null>(null);
+  const conflictRef = useRef<Conflict | null>(null);
+  const setConflict = (c: Conflict | null) => {
+    conflictRef.current = c;
+    setConflictState(c);
+  };
+  const [resolving, setResolving] = useState(false);
   const doc = useHistory<Resume>();
   const resume = doc.value;
   const setDoc = doc.set;
@@ -68,11 +126,15 @@ export default function MasterResumePage() {
   useEffect(() => {
     loadOrCreateMaster(supabase).then(
       (row) => {
-        known.current = row.updated_at;
+        const content = normalizeResume(row.content);
+        base.current = { content, updatedAt: row.updated_at };
         setId(row.id);
-        doc.reset(normalizeResume(row.content));
+        doc.reset(content);
       },
-      (e: { message?: string }) => setError(e?.message || "Couldn't load your master resume."),
+      (e: { code?: string; message?: string }) => {
+        console.error("Loading the master resume failed:", e);
+        setError(dbErrorMessage(e, "load"));
+      },
     );
     // LEGACY: one-time move of the user's own notes from the retired bullet bank. The table may be gone: ignore errors.
     try {
@@ -100,25 +162,68 @@ export default function MasterResumePage() {
   }, [notice]);
 
   /**
-   * Conflict-safe autosave: if the master changed elsewhere since we last saw it (another tab or
-   * device, or facts added from a job page), keep this document but union in the other version's
-   * facts, save that, and show the merged facts here too.
+   * Conflict-safe autosave: if the master changed elsewhere since our last load/save (another tab or
+   * device, facts or "Save as master" from a job page), three-way merge: changes from both sides are
+   * kept and shown here. If both sides changed the same thing, nothing is written and the conflict
+   * banner asks which version to keep (autosave stays paused until then).
    */
   const save = useCallback(
     async (r: Resume) => {
-      if (!id || !known.current) return;
-      const out = await saveMasterDocument(supabase, id, r, known.current);
-      known.current = out.updatedAt;
-      if (out.content !== r) {
-        const merged = out.content.facts ?? [];
-        const added = merged.length - (r.facts?.length ?? 0);
-        setDoc((cur) => addFacts(cur, merged), true);
-        setNotice(`Added ${added} fact${added === 1 ? "" : "s"} saved from another tab or device.`);
+      if (!id || !base.current || conflictRef.current) return;
+      if (sameJson(r, base.current.content)) return; // nothing new (e.g. right after a merge)
+      const out = await saveMasterDocument(supabase, id, r, base.current);
+      if (out.kind === "conflict") {
+        setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts });
+        return;
+      }
+      base.current = { content: out.content, updatedAt: out.updatedAt };
+      if (out.merged) {
+        // Edits typed while this save was in flight are merged on top (base = what we sent).
+        setDoc((cur) => (cur === r ? out.content : mergeResumes(r, cur, out.content).merged), true);
+        setNotice("Merged changes made on another device.");
       }
     },
     [id, supabase, setDoc],
   );
-  const status = useAutosave(resume, save);
+  const { status, retry } = useAutosaveWithRetry(resume, save);
+
+  // While a conflict is open nothing is saved, so ask before the tab closes.
+  useEffect(() => {
+    if (!conflict) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [conflict]);
+
+  /** Conflict choice: drop this page's unsaved edits and show the version saved elsewhere. */
+  async function reloadTheirs() {
+    if (!id || !conflictRef.current) return;
+    setResolving(true);
+    let next = { content: conflictRef.current.server, updatedAt: conflictRef.current.serverUpdatedAt };
+    const { data } = await supabase.from("resumes").select("content, updated_at").eq("id", id).maybeSingle();
+    if (data) next = { content: normalizeResume(data.content), updatedAt: (data as { updated_at: string }).updated_at };
+    base.current = next;
+    doc.reset(next.content);
+    setConflict(null);
+    setResolving(false);
+    setNotice("Loaded the version saved on your other tab or device.");
+  }
+
+  /**
+   * Conflict choice: keep this page's version of the conflicting lines (their other changes are kept
+   * too) and save it over theirs. Rebasing on the server copy makes the next save write exactly that.
+   */
+  function keepMine() {
+    const c = conflictRef.current;
+    if (!c || !base.current || !resume) return;
+    const { merged } = mergeResumes(base.current.content, resume, c.server);
+    base.current = { content: c.server, updatedAt: c.serverUpdatedAt };
+    setConflict(null);
+    setDoc({ ...merged }, true); // a new value, so autosave runs
+  }
 
   // LEGACY: bank notes that aren't already facts (case/whitespace-insensitive, de-duplicated).
   const pendingLegacy = useMemo(() => {
@@ -191,7 +296,7 @@ export default function MasterResumePage() {
             <div className="min-w-0 space-y-3">
               <DocToolbar onSlot={setSlot}>
                 <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
-                <SaveStatus status={status} />
+                <SaveStatus status={conflict ? "error" : status} />
                 <span className="hidden md:inline"><PageCount {...measure} /></span>
                 <a href="#facts" className="btn btn-sm lg:hidden">Facts ({factCount})</a>
                 <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -239,7 +344,11 @@ export default function MasterResumePage() {
       )}
 
       {/* Fixed "Not saved — retrying…" notice; visible even when the toolbar has scrolled away on phones. */}
-      <SaveErrorToast status={status} />
+      {conflict ? (
+        <ConflictBanner conflict={conflict} busy={resolving} onReload={reloadTheirs} onKeepMine={keepMine} />
+      ) : (
+        <SaveErrorToast status={status} onRetry={retry} />
+      )}
     </div>
   );
 }
