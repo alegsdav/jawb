@@ -37,6 +37,11 @@ type Props = {
   canFill?: (q: Question) => boolean;
   /** Put `value` in place of the question's placeholder in its bullet (and show the bullet). */
   onFill?: (q: Question, value: string) => void;
+  /**
+   * The job was marked Applied and "Keep editing" is off: show the verdict and keywords only (no
+   * questions, suggested edits or re-analyze), since edits no longer change what was sent.
+   */
+  quiet?: boolean;
 };
 
 const SEVERITY: Record<string, string> = { high: "text-bad", medium: "text-ok", low: "text-muted" };
@@ -160,11 +165,19 @@ export function AnalysisPanel(p: Props) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h2 className="font-semibold">Analysis</h2>
           {fit && <FitBadge fit={fit} />}
-          <button className="btn btn-primary btn-sm ml-auto min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
-            {p.analyzing ? "Analyzing…" : a ? "Re-analyze" : "Analyze fit"}
-          </button>
+          {!p.quiet && (
+            <button className="btn btn-primary btn-sm ml-auto min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
+              {p.analyzing ? "Analyzing…" : a ? "Re-analyze" : "Analyze fit"}
+            </button>
+          )}
         </div>
-        {p.error && !p.analyzing && (
+        {p.quiet && (
+          <p className="text-xs text-muted">
+            {a ? "From before you applied. " : "No analysis was run before you applied. "}Turn on &ldquo;Keep editing&rdquo; to tailor this copy
+            again for a re-apply.
+          </p>
+        )}
+        {p.error && !p.analyzing && !p.quiet && (
           <div role="alert" className="rounded-lg border border-bad/40 bg-bad-bg p-3 text-sm space-y-2">
             <p className="text-bad">{p.error}</p>
             <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={!!p.disabledReason}>
@@ -172,7 +185,7 @@ export function AnalysisPanel(p: Props) {
             </button>
           </div>
         )}
-        {p.disabledReason ? (
+        {p.quiet ? null : p.disabledReason ? (
           <p className="text-sm text-muted">{p.disabledReason}</p>
         ) : (
           !a &&
@@ -185,7 +198,7 @@ export function AnalysisPanel(p: Props) {
           )
         )}
         {a && <p className="text-sm">{a.verdict}</p>}
-        {a && p.pendingCount > 0 && (
+        {a && !p.quiet && p.pendingCount > 0 && (
           <div className="rounded-lg bg-accent/5 border border-accent/30 p-3 space-y-2">
             <p className="text-sm">
               <strong>{p.pendingCount} suggested edit{p.pendingCount > 1 ? "s" : ""}</strong> to tailor your resume for this job.
@@ -205,8 +218,8 @@ export function AnalysisPanel(p: Props) {
 
       {a && (
         <>
-          {errorBox}
-          {unanswered.length > 0 && (
+          {!p.quiet && errorBox}
+          {!p.quiet && unanswered.length > 0 && (
             <div className="card p-4 space-y-3 border-accent">
               <h3 className="label text-accent">Questions for you</h3>
               {unanswered.map(field)}
@@ -220,9 +233,9 @@ export function AnalysisPanel(p: Props) {
               {savedNote}
             </p>
           )}
-          {missingBox}
+          {!p.quiet && missingBox}
 
-          {answered.length > 0 && (
+          {!p.quiet && answered.length > 0 && (
             <details className="card p-4 text-sm">
               <summary className="label cursor-pointer">Your answers ({answered.length}) · edit</summary>
               <div className="mt-3 space-y-3">

@@ -48,10 +48,13 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
       aria-pressed={on}
       className={`btn btn-sm ${on ? "border-accent text-accent bg-accent/5" : "text-muted"}`}
     >
-      {label}: {on ? "On" : "Off"}
+      {toggleLabel(label, on)}
     </button>
   );
 }
+
+/** "Feedback: On" / "Feedback: Off": the same words on the toolbar toggle and in the phone's More menu. */
+export const toggleLabel = (label: string, on: boolean) => `${label}: ${on ? "On" : "Off"}`;
 
 const Dot = ({ color }: { color: string }) => <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />;
 
@@ -92,7 +95,7 @@ export function PlaceholderCount({ count, onClick }: { count: number; onClick: (
       title="Replace each [placeholder] with your real number before you apply"
       aria-label={`${count} placeholder${count > 1 ? "s" : ""} left: go to the first one`}
     >
-      <span className="sm:hidden">[{count}]</span>
+      <span className="sm:hidden">{count} to fill</span>
       <span className="hidden sm:inline">{count} placeholder{count > 1 ? "s" : ""} left</span>
     </button>
   );

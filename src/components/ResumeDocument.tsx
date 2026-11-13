@@ -29,6 +29,11 @@ type Props = {
    * incrementing `n`) each time. Works on iOS too, where focusing a field outside a tap is ignored.
    */
   reveal?: { id: string; n: number } | null;
+  /**
+   * After the job was marked Applied: no placeholder nags (tint, highlight, "replace before you apply"
+   * card). Suggestions are hidden by passing no `feedback`.
+   */
+  quiet?: boolean;
 };
 
 /** What's selected, by id (indexes go stale after a move). */
@@ -164,7 +169,7 @@ function locateBullet(r: Resume, bid: string): { sid: string; iid: string } | nu
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
-  reveal,
+  reveal, quiet = false,
 }: Props) {
   const [active, setActive] = useState<Active>(null);
   const focusNext = useRef<string | null>(null);
@@ -426,7 +431,7 @@ export function ResumeDocument({
     const changed = !!baseline && original !== undefined && original !== b.text;
     const suggestion = fb?.suggestion ?? "";
     const placeholders = [...b.text.matchAll(PLACEHOLDER_RE)].map((m) => ({ text: m[0], start: m.index! }));
-    const placeholder = placeholders.length > 0;
+    const placeholder = !quiet && placeholders.length > 0;
     // Placeholders win over the rating tint: they must be impossible to miss before applying.
     const tint = placeholder ? "bg-[#fff6d6]" : showHighlights && fb ? RATING[fb.rating].tint : "";
     const replace = (text: string) => setBullets(sid, item.id, item.bullets.map((x) => (x.id === b.id ? { ...x, text } : x)), true);
@@ -458,7 +463,7 @@ export function ResumeDocument({
         <div className={`flex rounded-sm ${tint}`}>
           <span aria-hidden className="select-none pr-2 pl-1">•</span>
           <AutoTextarea
-            highlight
+            highlight={!quiet}
             data-bullet={b.id}
             value={b.text}
             placeholder="Accomplishment: verb + what + measurable impact"

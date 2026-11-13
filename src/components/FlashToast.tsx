@@ -5,7 +5,15 @@
  * room in (or wraps) the document toolbar. Phones: above the bottom tab bar, and above the save-error
  * toast when that one is showing. Desktop: bottom center.
  */
-export function FlashToast({ message, raised = false, onClose }: { message: string; raised?: boolean; onClose?: () => void }) {
+export function FlashToast({
+  message, raised = false, onClose, action,
+}: {
+  message: string;
+  raised?: boolean;
+  onClose?: () => void;
+  /** Optional link-style button, e.g. "See bullet" after filling a placeholder from the Analysis tab. */
+  action?: { label: string; onClick: () => void } | null;
+}) {
   if (!message) return null;
   return (
     <div
@@ -18,6 +26,15 @@ export function FlashToast({ message, raised = false, onClose }: { message: stri
       }`}
     >
       <span className="flex-1 min-w-0 text-good">{message}</span>
+      {action && (
+        <button
+          type="button"
+          className="shrink-0 min-h-10 sm:min-h-0 px-1 font-medium text-accent underline underline-offset-2"
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
+      )}
       {onClose && (
         <button type="button" className="shrink-0 text-muted hover:text-fg px-1 min-h-8" aria-label="Dismiss" onClick={onClose}>
           ✕
