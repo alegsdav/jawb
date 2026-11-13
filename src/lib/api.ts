@@ -20,14 +20,16 @@ export async function postApi<T>(path: string, body: unknown): Promise<ApiResult
       /* not JSON */
     }
     if (!res.ok) {
-      if (json?.error) {
+      if (typeof json?.error === "string" && json.error) {
         return { error: String(json.error), ...(json.pasteOnly ? { pasteOnly: String(json.pasteOnly) } : {}) };
       }
       if (res.status === 504) return { error: "The AI took too long to respond. Try again in a moment." };
       if (res.status === 413) return { error: "That file is too large." };
       return { error: `Request failed (HTTP ${res.status}).` };
     }
-    return { data: (json ?? {}) as T };
+    // A 200 that isn't JSON is usually a login page after the session expired.
+    if (!json) return { error: "Unexpected response from the server. Reload the page and try again." };
+    return { data: json as T };
   } catch {
     return { error: "Network error. Check your connection and try again." };
   }

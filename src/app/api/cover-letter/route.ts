@@ -31,7 +31,9 @@ export async function POST(req: Request) {
       }),
       { temperature: 0.6 },
     );
-    await supabase.from("jobs").update({ cover_letter: letter.trim() }).eq("id", jobId);
+    const { error: saveError } = await supabase.from("jobs").update({ cover_letter: letter.trim() }).eq("id", jobId);
+    // The page also autosaves the letter it receives, so a failed write here isn't lost.
+    if (saveError) console.error("cover-letter: saving result failed:", saveError.message);
     return NextResponse.json({ cover_letter: letter.trim() });
   } catch (e) {
     console.error("cover-letter failed:", e);

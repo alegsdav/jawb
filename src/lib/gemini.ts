@@ -2,6 +2,29 @@ import "server-only";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
+export const AI_LIMIT_MESSAGE = "The AI's daily limit was reached. Try again later.";
+export const AI_DOWN_MESSAGE = "The AI service is having trouble. Try again in a minute.";
+export const AI_KEY_MESSAGE = "The Gemini API key isn't valid. Check GEMINI_API_KEY in Vercel.";
+
+/**
+ * A short, user-facing message for a failed Gemini call. Raw response bodies only go to the server
+ * log (they can be long JSON and mention internals); the browser gets one of these sentences.
+ */
+export function friendlyGeminiError(status: number, body = "", model = MODEL): string {
+  if (status === 429 || /RESOURCE_EXHAUSTED/i.test(body)) return AI_LIMIT_MESSAGE;
+  if (
+    (status === 400 || status === 401 || status === 403) &&
+    /API[_ ]?KEY|API key|UNAUTHENTICATED|PERMISSION_DENIED/i.test(body)
+  ) {
+    return AI_KEY_MESSAGE;
+  }
+  if (status === 404) {
+    return `The Gemini model "${model}" isn't available to your API key. Set GEMINI_MODEL in Vercel to a current model and redeploy.`;
+  }
+  if (status >= 500 || /overloaded|UNAVAILABLE/i.test(body)) return AI_DOWN_MESSAGE;
+  return `The AI request failed (error ${status}). Try again in a minute.`;
+}
+
 /** Call Gemini and parse a JSON response. Throws with a readable message on failure. */
 export type GeminiFile = { mimeType: string; data: string /* base64 */ };
 
@@ -34,7 +57,7 @@ export async function geminiText(
   opts: { temperature?: number; json?: boolean; files?: GeminiFile[] } = {},
 ): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY is not set on the server.");
+  if (!key) throw new Error("GEMINI_API_KEY is not set on the server. Add it in Vercel and redeploy.");
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
     {
@@ -54,16 +77,14 @@ export async function geminiText(
         },
       }),
     },
-  );
+  ).catch((e) => {
+    console.error("Gemini request failed:", e);
+    throw new Error("Couldn't reach the AI service. Try again in a minute.");
+  });
   if (!res.ok) {
-    const body = await res.text();
-    if (res.status === 404) {
-      throw new Error(
-        `Gemini model "${MODEL}" isn't available to your API key. Set GEMINI_MODEL in Vercel to a current model and redeploy. Google said: ${body.slice(0, 200)}`,
-      );
-    }
-    console.error("Gemini error", res.status, body.slice(0, 500));
-    throw new Error(`Gemini error ${res.status}: ${body.slice(0, 300)}`);
+    const body = await res.text().catch(() => "");
+    console.error("Gemini error", res.status, MODEL, body.slice(0, 2000));
+    throw new Error(friendlyGeminiError(res.status, body));
   }
   const data = await res.json();
   const out = data?.candidates?.[0]?.content?.parts
@@ -73,7 +94,7 @@ export async function geminiText(
   if (!out) {
     const reason = data?.candidates?.[0]?.finishReason ?? data?.promptFeedback?.blockReason ?? "unknown";
     console.error("Gemini empty response", JSON.stringify(data).slice(0, 500));
-    throw new Error(`Gemini returned an empty response (reason: ${reason}).`);
+    throw new Error(`The AI returned an empty answer (${String(reason).toLowerCase()}). Try again.`);
   }
   return out;
 }

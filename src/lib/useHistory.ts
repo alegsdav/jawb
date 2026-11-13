@@ -4,10 +4,29 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type State<T> = { past: T[]; present: T | null; future: T[] };
 
+type MaybeElement = { tagName?: string; closest?: (sel: string) => unknown } | null | undefined;
+
+/**
+ * Whether a Ctrl/Cmd+Z keypress belongs to the resume document's undo history: the key went to
+ * something inside the document (`.doc-canvas`) or its toolbar (`.doc-toolbar`), or nothing is
+ * focused (the event targets <body>). Anywhere else (cover letter, notes, facts, answers) the
+ * browser's own undo for that field must run, and the hidden resume must not change.
+ */
+export function isDocUndoTarget(target: EventTarget | MaybeElement): boolean {
+  const el = target as MaybeElement;
+  if (!el || typeof el.closest !== "function") return true; // window/document
+  const tag = (el.tagName ?? "").toUpperCase();
+  if (tag === "BODY" || tag === "HTML") return true;
+  if (el.closest(".doc-canvas")) return true;
+  // Toolbar buttons (e.g. right after clicking Undo), but never a text field that happens to sit there.
+  return !!el.closest(".doc-toolbar") && !["INPUT", "TEXTAREA", "SELECT"].includes(tag);
+}
+
 /**
  * Undo/redo for a document value. Rapid edits (typing) coalesce into one step;
  * structural edits pass commit=true to always create a step.
- * Binds Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y while mounted.
+ * Binds Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y while mounted, but only for keypresses in the
+ * document (see isDocUndoTarget); other fields keep the browser's native undo.
  */
 export function useHistory<T>() {
   const [s, setS] = useState<State<T>>({ past: [], present: null, future: [] });
@@ -48,6 +67,7 @@ export function useHistory<T>() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (!isDocUndoTarget(e.target)) return;
       const k = e.key.toLowerCase();
       if (k === "z") {
         e.preventDefault();

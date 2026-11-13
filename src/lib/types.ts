@@ -28,6 +28,12 @@ export type Resume = {
    * projects, answers to analysis questions). Never rendered or exported to PDF; fed to the AI as context.
    */
   facts?: string[];
+  /**
+   * Tailored copies only: the master's text at the time the copy was made (or last pulled from the
+   * master), keyed by bullet id, plus "header.name" / "header.contact". Used to tell which bullets the
+   * user edited in the copy and which ones can safely take a newer master wording. Never rendered.
+   */
+  baseline?: Record<string, string>;
 };
 
 export type JobStatus = "to_apply" | "applied" | "interview" | "offer" | "rejected" | "skipped";
@@ -52,8 +58,23 @@ export type Analysis = {
   keywords: { matched: string[]; missing: string[] };
   strengths: string[];
   gaps: { issue: string; severity: "high" | "medium" | "low"; fix: string }[];
-  bullets: { bullet_id: string; rating: "strong" | "ok" | "weak"; note: string; rewrite: string }[];
-  questions: { id: string; question: string; why: string }[];
+  bullets: {
+    bullet_id: string;
+    rating: "strong" | "ok" | "weak";
+    note: string;
+    rewrite: string;
+    /** The bullet's text when it was rated. Feedback is stale once the bullet no longer reads like this. */
+    original?: string;
+  }[];
+  questions: {
+    id: string;
+    question: string;
+    why: string;
+    /** Set when the question asks for the value of a placeholder in this bullet's suggested rewrite. */
+    bullet_id?: string;
+    /** That placeholder, e.g. "[N users]". */
+    placeholder?: string;
+  }[];
   answers?: Record<string, string>;
   /** Bullet ids whose suggested rewrite the user rejected. */
   dismissed?: string[];
