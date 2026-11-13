@@ -82,6 +82,11 @@ body {
   input:not(.doc-field), textarea:not(.doc-field), select { font-size: 16px !important; }
 }
 
+/* Document toolbar: comfortable tap targets on phones. */
+@media (max-width: 639px) {
+  .doc-toolbar .btn { min-height: 40px; }
+}
+
 /* Empty contextual-actions row in the document toolbar */
 .doc-slot:empty::before {
   content: "Click a section, entry or bullet to move or delete it.";
@@ -157,6 +162,17 @@ body {
   font-size: 13px; line-height: 1.4; color: #1b1b1a;
   background: #fff; border: 1px solid #e2e2de; border-left: 3px solid #2f5bd3;
   border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.08);
+}
+/* [placeholder] highlight: a copy of the bullet's text laid out exactly like the textarea on top of it
+   (same box, font and wrapping), invisible except for the marked spans. The textarea's own text stays
+   the visible, editable text; its background is transparent, so the marks show through. */
+.doc-mirror {
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+  color: transparent; pointer-events: none; user-select: none; -webkit-user-select: none;
+}
+.doc-mirror mark {
+  color: transparent; background: #ffd84d; border-radius: 2px;
+  box-shadow: 0 0 0 1px #d9a800;
 }
 .doc-dot { left: -26px; }
 .doc-changebar { right: -22px; }

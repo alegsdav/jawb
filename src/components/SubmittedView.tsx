@@ -58,15 +58,17 @@ export function SubmittedView({
       <div className="mx-auto my-0 sm:my-8 max-w-4xl min-h-dvh sm:min-h-0 bg-bg sm:rounded-xl shadow-xl">
         <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-border bg-bg/95 px-3 sm:px-4 py-2.5 sm:rounded-t-xl pt-[max(0.625rem,env(safe-area-inset-top))]">
           <div className="min-w-0 flex-1 basis-48">
-            <h2 id="submitted-title" className="font-semibold">Submitted version</h2>
-            <p className="text-xs text-muted">Frozen copy of what you sent on {formatSubmitted(submittedAt)}. Read-only.</p>
+            <h2 id="submitted-title" className="font-semibold">What you sent</h2>
+            <p className="text-xs text-muted">
+              Saved when you marked this job Applied on {formatSubmitted(submittedAt)}. Read-only.
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <button type="button" className="btn btn-sm" onClick={onReplace}>Replace with current version…</button>
-            <button type="button" className="btn btn-sm btn-primary" onClick={download} disabled={busy}>
-              {busy ? "Building…" : "Download submitted PDF"}
+            <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={onReplace}>Replace with current tailored copy…</button>
+            <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" onClick={download} disabled={busy}>
+              {busy ? "Building…" : "Download this PDF"}
             </button>
-            <button ref={closeBtn} type="button" className="btn btn-sm" onClick={onClose} aria-label="Close">Close</button>
+            <button ref={closeBtn} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={onClose} aria-label="Close">Close</button>
           </div>
         </div>
         <div className="p-0 sm:p-3">

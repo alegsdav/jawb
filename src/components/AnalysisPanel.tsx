@@ -3,25 +3,59 @@
 import { useState } from "react";
 import type { Analysis } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
+import { suggestFill } from "@/lib/analysis";
 import { FitBadge } from "./StatusSelect";
+
+type Question = Analysis["questions"][number];
 
 type Props = {
   analysis: Analysis | null;
   analyzing: boolean;
   onAnalyze: () => void;
+  /** Why the last analysis failed (already user-friendly); shown in the panel with a Retry button. */
+  error?: string;
   /** When set, analysis can't run yet; shown in place of the usual blurb and the button is disabled. */
   disabledReason?: string;
   /**
-   * Store the answers on the analysis and append them to the master resume's facts.
+   * Store the answers on the analysis and update the master resume's facts.
    * Resolves true when facts were written to the master; rejects on failure.
    */
   onSaveAnswers: (answers: Record<string, string>) => Promise<boolean>;
+  /** Suggested edits still waiting (stale ones excluded). */
   pendingCount: number;
   onReview: () => void;
   onAcceptAll: () => void;
+  /** Whether this question's placeholder can be filled in its bullet right now. */
+  canFill?: (q: Question) => boolean;
+  /** Put `value` in place of the question's placeholder in its bullet (and show the bullet). */
+  onFill?: (q: Question, value: string) => void;
 };
 
 const SEVERITY: Record<string, string> = { high: "text-bad", medium: "text-ok", low: "text-muted" };
+
+/** "Fill [N users] in the bullet with: [300 users] [Fill]", prefilled from the answer and editable. */
+function FillRow({ q, answer, onFill }: { q: Question; answer: string; onFill: (q: Question, value: string) => void }) {
+  const [edited, setEdited] = useState<string | null>(null);
+  const value = edited ?? suggestFill(q.placeholder ?? "", answer);
+  return (
+    <div className="rounded-lg border border-[#e0b100]/60 bg-[#fff6d6] p-2 text-[#5c4300] space-y-1.5">
+      <p className="text-xs">
+        Fill <strong className="rounded bg-[#ffd84d] px-1 text-[#3d2c00]">{q.placeholder}</strong> in the bullet with:
+      </p>
+      <div className="flex gap-1.5">
+        <input
+          className="input min-w-0 flex-1 py-1 text-sm text-fg"
+          value={value}
+          onChange={(e) => setEdited(e.target.value)}
+          aria-label={`Text to put in place of ${q.placeholder}`}
+        />
+        <button type="button" className="btn btn-sm btn-primary shrink-0 min-h-10 sm:min-h-0" disabled={!value.trim()} onClick={() => onFill(q, value)}>
+          Fill
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function AnalysisPanel(p: Props) {
   const a = p.analysis;
@@ -38,7 +72,9 @@ export function AnalysisPanel(p: Props) {
 
   const unanswered = a?.questions.filter((q) => !a.answers?.[q.id]?.trim()) ?? [];
   const answered = a?.questions.filter((q) => a.answers?.[q.id]?.trim()) ?? [];
-  const dirty = JSON.stringify(answers) !== JSON.stringify(a?.answers ?? {});
+  const norm = (r: Record<string, string> | undefined) =>
+    JSON.stringify(Object.entries(r ?? {}).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v).sort());
+  const dirty = norm(answers) !== norm(a?.answers);
 
   async function save() {
     setSaving(true);
@@ -52,21 +88,62 @@ export function AnalysisPanel(p: Props) {
     setTimeout(() => setSavedNote(""), 6000);
   }
 
+  function fill(q: Question, value: string) {
+    p.onFill?.(q, value);
+    if (dirty) void save(); // keep the answer too, so other jobs can use it
+  }
+
+  const field = (q: Question) => {
+    const answer = answers[q.id] ?? "";
+    return (
+      <div key={q.id} className="space-y-1.5">
+        <p className="text-sm font-medium">{q.question}</p>
+        {q.why && <p className="text-xs text-muted">{q.why}</p>}
+        <textarea
+          className="input w-full h-16 text-sm"
+          value={answer}
+          onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
+          placeholder="Your answer (rough is fine; numbers help)"
+          aria-label={q.question}
+        />
+        {answer.trim() && q.placeholder && p.onFill && p.canFill?.(q) && <FillRow q={q} answer={answer} onFill={fill} />}
+      </div>
+    );
+  };
+
+  const saveRow = (
+    <div className="flex flex-wrap items-center gap-2">
+      <button className="btn btn-sm min-h-10 sm:min-h-0" disabled={!dirty || saving} onClick={save}>
+        {saving ? "Saving…" : "Save answers"}
+      </button>
+      {dirty && !saving && <span className="text-xs text-muted">Unsaved answers</span>}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <div className="card p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h2 className="font-semibold">Analysis</h2>
           {fit && <FitBadge fit={fit} />}
-          <button className="btn btn-primary btn-sm ml-auto" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
+          <button className="btn btn-primary btn-sm ml-auto min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
             {p.analyzing ? "Analyzing…" : a ? "Re-analyze" : "Analyze fit"}
           </button>
         </div>
+        {p.error && !p.analyzing && (
+          <div role="alert" className="rounded-lg border border-bad/40 bg-bad-bg p-3 text-sm space-y-2">
+            <p className="text-bad">{p.error}</p>
+            <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={!!p.disabledReason}>
+              Retry
+            </button>
+          </div>
+        )}
         {p.disabledReason ? (
           <p className="text-sm text-muted">{p.disabledReason}</p>
         ) : (
           !a &&
-          !p.analyzing && (
+          !p.analyzing &&
+          !p.error && (
             <p className="text-sm text-muted">
               Compares this tailored copy against the job: overall fit, missing keywords, a rating for every bullet with
               suggested rewrites, and questions for anything it needs from you. Usually takes 20–60 seconds.
@@ -80,13 +157,15 @@ export function AnalysisPanel(p: Props) {
               <strong>{p.pendingCount} suggested edit{p.pendingCount > 1 ? "s" : ""}</strong> to tailor your resume for this job.
             </p>
             <div className="flex flex-wrap gap-1.5">
-              <button className="btn btn-sm" onClick={p.onReview}>Review one by one</button>
-              <button className="btn btn-sm btn-primary" onClick={p.onAcceptAll}>Accept all</button>
+              <button className="btn btn-sm min-h-10 sm:min-h-0" onClick={p.onReview}>Review one by one</button>
+              <button className="btn btn-sm btn-primary min-h-10 sm:min-h-0" onClick={p.onAcceptAll}>Accept all</button>
             </div>
           </div>
         )}
         {a?.analyzed_at && (
-          <p className="text-xs text-muted">Last run {new Date(a.analyzed_at).toLocaleString()}. Edits since then aren&apos;t reflected until you re-analyze.</p>
+          <p className="text-xs text-muted">
+            Last run {new Date(a.analyzed_at).toLocaleString()}. Bullets you edit after that lose their rating until you re-analyze.
+          </p>
         )}
       </div>
 
@@ -95,24 +174,9 @@ export function AnalysisPanel(p: Props) {
           {unanswered.length > 0 && (
             <div className="card p-4 space-y-3 border-accent">
               <h3 className="label text-accent">Questions for you</h3>
-              {unanswered.map((q) => (
-                <div key={q.id} className="space-y-1">
-                  <p className="text-sm font-medium">{q.question}</p>
-                  <p className="text-xs text-muted">{q.why}</p>
-                  <textarea
-                    className="input w-full h-16 text-sm"
-                    value={answers[q.id] ?? ""}
-                    onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-                    placeholder="Your answer (rough is fine; numbers help)"
-                  />
-                </div>
-              ))}
+              {unanswered.map(field)}
               <p className="text-xs text-muted">Answers are added to your master resume&apos;s facts, so other jobs can use them too.</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button className="btn btn-sm" disabled={!dirty || saving} onClick={save}>
-                  {saving ? "Saving…" : "Save answers"}
-                </button>
-              </div>
+              {saveRow}
             </div>
           )}
           {/* Outside the questions card: once everything is answered that card goes away. */}
@@ -120,6 +184,17 @@ export function AnalysisPanel(p: Props) {
             <p role="status" className={`card px-4 py-3 text-sm ${savedNote.startsWith("Couldn't") ? "text-bad" : "text-good"}`}>
               {savedNote}
             </p>
+          )}
+
+          {answered.length > 0 && (
+            <details className="card p-4 text-sm">
+              <summary className="label cursor-pointer">Your answers ({answered.length}) · edit</summary>
+              <div className="mt-3 space-y-3">
+                {answered.map(field)}
+                <p className="text-xs text-muted">Editing an answer replaces its fact on your master resume.</p>
+                {saveRow}
+              </div>
+            </details>
           )}
 
           <div className="card p-4 space-y-2">
@@ -157,20 +232,6 @@ export function AnalysisPanel(p: Props) {
                 {a.strengths.map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
-          )}
-
-          {answered.length > 0 && (
-            <details className="card p-4 text-sm">
-              <summary className="label cursor-pointer">Your answers ({answered.length})</summary>
-              <ul className="mt-2 space-y-2">
-                {answered.map((q) => (
-                  <li key={q.id}>
-                    <p className="text-muted">{q.question}</p>
-                    <p>{a.answers?.[q.id]}</p>
-                  </li>
-                ))}
-              </ul>
-            </details>
           )}
         </>
       )}

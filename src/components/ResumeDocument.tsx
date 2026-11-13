@@ -2,24 +2,22 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Analysis, Bullet, Item, Resume, Section } from "@/lib/types";
+import type { Bullet, Item, Resume, Section } from "@/lib/types";
 import { emptyItem, isInlineItem, uid } from "@/lib/resume";
-import { hasPlaceholder } from "@/lib/facts";
-
-type Feedback = Analysis["bullets"][number];
+import { PLACEHOLDER_RE } from "@/lib/facts";
+import type { BulletFeedback, Rating } from "@/lib/analysis";
 
 type Props = {
   value: Resume;
   /** commit=true for structural edits so they become their own undo step. */
   onChange: (r: Resume, commit?: boolean) => void;
-  /** AI feedback per bullet id. */
-  feedback?: Record<string, Feedback>;
+  /** AI feedback per bullet id, already checked against the current text (see bulletFeedback). */
+  feedback?: Record<string, BulletFeedback>;
   showHighlights?: boolean;
-  /** Bullet texts from the master resume, for change tracking. */
+  /** Bullet texts the copy is compared against ("changed from master"): the copy's baseline or the master. */
   baseline?: Map<string, string> | null;
   showChanges?: boolean;
-  /** Bullet ids whose suggestion was rejected. */
-  rejected?: Set<string>;
+  /** Reject a bullet's pending suggestion. */
   onReject?: (bulletId: string) => void;
   /** Reports page count and roughly how many lines spill past page 1. */
   onMeasure?: (m: { pages: number; overflowLines: number }) => void;
@@ -81,7 +79,17 @@ function AutoInput({
   );
 }
 
-function AutoTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+/** The text with each [placeholder] wrapped in <mark> (for the highlight layer). */
+function markPlaceholders(text: string) {
+  return text.split(/(\[[^\]\n]+\])/g).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
+}
+
+/**
+ * Textarea that grows with its content. With `highlight`, a mirror of the text sits in the same grid
+ * cell behind it and paints a highlight under every [placeholder]. The structure is the same whether
+ * or not there are placeholders, so typing a "]" never remounts the field (and drops the keyboard).
+ */
+function AutoTextarea({ highlight, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { highlight?: boolean }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -89,7 +97,20 @@ function AutoTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) 
     el.style.height = "0px";
     el.style.height = `${el.scrollHeight}px`;
   });
-  return <textarea ref={ref} rows={1} {...props} className={`doc-field block w-full resize-none overflow-hidden ${props.className ?? ""}`} />;
+  const cls = `doc-field block w-full ${props.className ?? ""}`;
+  const field = (
+    <textarea ref={ref} rows={1} {...props} className={`${cls} resize-none overflow-hidden ${highlight ? "relative col-start-1 row-start-1" : ""}`} />
+  );
+  if (!highlight) return field;
+  return (
+    <div className="grid w-full min-w-0">
+      <div aria-hidden className={`doc-mirror col-start-1 row-start-1 ${cls}`}>
+        {markPlaceholders(String(props.value ?? ""))}
+        {"​"}
+      </div>
+      {field}
+    </div>
+  );
 }
 
 function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
@@ -100,7 +121,7 @@ function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => voi
       // it's only cleared by taps outside the document, not by blur.)
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className={`px-2.5 py-1.5 sm:px-2 sm:py-1 rounded-md text-xs whitespace-nowrap hover:bg-black/5 active:bg-black/10 ${danger ? "text-[#c53030]" : "text-[#3c3c3a]"}`}
+      className={`min-h-10 sm:min-h-0 px-2.5 py-1.5 sm:px-2 sm:py-1 rounded-md text-xs whitespace-nowrap hover:bg-black/5 active:bg-black/10 ${danger ? "text-[#c53030]" : "text-[#3c3c3a]"}`}
     >
       {label}
     </button>
@@ -130,7 +151,7 @@ function ContextBar({ slot, label, children }: { slot?: HTMLElement | null; labe
   );
 }
 
-const RATING: Record<Feedback["rating"], { label: string; tint: string; dot: string; text: string }> = {
+const RATING: Record<Rating, { label: string; tint: string; dot: string; text: string }> = {
   strong: { label: "Strong", tint: "bg-[#e9f6ee]", dot: "bg-[#1f8a4c]", text: "text-[#1f8a4c]" },
   ok: { label: "Okay", tint: "bg-[#fdf5e2]", dot: "bg-[#c98a12]", text: "text-[#a86f05]" },
   weak: { label: "Weak", tint: "bg-[#fdecec]", dot: "bg-[#c53030]", text: "text-[#c53030]" },
@@ -146,7 +167,7 @@ function locateBullet(r: Resume, bid: string): { sid: string; iid: string } | nu
 // ---------- the document ----------
 
 export function ResumeDocument({
-  value, onChange, feedback, showHighlights = true, baseline, showChanges = true, rejected, onReject, onMeasure, actionsSlot,
+  value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
   reveal,
 }: Props) {
   const [active, setActive] = useState<Active>(null);
@@ -347,7 +368,8 @@ export function ResumeDocument({
             {item.subtitle ? (
               <>
                 <AutoInput className="font-bold shrink-0" value={item.title} placeholder="Label" onChange={(v) => updItem(sid, item.id, { title: v })} />
-                <span className="shrink-0">:&nbsp;</span>
+                {/* The label's sizing box is 4px wider than its text (field padding); pull the colon back against it. */}
+                <span className="shrink-0 -ml-[4px] relative">:&nbsp;</span>
                 <AutoTextarea value={item.subtitle} placeholder="Details" onChange={(e) => updItem(sid, item.id, { subtitle: e.target.value })} />
               </>
             ) : (
@@ -399,29 +421,46 @@ export function ResumeDocument({
   }
 
   function renderBullet(sid: string, item: Item, b: Bullet, bi: number, isActive: boolean) {
-    const fb = feedback?.[b.id];
+    const view = feedback?.[b.id];
+    const fb = view?.state === "current" ? view : null; // rating/note only while the bullet reads as rated
     const original = baseline?.get(b.id);
     const isNew = !!baseline && original === undefined;
     const changed = !!baseline && original !== undefined && original !== b.text;
-    const suggestion = fb?.rewrite && fb.rewrite.trim() !== b.text.trim() && !rejected?.has(b.id) ? fb.rewrite : "";
-    const placeholder = hasPlaceholder(b.text);
-    const tint = showHighlights && fb ? RATING[fb.rating].tint : placeholder ? "bg-[#fff6d6]" : "";
+    const suggestion = fb?.suggestion ?? "";
+    const placeholders = [...b.text.matchAll(PLACEHOLDER_RE)].map((m) => ({ text: m[0], start: m.index! }));
+    const placeholder = placeholders.length > 0;
+    // Placeholders win over the rating tint: they must be impossible to miss before applying.
+    const tint = placeholder ? "bg-[#fff6d6]" : showHighlights && fb ? RATING[fb.rating].tint : "";
     const replace = (text: string) => setBullets(sid, item.id, item.bullets.map((x) => (x.id === b.id ? { ...x, text } : x)), true);
+    const selectPlaceholder = (p: { text: string; start: number }) => {
+      const el = document.querySelector<HTMLTextAreaElement>(`textarea[data-bullet="${b.id}"]`);
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(p.start, p.start + p.text.length);
+    };
 
     return (
       <li key={b.id} className="relative">
-        {showHighlights && fb && (
+        {showHighlights && view && view.state !== "stale" && (
           <span
             aria-hidden
-            className={`doc-ui doc-dot absolute top-[7px] h-2 w-2 rounded-full ${RATING[fb.rating].dot} ${suggestion ? "ring-2 ring-offset-1 ring-[#2f5bd3]/50" : ""}`}
+            title={fb ? RATING[fb.rating].label : "Updated"}
+            className={`doc-ui doc-dot absolute top-[7px] h-2 w-2 rounded-full ${fb ? RATING[fb.rating].dot : "bg-[#9a9a95]"} ${
+              suggestion ? "ring-2 ring-offset-1 ring-[#2f5bd3]/50" : ""
+            }`}
           />
         )}
         {showChanges && (changed || isNew) && (
-          <span aria-hidden className="doc-ui doc-changebar absolute top-[2px] bottom-[2px] w-[3px] rounded bg-[#2f5bd3]" title={isNew ? "Added" : "Changed from master"} />
+          <span
+            aria-hidden
+            className="doc-ui doc-changebar absolute top-[2px] bottom-[2px] w-[3px] rounded bg-[#2f5bd3]"
+            title={isNew ? "Added in this tailored copy" : "Changed from master resume"}
+          />
         )}
         <div className={`flex rounded-sm ${tint}`}>
           <span aria-hidden className="select-none pr-2 pl-1">•</span>
           <AutoTextarea
+            highlight
             data-bullet={b.id}
             value={b.text}
             placeholder="Accomplishment: verb + what + measurable impact"
@@ -448,17 +487,40 @@ export function ResumeDocument({
         </div>
 
         {/* Comment card for the selected bullet */}
-        {isActive && (fb || changed || isNew || placeholder) && (
+        {isActive && (view || changed || isNew || placeholder) && (
           <div className="doc-ui doc-comment">
             {placeholder && (
-              <p className="mb-2 rounded bg-[#fff6d6] px-2 py-1 text-[#5c4300]">
-                The values in [brackets] are placeholders. Replace them with your real numbers (or remove them) before sending.
-              </p>
+              <div className="mb-2 rounded bg-[#fff6d6] px-2 py-1.5 text-[#5c4300]">
+                <p>Replace each [placeholder] with your real number, or reword the bullet, before you apply.</p>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {placeholders.map((p) => (
+                    <button
+                      key={p.start}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => selectPlaceholder(p)}
+                      className="min-h-8 rounded border border-[#d9a800] bg-[#ffd84d] px-2 text-xs font-medium text-[#3d2c00]"
+                      title="Select it so you can type over it"
+                    >
+                      {p.text}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             {fb && (
               <p>
                 <span className={`font-semibold ${RATING[fb.rating].text}`}>{RATING[fb.rating].label}.</span> {fb.note}
               </p>
+            )}
+            {view?.state === "updated" && (
+              <p>
+                <span className="font-semibold">Updated.</span>{" "}
+                <span className="text-[#6b6b66]">You accepted the suggested edit. Re-analyze to rate the new wording.</span>
+              </p>
+            )}
+            {view?.state === "stale" && (
+              <p className="text-[#6b6b66]">Edited since the last analysis, so its rating is hidden. Re-analyze for feedback on this wording.</p>
             )}
             {suggestion && (
               <div className="mt-2 space-y-1.5">
@@ -489,19 +551,21 @@ export function ResumeDocument({
             )}
             {showChanges && changed && (
               <div className="mt-2 border-t border-[#efefeb] pt-2">
-                <p className="text-[11px] uppercase tracking-wide text-[#6b6b66]">Master version</p>
+                <p className="text-[11px] uppercase tracking-wide text-[#6b6b66]">Master resume version</p>
                 <p className="text-[#6b6b66]">{original}</p>
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
-                  className="mt-1 text-xs text-[#2f5bd3] underline underline-offset-2"
+                  className="mt-1 min-h-8 text-xs text-[#2f5bd3] underline underline-offset-2"
                   onClick={() => replace(original!)}
                 >
-                  Revert to master
+                  Revert to master resume
                 </button>
               </div>
             )}
-            {showChanges && isNew && !fb && <p className="text-[#6b6b66]">Added in this version (not in your master).</p>}
+            {showChanges && isNew && !view && (
+              <p className="text-[#6b6b66]">Added in this tailored copy (not in your master resume).</p>
+            )}
           </div>
         )}
       </li>
