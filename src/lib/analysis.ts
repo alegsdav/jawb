@@ -1,7 +1,7 @@
 import type { Analysis, Fit, Resume } from "./types";
 import { fitFromScore } from "./fit";
 import { bulletTextMap } from "./resume";
-import { PLACEHOLDER_RE } from "./facts";
+import { addFacts, PLACEHOLDER_RE } from "./facts";
 
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -202,30 +202,227 @@ export function suggestFill(placeholder: string, answer: string): string {
 /** The fact recorded on the master resume for an answer. */
 export const answerFact = (question: string, answer: string) => `${answer.trim()} (re: ${question.trim()})`;
 
+const normText = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Drop facts (case/whitespace-insensitive) from a list. */
+export function removeFacts(facts: string[] | undefined, remove: string[]): string[] {
+  const gone = new Set(remove.map(normText));
+  return (facts ?? []).filter((f) => !gone.has(normText(f)));
+}
+
 /**
- * Facts to add and remove when answers change: a new or edited answer adds its fact, and an edited
- * or cleared answer removes the fact written for its previous wording.
+ * Facts to add to and remove from the master so it matches `next`, judged against the master's CURRENT
+ * facts (not against the previously saved answers), so running it again repairs any earlier failure:
+ * - every non-empty answer's fact is added unless the master already has it;
+ * - when an answer was edited or cleared, the fact for its previous wording (`prev`) is removed if present.
  */
-export function answerFactChanges(
+export function answerFactPlan(
   questions: Analysis["questions"],
   prev: Record<string, string> | undefined,
   next: Record<string, string>,
+  masterFacts: string[] | undefined,
 ): { add: string[]; remove: string[] } {
+  const have = new Set((masterFacts ?? []).map(normText));
   const add: string[] = [];
   const remove: string[] = [];
   for (const q of questions) {
     const before = prev?.[q.id]?.trim() ?? "";
     const after = next[q.id]?.trim() ?? "";
-    if (before === after) continue;
-    if (before) remove.push(answerFact(q.question, before));
-    if (after) add.push(answerFact(q.question, after));
+    const want = after ? answerFact(q.question, after) : "";
+    if (want && !have.has(normText(want))) add.push(want);
+    const old = before ? answerFact(q.question, before) : "";
+    if (old && normText(old) !== normText(want) && have.has(normText(old))) remove.push(old);
   }
   return { add, remove };
 }
 
-/** Drop facts (case/whitespace-insensitive) from a list. */
-export function removeFacts(facts: string[] | undefined, remove: string[]): string[] {
-  const norm = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
-  const gone = new Set(remove.map(norm));
-  return (facts ?? []).filter((f) => !gone.has(norm(f)));
+/** Question ids whose (stored or drafted) answer has no matching fact on the master yet. */
+export function missingAnswerFacts(
+  questions: Analysis["questions"],
+  answers: Record<string, string> | undefined,
+  masterFacts: string[] | undefined,
+): string[] {
+  const have = new Set((masterFacts ?? []).map(normText));
+  return questions
+    .filter((q) => answers?.[q.id]?.trim() && !have.has(normText(answerFact(q.question, answers[q.id]))))
+    .map((q) => q.id);
 }
+
+/** The master with its answer facts brought in line with `next` (the same object when nothing changes). */
+export function applyAnswerFacts(
+  master: Resume,
+  questions: Analysis["questions"],
+  prev: Record<string, string> | undefined,
+  next: Record<string, string>,
+): Resume {
+  const { add, remove } = answerFactPlan(questions, prev, next, master.facts);
+  if (!add.length && !remove.length) return master;
+  return addFacts({ ...master, facts: removeFacts(master.facts, remove) }, add);
+}
+
+type MasterWrite = (mutate: (m: Resume) => Resume) => Promise<{ ok: true; content: Resume } | { ok: false; error: string }>;
+
+/**
+ * Save analysis answers in the order that can't lose them: first the master's facts (conflict-safe
+ * `writeMaster`, i.e. updateMaster), and only once that worked, the answers on the job (`persist`).
+ * If the master write fails nothing is persisted, so the answers stay "unsaved" and a retry redoes it.
+ */
+export async function saveAnswersInOrder(opts: {
+  analysis: Analysis;
+  answers: Record<string, string>;
+  writeMaster: MasterWrite;
+  persist: (next: Analysis) => Promise<void> | void;
+}): Promise<
+  { ok: true; master: Resume; added: number; analysis: Analysis } | { ok: false; stage: "master" | "answers"; error: string }
+> {
+  const { analysis } = opts;
+  const clean = Object.fromEntries(Object.entries(opts.answers).filter(([, v]) => v.trim()));
+  let added = 0;
+  let res: Awaited<ReturnType<MasterWrite>>;
+  try {
+    res = await opts.writeMaster((m) => {
+      added = answerFactPlan(analysis.questions, analysis.answers, clean, m.facts).add.length;
+      return applyAnswerFacts(m, analysis.questions, analysis.answers, clean);
+    });
+  } catch (e) {
+    res = { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (!res.ok) return { ok: false, stage: "master", error: res.error };
+  const next: Analysis = { ...analysis, answers: clean };
+  try {
+    await opts.persist(next);
+  } catch (e) {
+    return { ok: false, stage: "answers", error: e instanceof Error ? e.message : String(e) };
+  }
+  return { ok: true, master: res.content, added, analysis: next };
+}
+
+/**
+ * Fold what only the page knows into a freshly returned analysis (the server merged with the row as
+ * it was stored, which may lag behind the page): answers given on the page and answer drafts. Both are
+ * matched to the new questions by question text; a draft or answer whose question wasn't asked again
+ * keeps its old question, so nothing typed disappears. `changed` means the result differs from
+ * `fresh`, so the page must save it itself.
+ */
+export function carryClientState(
+  prev: Analysis | null,
+  fresh: Analysis,
+  drafts: Record<string, string>,
+): { analysis: Analysis; drafts: Record<string, string>; changed: boolean } {
+  const questions = [...fresh.questions];
+  const answers: Record<string, string> = { ...(fresh.answers ?? {}) };
+  const byText = new Map(questions.map((q) => [normText(q.question), q.id]));
+  const ids = new Set(questions.map((q) => q.id));
+  let changed = false;
+  const target = (q: Analysis["questions"][number]): string => {
+    const hit = byText.get(normText(q.question));
+    if (hit) return hit;
+    let id = q.id;
+    while (ids.has(id)) id = `${id}_`;
+    questions.push({ ...q, id });
+    ids.add(id);
+    byText.set(normText(q.question), id);
+    changed = true;
+    return id;
+  };
+  const outDrafts: Record<string, string> = {};
+  for (const q of prev?.questions ?? []) {
+    const saved = prev?.answers?.[q.id]?.trim() ? prev.answers[q.id] : "";
+    const draft = drafts[q.id]?.trim() ? drafts[q.id] : "";
+    if (!saved && !draft) continue;
+    const id = target(q);
+    if (saved && answers[id] !== saved) {
+      answers[id] = saved;
+      changed = true;
+    }
+    if (draft) outDrafts[id] = draft;
+  }
+  for (const [id, v] of Object.entries(answers)) if (!(id in outDrafts) && v.trim()) outDrafts[id] = v;
+  return { analysis: { ...fresh, questions, answers }, drafts: outDrafts, changed };
+}
+
+// ---------- honesty guard: numbers the candidate never gave ----------
+
+const SOURCE_NUM_RE = /(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?([kKmMbB](?![a-zA-Z]))?/g;
+const TEXT_NUM_RE = /(\$\s?)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(\s?%|\s?percent\b|[kKmMbB](?![a-zA-Z])|x(?![a-zA-Z])|\+)?/g;
+const MULT: Record<string, number> = { k: 1e3, m: 1e6, b: 1e9 };
+const numValue = (digits: string) => Number(digits.replace(/,/g, ""));
+const round = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/** Every number in the source texts, with K/M/B multiplied out too ("10K" counts as 10 and 10000). */
+export function sourceNumbers(sources: string[]): Set<number> {
+  const out = new Set<number>();
+  for (const s of sources) {
+    for (const m of (s ?? "").matchAll(SOURCE_NUM_RE)) {
+      const v = numValue(m[1]);
+      out.add(round(v));
+      if (m[2]) out.add(round(v * MULT[m[2].toLowerCase()]));
+    }
+  }
+  return out;
+}
+
+function placeholderFor(currency: boolean, suffix: string): string {
+  const s = suffix.trim().toLowerCase();
+  if (s === "%" || s === "percent") return "[X%]";
+  if (currency) return "[$X]";
+  if (s in MULT) return `[N${s.toUpperCase()}]`;
+  if (s === "x") return "[N]x";
+  if (s === "+") return "[N+]";
+  return "[N]";
+}
+
+/**
+ * Replace every number in `text` that doesn't appear in any of `sources` (the resume, facts, answers)
+ * with a [placeholder]: "40%" -> "[X%]", "$5,000" -> "[$X]", "10K" -> "[NK]", "300" -> "[N]".
+ * Existing [placeholders], and tokens glued to letters or other digits (EC2, B2B, 1st, 24/7, 3:30,
+ * v1.2) are left alone.
+ */
+export function guardNumbers(text: string, sources: string[] | Set<number>): { text: string; placeholders: string[] } {
+  const known = sources instanceof Set ? sources : sourceNumbers(sources);
+  const placeholders: string[] = [];
+  const parts = text.split(/(\[[^\]\n]+\])/g);
+  const out = parts.map((part, i) => {
+    if (i % 2) return part; // an existing [placeholder]
+    return part.replace(TEXT_NUM_RE, (match: string, cur: string | undefined, digits: string, suffix: string | undefined, at: number) => {
+      const before = part[at - 1] ?? "";
+      const after = part[at + match.length] ?? "";
+      if (/[A-Za-z0-9_./:]/.test(before) || /[A-Za-z0-9_/:]/.test(after)) return match;
+      const v = numValue(digits);
+      const s = (suffix ?? "").trim().toLowerCase();
+      const scaled = s in MULT ? v * MULT[s] : v;
+      if (known.has(round(v)) || known.has(round(scaled))) return match;
+      const ph = placeholderFor(!!cur, suffix ?? "");
+      placeholders.push(ph);
+      return ph;
+    });
+  });
+  return { text: out.join(""), placeholders };
+}
+
+/**
+ * Server-side honesty check for a fresh analysis: any number in a suggested rewrite that isn't in the
+ * resume, facts or answers becomes a [placeholder], with a question asking for the real value.
+ */
+export function guardAnalysisNumbers(a: Analysis, sources: string[]): Analysis {
+  const known = sourceNumbers(sources);
+  const questions = [...a.questions];
+  const bullets = a.bullets.map((b) => {
+    if (!b.rewrite.trim()) return b;
+    const g = guardNumbers(b.rewrite, known);
+    if (!g.placeholders.length) return b;
+    const shown = g.text.length > 120 ? `${g.text.slice(0, 119).trimEnd()}…` : g.text;
+    [...new Set(g.placeholders)].forEach((ph, i) => {
+      questions.push({
+        id: `num_${b.bullet_id}_${i}`,
+        question: `What's the real number for ${ph} in "${shown}"?`,
+        why: "The AI suggested a number that isn't in your resume, facts or answers, so it was left as a placeholder.",
+        bullet_id: b.bullet_id,
+        placeholder: ph,
+      });
+    });
+    return { ...b, rewrite: g.text };
+  });
+  return { ...a, bullets, questions };
+}
+

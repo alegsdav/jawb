@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createSaveQueue, type SaveQueue, type SaveState } from "./saveQueue";
 
-export type SaveState = "saved" | "saving" | "unsaved" | "error";
-
-/** Automatic retries after a failed save, in ms (the last delay repeats). */
-export const RETRY_DELAYS = [3000, 10000, 30000];
+export { createSaveQueue, RETRY_DELAYS, type SaveQueue, type SaveState } from "./saveQueue";
 
 /** Retry functions of every mounted autosave, so <SaveErrorToast> can retry without being handed one. */
 const retryRegistry = new Set<() => void>();
@@ -25,6 +23,7 @@ export function retryAllSaves() {
  *
  * A failed save keeps its value and retries by itself after 3s, 10s, then every 30s, and as soon
  * as the browser comes back online. `retry()` (or retryAllSaves()) tries again immediately.
+ * The scheduling itself lives in createSaveQueue (saveQueue.ts).
  */
 export function useAutosaveWithRetry<T>(
   value: T | null,
@@ -35,59 +34,17 @@ export function useAutosaveWithRetry<T>(
   const first = useRef(true);
   const saveRef = useRef(save);
   saveRef.current = save;
-  /** Latest value not yet handed to `save` (wrapped so `null`/falsy values are still "pending"). */
-  const pending = useRef<{ v: T } | null>(null);
-  const inFlight = useRef(0);
-  const chain = useRef<Promise<unknown>>(Promise.resolve());
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const failures = useRef(0);
-  const flushRef = useRef<() => void>(() => {});
+  const queue = useRef<SaveQueue<T> | null>(null);
+  if (!queue.current) {
+    queue.current = createSaveQueue<T>({
+      save: (v) => saveRef.current(v),
+      onStatus: setStatus,
+      delay,
+      onError: (e) => console.warn("Autosave failed (will retry):", e),
+    });
+  }
 
-  flushRef.current = () => {
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
-    }
-    if (retryTimer.current) {
-      clearTimeout(retryTimer.current);
-      retryTimer.current = null;
-    }
-    const p = pending.current;
-    if (!p) return;
-    pending.current = null;
-    inFlight.current++;
-    // While recovering from a failure, stay "error" until a save actually lands (no toast flicker).
-    setStatus(failures.current ? "error" : "saving");
-    const fn = saveRef.current;
-    chain.current = chain.current
-      .catch(() => {})
-      .then(() => fn(p.v))
-      .then(
-        () => {
-          inFlight.current--;
-          failures.current = 0;
-          if (!pending.current && !inFlight.current) setStatus("saved");
-        },
-        (e) => {
-          inFlight.current--;
-          console.warn("Autosave failed (will retry):", e);
-          // Keep the value so a retry, the next edit, navigation or tab close saves it (and the tab-close prompt still shows).
-          if (!pending.current) pending.current = p;
-          setStatus("error");
-          if (!retryTimer.current && !timer.current) {
-            const wait = RETRY_DELAYS[Math.min(failures.current, RETRY_DELAYS.length - 1)];
-            failures.current++;
-            retryTimer.current = setTimeout(() => {
-              retryTimer.current = null;
-              flushRef.current();
-            }, wait);
-          }
-        },
-      );
-  };
-
-  const retry = useCallback(() => flushRef.current(), []);
+  const retry = useCallback(() => queue.current?.flush(), []);
 
   useEffect(() => {
     if (value === null) return;
@@ -95,18 +52,16 @@ export function useAutosaveWithRetry<T>(
       first.current = false;
       return;
     }
-    pending.current = { v: value };
-    if (!failures.current) setStatus("unsaved");
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => flushRef.current(), delay);
+    queue.current?.push(value, delay);
   }, [value, delay]);
 
   useEffect(() => {
-    const flush = () => flushRef.current();
+    const q = queue.current!;
+    const flush = () => q.flush();
     const onVisibility = () => document.visibilityState === "hidden" && flush();
-    const onOnline = () => pending.current && retry();
+    const onOnline = () => q.hasPending() && flush();
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!pending.current && !inFlight.current) return;
+      if (!q.busy()) return;
       flush(); // start saving now; the prompt gives it time to finish
       e.preventDefault();
       e.returnValue = ""; // older Safari/Chrome need this to show the prompt
@@ -123,7 +78,7 @@ export function useAutosaveWithRetry<T>(
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("visibilitychange", onVisibility);
       flush(); // unmount (e.g. <Link> navigation): save whatever is pending, fire-and-forget
-      if (retryTimer.current) clearTimeout(retryTimer.current);
+      q.dispose();
     };
   }, [retry]);
 

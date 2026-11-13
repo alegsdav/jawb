@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  answerFactChanges, attachOriginals, bulletFeedback, fillPlaceholder, findPlaceholder, matchesRewrite, normalizeAnalysis,
+  answerFactPlan, attachOriginals, bulletFeedback, fillPlaceholder, findPlaceholder, matchesRewrite, normalizeAnalysis,
   planFill, removeFacts, suggestFill,
 } from "@/lib/analysis";
 import type { Analysis, Resume } from "@/lib/types";
@@ -142,13 +142,21 @@ describe("answer facts", () => {
     { id: "q2", question: "Which tools?", why: "" },
   ];
 
-  it("adds new answers and replaces edited ones", () => {
-    expect(answerFactChanges(qs, { q1: "300" }, { q1: "350", q2: "Figma" })).toEqual({
+  const has300 = ["300 (re: How many users?)"];
+
+  it("adds new answers and replaces edited ones (against the master's current facts)", () => {
+    expect(answerFactPlan(qs, { q1: "300" }, { q1: "350", q2: "Figma" }, has300)).toEqual({
       add: ["350 (re: How many users?)", "Figma (re: Which tools?)"],
       remove: ["300 (re: How many users?)"],
     });
-    expect(answerFactChanges(qs, { q1: "300" }, { q1: " 300 " })).toEqual({ add: [], remove: [] });
-    expect(answerFactChanges(qs, { q1: "300" }, { q1: "" })).toEqual({ add: [], remove: ["300 (re: How many users?)"] });
+    expect(answerFactPlan(qs, { q1: "300" }, { q1: " 300 " }, has300)).toEqual({ add: [], remove: [] });
+    expect(answerFactPlan(qs, { q1: "300" }, { q1: "" }, has300)).toEqual({ add: [], remove: ["300 (re: How many users?)"] });
+  });
+
+  it("repairs a fact that never reached the master, even when the answer itself is unchanged", () => {
+    expect(answerFactPlan(qs, { q1: "300" }, { q1: "300" }, [])).toEqual({ add: ["300 (re: How many users?)"], remove: [] });
+    // The old wording's fact isn't there to remove.
+    expect(answerFactPlan(qs, { q1: "300" }, { q1: "350" }, [])).toEqual({ add: ["350 (re: How many users?)"], remove: [] });
   });
 
   it("removes facts case/whitespace-insensitively", () => {

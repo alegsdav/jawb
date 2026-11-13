@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/supabase/server";
 import { geminiJSON } from "@/lib/gemini";
 import { parseResumePrompt } from "@/lib/prompts";
 import { normalizeResume } from "@/lib/resume";
+import { friendlyError } from "@/lib/api";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
       );
     }
   } else {
-    text = ((await req.json()) as { text?: string }).text ?? "";
+    text = (((await req.json().catch(() => ({}))) ?? {}) as { text?: string }).text ?? "";
     if (!text.trim()) return NextResponse.json({ error: "Paste your resume text." }, { status: 400 });
   }
 
@@ -48,6 +49,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ resume });
   } catch (e) {
     console.error("parse-resume failed:", e);
-    return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    return NextResponse.json({ error: friendlyError(e, "Couldn't read that resume. Try again, or paste the text instead.") }, { status: 502 });
   }
 }

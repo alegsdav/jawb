@@ -23,7 +23,9 @@ describe("baseline", () => {
     const master = { ...doc({ a: "A1", b: "B1" }), facts: ["secret"] };
     const copy = cloneForJob(master);
     expect(copy.facts).toBeUndefined();
-    expect(copy.baseline).toEqual({ a: "A1", b: "B1", [HEADER_NAME]: "Ann", [HEADER_CONTACT]: "ann@x.com" });
+    expect(copy.baseline).toEqual({
+      a: "A1", b: "B1", [HEADER_NAME]: "Ann", [HEADER_CONTACT]: "ann@x.com", "section:s": "Experience", "item:i": "Co",
+    });
     expect(stripBaseline(copy)).not.toHaveProperty("baseline");
   });
 
@@ -56,12 +58,15 @@ describe("pull master changes", () => {
   const copy = { ...cloneForJob(masterV1), sections: doc({ a: "A1", b: "B mine", c: "C1", x: "only here" }).sections };
 
   it("nothing to pull while the master is unchanged", () => {
-    expect(planPull(copy, masterV1)).toEqual({ header: false, bullets: 0, skipped: 0, total: 0 });
+    expect(planPull(copy, masterV1)).toEqual({
+      header: false, headerKept: false, bullets: 0, skipped: 0, total: 0, additions: [], removals: [],
+    });
   });
 
   it("takes new master wording for untouched bullets, never for edited ones, and syncs the header", () => {
     const masterV2 = doc({ a: "A2", b: "B2", c: "C1", d: "D new" }, { name: "Ann Lee", contact: "ann@x.com" });
-    expect(planPull(copy, masterV2)).toEqual({ header: true, bullets: 1, skipped: 1, total: 2 });
+    expect(planPull(copy, masterV2)).toMatchObject({ header: true, headerKept: false, bullets: 1, skipped: 1, total: 2 });
+    expect(planPull(copy, masterV2).additions).toEqual([{ kind: "bullet", id: "d", itemId: "i", text: "D new", where: "Co" }]);
     const r = applyPull(copy, masterV2);
     const texts = bulletTextMap(r.resume);
     expect(texts.get("a")).toBe("A2");
@@ -70,10 +75,14 @@ describe("pull master changes", () => {
     expect(texts.get("x")).toBe("only here");
     expect(texts.has("d")).toBe(false); // new master bullets aren't added
     expect(r.resume.header.name).toBe("Ann Lee");
-    expect(r.resume.baseline).toEqual(makeBaseline(masterV2));
+    // The baseline moves to the master, except the new bullet "d" that wasn't added yet (still offered).
+    const { d: _d, ...rest } = makeBaseline(masterV2);
+    void _d;
+    expect(r.resume.baseline).toEqual(rest);
     expect(r).toMatchObject({ header: true, bullets: 1, skipped: 1 });
-    // Once pulled, the same change isn't offered again.
+    // Once pulled, the same change isn't offered again; the addition still is.
     expect(planPull(r.resume, masterV2).total).toBe(0);
+    expect(planPull(r.resume, masterV2).additions.map((a) => a.id)).toEqual(["d"]);
   });
 
   it("a header edited only in the copy is not an update", () => {
