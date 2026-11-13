@@ -10,6 +10,71 @@ export type FetchedJob = {
   description: string;
 };
 
+/**
+ * An error whose message is a plain sentence meant for the user (the intake API shows it as is).
+ * Anything else that goes wrong while fetching is shown as a generic "couldn't read that page".
+ */
+export class JobFetchError extends Error {}
+
+/** Time allowed for reading a job link, all redirects and API calls included. */
+export const FETCH_TIMEOUT_MS = 15000;
+/** Bytes read from any response; the rest is ignored (job postings are far smaller). */
+export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+export const INVALID_URL_MESSAGE = "That doesn't look like a link. Paste the full address starting with https://";
+const TIMEOUT_MESSAGE = "That site took too long to respond. Paste the job description and keep the link.";
+const UNREACHABLE_MESSAGE = "Couldn't reach that site. Paste the job description and keep the link.";
+
+/** Parse a user-supplied job link: http(s) only, never throws a raw TypeError. */
+export function parseJobUrl(raw: string): URL {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    throw new JobFetchError(INVALID_URL_MESSAGE);
+  }
+  if (!/^https?:$/.test(u.protocol)) throw new JobFetchError("Only http(s) links are supported.");
+  return u;
+}
+
+/** Read a response body as text, stopping after MAX_RESPONSE_BYTES. */
+export async function readCapped(res: Response, max = MAX_RESPONSE_BYTES): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const room = max - size;
+      chunks.push(value.length > room ? value.subarray(0, room) : value);
+      size += Math.min(value.length, room);
+    }
+  } finally {
+    if (size >= max) await reader.cancel().catch(() => {});
+    else reader.releaseLock();
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    all.set(c, at);
+    at += c.length;
+  }
+  return new TextDecoder().decode(all);
+}
+
+/** fetch() with the shared deadline; turns timeouts and network failures into plain sentences. */
+async function timedFetch(url: URL | string, init: RequestInit, signal: AbortSignal): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal });
+  } catch (e) {
+    const name = (e as { name?: string })?.name;
+    if (signal.aborted || name === "TimeoutError" || name === "AbortError") throw new JobFetchError(TIMEOUT_MESSAGE);
+    throw new JobFetchError(UNREACHABLE_MESSAGE);
+  }
+}
+
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
@@ -116,57 +181,67 @@ export function isBlockedIp(ip: string): boolean {
  * blocks plain links to internal hosts, which is what a pasted URL can otherwise reach.
  */
 export async function assertPublicUrl(u: URL): Promise<void> {
-  if (!/^https?:$/.test(u.protocol)) throw new Error("Only http(s) links are supported.");
+  if (!/^https?:$/.test(u.protocol)) throw new JobFetchError("Only http(s) links are supported.");
   const host = u.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
-  if (!host || host === "localhost" || host.endsWith(".localhost")) throw new Error(BLOCKED_MESSAGE);
+  if (!host || host === "localhost" || host.endsWith(".localhost")) throw new JobFetchError(BLOCKED_MESSAGE);
   if (isIP(host)) {
-    if (isBlockedIp(host)) throw new Error(BLOCKED_MESSAGE);
+    if (isBlockedIp(host)) throw new JobFetchError(BLOCKED_MESSAGE);
     return;
   }
   let addrs: { address: string }[];
   try {
     addrs = await dns.lookup(host, { all: true, verbatim: true });
   } catch {
-    throw new Error("Couldn't find that site. Check the link, or paste the job description instead.");
+    throw new JobFetchError("Couldn't find that site. Check the link, or paste the job description instead.");
   }
-  if (!addrs.length || addrs.some((a) => isBlockedIp(a.address))) throw new Error(BLOCKED_MESSAGE);
+  if (!addrs.length || addrs.some((a) => isBlockedIp(a.address))) throw new JobFetchError(BLOCKED_MESSAGE);
 }
 
 /** fetch() that re-checks every redirect hop with assertPublicUrl (at most 5 redirects). */
-async function fetchPublic(url: URL, init: RequestInit): Promise<{ res: Response; url: URL }> {
+async function fetchPublic(url: URL, init: RequestInit, signal: AbortSignal): Promise<{ res: Response; url: URL }> {
   let current = url;
   for (let hop = 0; ; hop++) {
     await assertPublicUrl(current);
-    const res = await fetch(current, { ...init, redirect: "manual" });
+    const res = await timedFetch(current, { ...init, redirect: "manual" }, signal);
     const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
     if (!location) return { res, url: current };
     await res.body?.cancel().catch(() => {});
-    if (hop >= MAX_REDIRECTS) throw new Error("That link redirects too many times. Paste the job description instead.");
-    current = new URL(location, current);
+    if (hop >= MAX_REDIRECTS) throw new JobFetchError("That link redirects too many times. Paste the job description instead.");
+    try {
+      current = new URL(location, current);
+    } catch {
+      throw new JobFetchError(pasteMessage(null));
+    }
     // A link can redirect to a login wall on another host (e.g. a short link to LinkedIn).
     const site = pasteOnlySite(current.href);
-    if (site) throw new Error(pasteMessage(site));
+    if (site) throw new JobFetchError(pasteMessage(site));
   }
 }
 
 /** Fixed public API hosts (Greenhouse, Lever): not user-controlled, so no address check. */
-async function getJSON(url: string) {
-  const r = await fetch(url, { headers: { "User-Agent": UA } });
+async function getJSON(url: string, signal: AbortSignal) {
+  const r = await timedFetch(url, { headers: { "User-Agent": UA } }, signal);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  return JSON.parse(await readCapped(r));
 }
 
+/** Greenhouse board hosts (boards.greenhouse.io, job-boards.greenhouse.io…), anchored so "evilgreenhouse.io" doesn't match. */
+const GREENHOUSE_HOST = /(^|\.)greenhouse\.io$/;
+
 /** Greenhouse and Lever have public JSON APIs, which beat scraping. */
-async function tryKnownBoards(u: URL): Promise<FetchedJob | null> {
+async function tryKnownBoards(u: URL, signal: AbortSignal): Promise<FetchedJob | null> {
   const parts = u.pathname.split("/").filter(Boolean);
-  if (/greenhouse\.io$/.test(u.hostname)) {
+  if (GREENHOUSE_HOST.test(u.hostname)) {
     const i = parts.indexOf("jobs");
     // Embedded boards look like /embed/job_app?for=<board>&token=<id>.
     const embed = parts[0] === "embed";
     const board = embed ? u.searchParams.get("for") : parts[0];
     const id = embed ? u.searchParams.get("token") : i >= 0 ? parts[i + 1] : u.searchParams.get("gh_jid");
     if (board && id) {
-      const j = await getJSON(`https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}`);
+      const j = await getJSON(
+        `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs/${encodeURIComponent(id)}`,
+        signal,
+      );
       return {
         title: j.title ?? "",
         company: j.company_name ?? board,
@@ -178,7 +253,7 @@ async function tryKnownBoards(u: URL): Promise<FetchedJob | null> {
     }
   }
   if (u.hostname === "jobs.lever.co" && parts.length >= 2) {
-    const j = await getJSON(`https://api.lever.co/v0/postings/${parts[0]}/${parts[1]}`);
+    const j = await getJSON(`https://api.lever.co/v0/postings/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`, signal);
     const lists = (j.lists ?? [])
       .map((l: { text: string; content: string }) => `${l.text}\n${htmlToText(l.content)}`)
       .join("\n\n");
@@ -226,23 +301,36 @@ const pasteMessage = (site: string | null) =>
     ? `${site} postings can't be read automatically. Paste the job description and keep the link.`
     : "That page needs a login or loads with JavaScript. Paste the job description and keep the link.";
 
-export async function fetchJobFromUrl(rawUrl: string): Promise<FetchedJob> {
-  const u = new URL(rawUrl);
-  if (!/^https?:$/.test(u.protocol)) throw new Error("Only http(s) links are supported.");
-  const site = pasteOnlySite(rawUrl);
-  if (site) throw new Error(pasteMessage(site));
-  const known = await tryKnownBoards(u).catch(() => null);
+/**
+ * Fetch a job posting. Every error thrown is a JobFetchError with a plain sentence. The whole fetch
+ * (API calls, redirects, body) must finish within FETCH_TIMEOUT_MS, and at most MAX_RESPONSE_BYTES
+ * of any response is read.
+ */
+export async function fetchJobFromUrl(rawUrl: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<FetchedJob> {
+  const u = parseJobUrl(rawUrl);
+  const site = pasteOnlySite(u.href);
+  if (site) throw new JobFetchError(pasteMessage(site));
+  const signal = AbortSignal.timeout(timeoutMs);
+  const known = await tryKnownBoards(u, signal).catch(() => null);
   if (known?.description) return known;
 
-  const { res, url: finalUrl } = await fetchPublic(u, { headers: { "User-Agent": UA, Accept: "text/html" } });
-  if (!res.ok) throw new Error(`The site returned HTTP ${res.status}. Paste the job description and keep the link.`);
-  const html = await res.text();
+  const { res, url: finalUrl } = await fetchPublic(u, { headers: { "User-Agent": UA, Accept: "text/html" } }, signal);
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
+    throw new JobFetchError(`The site returned HTTP ${res.status}. Paste the job description and keep the link.`);
+  }
+  let html: string;
+  try {
+    html = await readCapped(res);
+  } catch {
+    throw new JobFetchError(signal.aborted ? TIMEOUT_MESSAGE : UNREACHABLE_MESSAGE);
+  }
   const ld = fromJsonLd(html);
   if (ld?.description && ld.description.length > 200) return ld;
 
   const text = htmlToText(html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? html);
   if (text.length < 300 || /sign in|log in to view|join now/i.test(text.slice(0, 600))) {
-    throw new Error(pasteMessage(pasteOnlySite(finalUrl.href)));
+    throw new JobFetchError(pasteMessage(pasteOnlySite(finalUrl.href)));
   }
   const title = html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
   return { title, company: "", location: "", description: text.slice(0, 20000) };

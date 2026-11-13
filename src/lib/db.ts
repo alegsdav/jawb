@@ -14,3 +14,21 @@ export const MIGRATION_0002_COLUMNS = ["deadline", "submitted_resume", "submitte
 
 /** Every job column added after 0001; strip these from writes/selects when a migration is missing. */
 export const OPTIONAL_JOB_COLUMNS = [...MIGRATION_0002_COLUMNS, "reached_interview"] as const;
+
+type DbError = { code?: string; message?: string; status?: number; name?: string } | null | undefined;
+
+/**
+ * A plain sentence for a Supabase/PostgREST/network failure. Never shows raw backend text.
+ * `action` picks the wording: "autosave" (it retries by itself), "save" (a one-off action) or "load".
+ */
+export function dbErrorMessage(e: DbError, action: "autosave" | "save" | "load" = "autosave"): string {
+  if (isMissingColumn(e)) return MIGRATION_HINT;
+  const code = e?.code ?? "";
+  if (code === "PGRST301" || code === "PGRST302" || e?.status === 401 || /jwt|token.*expired|not authenticated/i.test(e?.message ?? "")) {
+    return "You've been signed out. Reload the page and sign in again.";
+  }
+  if (code === "42501" || e?.status === 403) return "This account can't change that. Reload the page and sign in again.";
+  if (action === "load") return "Couldn't load your data. Check your connection and reload the page.";
+  if (action === "save") return "Couldn't save. Check your connection and try again.";
+  return "Couldn't save. Check your connection; we'll keep retrying.";
+}
