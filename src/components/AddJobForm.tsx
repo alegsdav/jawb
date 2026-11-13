@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { pasteOnlySite } from "@/lib/jobsites";
+import { postApi } from "@/lib/api";
 import { Bookmarklet } from "./Bookmarklet";
 
 const URL_RE = /^https?:\/\/\S+$/i;
@@ -50,26 +51,6 @@ function takeCapture(): Capture | null {
   return null;
 }
 
-async function intake(body: { url?: string; text?: string }): Promise<{ id?: string; error?: string; pasteOnly?: string }> {
-  try {
-    const res = await fetch("/api/intake", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = (await res.json().catch(() => null)) as { id?: string; error?: string; pasteOnly?: string } | null;
-    if (!res.ok) {
-      return {
-        pasteOnly: json?.pasteOnly,
-        error: json?.error ?? (res.status === 504 ? "The AI took too long to respond. Try again in a moment." : `Request failed (HTTP ${res.status}).`),
-      };
-    }
-    return json?.id ? { id: json.id } : { error: "Something went wrong." };
-  } catch {
-    return { error: "Network error. Check your connection and try again." };
-  }
-}
-
 /**
  * "Add a job": one box for a link or a pasted description. For sites the server can't read
  * (LinkedIn, Handshake, Workday…) it switches to two fields: the link plus the pasted description.
@@ -114,9 +95,9 @@ export function AddJobForm() {
   async function send(body: { url?: string; text?: string }, fromUrl: string | null) {
     setBusy(true);
     setError("");
-    const r = await intake(body);
-    if (r.id) {
-      router.push(`/jobs/${r.id}`);
+    const r = await postApi<{ id: string }>("/api/intake", body);
+    if (r.data?.id) {
+      router.push(`/jobs/${r.data.id}`);
       return;
     }
     setBusy(false);

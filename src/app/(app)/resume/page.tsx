@@ -19,11 +19,8 @@ const NOT_NOTES = ["example", "from-resume", "accepted"];
 const LEGACY_DISMISSED_KEY = "jp:legacy-bank-dismissed";
 const norm = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
 
-/** Re-import keeps bullet ids stable and never drops the master's facts. */
-function mergeImport(prev: Resume, imported: Resume): Resume {
-  const next = reconcileIds(prev, normalizeResume(imported));
-  return prev.facts?.length && !next.facts?.length ? { ...next, facts: prev.facts } : next;
-}
+/** Re-import keeps bullet ids stable and carries the master's facts over (reconcileIds merges them). */
+const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
 
 export default function MasterResumePage() {
   const supabase = useMemo(() => createClient(), []);
