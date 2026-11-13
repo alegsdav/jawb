@@ -87,6 +87,22 @@ body {
   .doc-toolbar .btn { min-height: 40px; }
 }
 
+/* [placeholder] highlight behind a plain textarea (cover letter): see PlaceholderTextarea. */
+.ph-mirror {
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+  color: transparent; pointer-events: none; user-select: none; -webkit-user-select: none;
+}
+.ph-mirror mark {
+  color: transparent; background: #ffd84d; border-radius: 2px; box-shadow: 0 0 0 1px #d9a800;
+}
+@media (prefers-color-scheme: dark) {
+  .ph-mirror mark { background: rgb(224 177 0 / 0.38); box-shadow: 0 0 0 1px rgb(224 177 0 / 0.7); }
+}
+/* Must match the 16px the textarea gets on phones (rule above), or the highlights drift. */
+@media (max-width: 639px) {
+  .ph-mirror { font-size: 16px !important; }
+}
+
 /* Empty contextual-actions row in the document toolbar */
 .doc-slot:empty::before {
   content: "Click a section, entry or bullet to move or delete it.";
@@ -184,7 +200,7 @@ body {
   .doc-canvas { padding: 10px 0 24px; background: transparent; }
   .doc-page { min-height: 0; padding: 20px 16px; font-size: 16px; }
   .doc-name { font-size: 24px; }
-  .doc-contact { font-size: 14px; }
+  .doc-contact { font-size: 16px; } /* >= 16px so iOS doesn't zoom when it's focused */
   .doc-bullets { padding-left: 2px; }
   .doc-comment { margin-left: 0; }
   .doc-dot { left: -12px; }

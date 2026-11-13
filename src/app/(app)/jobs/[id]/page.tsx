@@ -7,25 +7,32 @@ import { createClient } from "@/lib/supabase/client";
 import {
   bulletTextMap, countChangedBullets, emptyResume, isEmptyResume, normalizeResume, resumeToPlainText,
 } from "@/lib/resume";
-import { STATUSES, type Analysis, type Job, type JobStatus, type Resume } from "@/lib/types";
-import { postApi } from "@/lib/api";
-import { addFacts, countPlaceholders, hasPlaceholder } from "@/lib/facts";
+import type { Analysis, Job, JobStatus, Resume } from "@/lib/types";
+import { friendlyError, postApi } from "@/lib/api";
+import { countPlaceholders, hasPlaceholder } from "@/lib/facts";
 import { fitOf } from "@/lib/fit";
-import { answerFactChanges, bulletFeedback, findPlaceholder, normalizeAnalysis, planFill, removeFacts } from "@/lib/analysis";
-import { shouldOfferUnsubmit, shouldSnapshot, snapshotPatch, unsubmitPatch } from "@/lib/outcomes";
-import { isMissingColumn, isUniqueViolation, MIGRATION_0002_COLUMNS, MIGRATION_HINT } from "@/lib/db";
+import {
+  bulletFeedback, carryClientState, findPlaceholder, missingAnswerFacts, normalizeAnalysis, planFill, saveAnswersInOrder,
+} from "@/lib/analysis";
+import { snapshotPatch } from "@/lib/outcomes";
+import { applyStatusChange } from "@/lib/status";
+import { isMissingColumn, isUniqueViolation, MIGRATION_HINT, OPTIONAL_JOB_COLUMNS } from "@/lib/db";
 import { updateMaster } from "@/lib/master";
 import {
-  applyPull, cloneForJob, compareMap, diffFields, ensureBaseline, JOB_FIELDS, makeBaseline, omitKeys, planPull, readBaseline,
-  replaceBullet, stripBaseline,
+  addAllFromMaster, addFromMaster, applyPull, cloneForJob, compareMap, diffFields, dismissAdditions, ensureBaseline, JOB_FIELDS,
+  makeBaseline, missingOptionalColumns, omitKeys, planPull, readBaseline, replaceBullet, resolveRemoval, stripBaseline,
+  type PullAddition, type PullRemoval,
 } from "@/lib/tailor";
 import { ResumeDocument } from "@/components/ResumeDocument";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
-import { StatusSelect, applyDates, FitBadge } from "@/components/StatusSelect";
+import { StatusSelect, FitBadge } from "@/components/StatusSelect";
 import { DeadlineField } from "@/components/DeadlineField";
-import { DocToolbar, PageCount, PlaceholderCount, Toggle, UndoRedo } from "@/components/DocToolbar";
+import { DocToolbar, FeedbackLegend, PageCount, PlaceholderCount, Toggle, UndoRedo } from "@/components/DocToolbar";
 import { Menu, MenuItem } from "@/components/Menu";
 import { SubmittedView, formatSubmitted } from "@/components/SubmittedView";
+import { PullBanner } from "@/components/PullBanner";
+import { FlashToast } from "@/components/FlashToast";
+import { PlaceholderTextarea } from "@/components/PlaceholderTextarea";
 import { confirmPlaceholders, downloadResumePdf, resumeTexts } from "@/components/pdfDownload";
 import { SaveErrorToast, SaveStatus, useAutosaveWithRetry, worstStatus } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
@@ -33,14 +40,15 @@ import { useHistory } from "@/lib/useHistory";
 type Tab = "resume" | "analysis" | "job" | "cover";
 type Question = Analysis["questions"][number];
 
-const TABS: [Tab, string][] = [
-  ["resume", "Tailored resume"],
-  ["analysis", "Analysis"], // phones only; desktop shows it in the sidebar
-  ["job", "Job posting"],
-  ["cover", "Cover letter"],
+/** [key, phone label, desktop label] */
+const TABS: [Tab, string, string][] = [
+  ["resume", "Resume", "Tailored resume"],
+  ["analysis", "Analysis", "Analysis"], // phones/tablets only; desktop shows it in the sidebar
+  ["job", "Posting", "Job posting"],
+  ["cover", "Letter", "Cover letter"],
 ];
 
-const statusLabel = (s: JobStatus) => STATUSES.find((x) => x.value === s)?.label ?? s;
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 /** Borderless input that's as wide as its text (company name next to the location on one line). */
 function FitInput({
@@ -85,37 +93,54 @@ export default function JobPage() {
   const [showFeedback, setShowFeedback] = useState(true);
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
+  /** Page-level problem, always plain language. Cleared by the next successful action or a tab change. */
   const [error, setError] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false);
   const [migrationHint, setMigrationHint] = useState(false);
   const [flash, setFlash] = useState("");
   const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
   const [viewingSubmitted, setViewingSubmitted] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  /** What's typed in each answer box (by question id). Lives here so a re-analysis can carry it over. */
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const autoRan = useRef(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The job row as last written, so autosave only sends the fields that changed (and can't clobber other tabs). */
   const lastSaved = useRef<Job | null>(null);
-  /** Migration 0002 is missing: never write its columns. */
-  const noMigration = useRef(false);
+  /** Optional columns (migrations 0002/0003) this database doesn't have: never write them. */
+  const missingCols = useRef<Set<string>>(new Set());
   const hintShown = useRef(false);
+  /** The analysis object the server already stored (so the analysis autosave doesn't write it again). */
+  const serverSaved = useRef<Analysis | null>(null);
+
+  const fail = useCallback((e: unknown, fallback: string) => {
+    console.warn(fallback, e);
+    setError(friendlyError(e, fallback));
+  }, []);
 
   useEffect(() => {
     (async () => {
       const [{ data: j, error: e1 }, { data: r, error: eR }, { data: m, error: eM }] = await Promise.all([
-        supabase.from("jobs").select("*").eq("id", id).single(),
+        supabase.from("jobs").select("*").eq("id", id).maybeSingle(),
         supabase.from("resumes").select("id, content").eq("job_id", id).maybeSingle(),
         supabase.from("resumes").select("content").eq("is_master", true).maybeSingle(),
       ]);
-      if (e1 || !j) return setError(e1?.message ?? "Job not found");
-      if (eR || eM) return setError((eR ?? eM)!.message);
+      const loadFail = (e: unknown, fallback: string) => {
+        setLoadFailed(true);
+        fail(e, fallback);
+      };
+      if (e1 || eR || eM) return loadFail(e1 ?? eR ?? eM, "Couldn't load this job.");
+      if (!j) return loadFail(null, "This job doesn't exist anymore. It may have been deleted.");
       const masterResume = m ? normalizeResume(m.content) : emptyResume();
       const masterEmpty = isEmptyResume(masterResume);
       const loaded: Job = { ...(j as Job), analysis: j.analysis ? normalizeAnalysis(j.analysis) : null };
-      if (!("submitted_at" in j)) noMigration.current = true;
+      for (const c of OPTIONAL_JOB_COLUMNS) if (!(c in j)) missingCols.current.add(c);
       lastSaved.current = loaded;
+      serverSaved.current = loaded.analysis;
       setMaster(masterResume);
       setJob(loaded);
+      setDrafts(loaded.analysis?.answers ?? {});
 
       const open = async (row: { id: string; content: unknown }) => {
         setResumeId(row.id);
@@ -135,7 +160,7 @@ export default function JobPage() {
           // Self-heal: this copy was made before the master had content. Start it over from the master.
           start = cloneForJob(masterResume);
           const { error: e3 } = await supabase.from("resumes").update({ content: start }).eq("id", row.id);
-          if (e3) return setError(e3.message);
+          if (e3) return loadFail(e3, "Couldn't set up this job's tailored copy.");
         }
         setLoadedTexts(bulletTextMap(start));
         doc.reset(start);
@@ -151,12 +176,15 @@ export default function JobPage() {
         .select("id, content")
         .single();
       if (created && !e2) return open(created);
-      if (!isUniqueViolation(e2)) return setError(e2?.message ?? "Couldn't create this job's tailored copy.");
+      if (!isUniqueViolation(e2)) return loadFail(e2, "Couldn't create this job's tailored copy.");
       // Another tab (or a double render) created it first: use that one.
       const { data: again, error: e4 } = await supabase.from("resumes").select("id, content").eq("job_id", id).single();
-      if (e4 || !again) return setError(e4?.message ?? "Couldn't load this job's tailored copy.");
+      if (e4 || !again) return loadFail(e4, "Couldn't load this job's tailored copy.");
       return open(again);
-    })();
+    })().catch((e) => {
+      setLoadFailed(true);
+      fail(e, "Couldn't load this job.");
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -176,36 +204,52 @@ export default function JobPage() {
       if (!prev) return;
       // Only what changed here since the last save: another tab's edits to other fields survive.
       const patch = diffFields(prev, j, JOB_FIELDS);
-      let write: Partial<Job> = noMigration.current ? omitKeys(patch, MIGRATION_0002_COLUMNS) : patch;
-      if (noMigration.current && Object.keys(write).length < Object.keys(patch).length && !hintShown.current) {
+      const showHint = () => {
+        if (hintShown.current) return;
         hintShown.current = true;
         setMigrationHint(true);
-      }
-      if (Object.keys(write).length) {
-        let { error } = await supabase.from("jobs").update(write).eq("id", j.id);
-        if (error && isMissingColumn(error) && !noMigration.current) {
-          noMigration.current = true;
-          if (!hintShown.current) {
-            hintShown.current = true;
-            setMigrationHint(true);
-          }
-          write = omitKeys(patch, MIGRATION_0002_COLUMNS);
-          error = Object.keys(write).length ? (await supabase.from("jobs").update(write).eq("id", j.id)).error : null;
-        }
-        if (error) throw error;
+      };
+      // A missing optional column (migration not run) is dropped from the write; the rest still saves.
+      for (let attempt = 0; attempt <= OPTIONAL_JOB_COLUMNS.length; attempt++) {
+        const write = omitKeys(patch, [...missingCols.current]);
+        if (Object.keys(write).length < Object.keys(patch).length) showHint();
+        if (!Object.keys(write).length) break;
+        const { error } = await supabase.from("jobs").update(write).eq("id", j.id);
+        if (!error) break;
+        const left = OPTIONAL_JOB_COLUMNS.filter((c) => !missingCols.current.has(c) && c in write);
+        if (!isMissingColumn(error) || !left.length) throw error;
+        for (const c of missingOptionalColumns(error.message, left)) missingCols.current.add(c);
       }
       lastSaved.current = { ...prev, ...patch };
     },
     [supabase],
   );
   const jobSave = useAutosaveWithRetry(job, saveJob);
-  const saveState = worstStatus(jobSave.status, resumeSave.status);
+
+  // The analysis (answers, rejected suggestions, results the server couldn't store) saves on its own, with retries.
+  const jobLoaded = job !== null;
+  const jobAnalysis = job?.analysis ?? null;
+  const analysisValue = useMemo(() => (jobLoaded ? { a: jobAnalysis } : null), [jobLoaded, jobAnalysis]);
+  const saveAnalysis = useCallback(
+    async ({ a }: { a: Analysis | null }) => {
+      if (a === serverSaved.current) return;
+      const { error } = await supabase.from("jobs").update({ analysis: a }).eq("id", id);
+      if (error) throw error;
+      serverSaved.current = a;
+    },
+    [supabase, id],
+  );
+  const analysisSave = useAutosaveWithRetry(analysisValue, saveAnalysis, 300);
+
+  const saveState = worstStatus(jobSave.status, resumeSave.status, analysisSave.status);
   const { retry: retryJob } = jobSave;
   const { retry: retryResume } = resumeSave;
+  const { retry: retryAnalysis } = analysisSave;
   const retrySaves = useCallback(() => {
     retryJob();
     retryResume();
-  }, [retryJob, retryResume]);
+    retryAnalysis();
+  }, [retryJob, retryResume, retryAnalysis]);
 
   const analysis = job?.analysis ?? null;
   const fit = fitOf(analysis);
@@ -220,6 +264,14 @@ export default function JobPage() {
   const changedCount = useMemo(() => (resume && compareTo ? countChangedBullets(resume, compareTo) : 0), [resume, compareTo]);
   const pull = useMemo(() => planPull(resume, master), [resume, master]);
   const placeholderCount = useMemo(() => (resume ? countPlaceholders(resumeTexts(resume)) : 0), [resume]);
+  const missingFacts = useMemo(
+    () => (analysis && master ? missingAnswerFacts(analysis.questions, analysis.answers, master.facts) : []),
+    [analysis, master],
+  );
+
+  // The latest values, for async work that finishes later (an analysis takes 20-60s; drafts typed meanwhile count).
+  const latest = useRef({ analysis, drafts });
+  latest.current = { analysis, drafts };
 
   const analyze = useCallback(async () => {
     if (!resume) return;
@@ -230,10 +282,16 @@ export default function JobPage() {
     } catch {
       /* the analyze route reads the last saved copy */
     }
-    const { data, error } = await postApi<{ analysis: Analysis }>("/api/analyze", { jobId: id });
+    const { data, error } = await postApi<{ analysis: Analysis; saved?: boolean }>("/api/analyze", { jobId: id });
     setAnalyzing(false);
     if (error || !data?.analysis) return setAnalyzeError(error ?? "The analysis didn't come back. Try again.");
-    setJob((j) => (j ? { ...j, analysis: normalizeAnalysis(data.analysis) } : j));
+    // Keep answers and drafts typed on this page; match them to the new questions by text.
+    const carried = carryClientState(latest.current.analysis, normalizeAnalysis(data.analysis), latest.current.drafts);
+    // Stored by the server and nothing added here: no need to write it again. Otherwise the analysis autosave stores it.
+    serverSaved.current = data.saved !== false && !carried.changed ? carried.analysis : serverSaved.current;
+    setDrafts(carried.drafts);
+    setJob((j) => (j ? { ...j, analysis: carried.analysis } : j));
+    setError("");
   }, [resume, saveResume, id]);
 
   // Run the first analysis automatically so the tailored copy has suggestions right away.
@@ -244,21 +302,24 @@ export default function JobPage() {
     if (!job.analysis && job.description.trim() && !isEmptyResume(resume)) analyze();
   }, [job, resume, analyze]);
 
+  /** A successful action: say so briefly (as a toast) and clear any earlier error. */
   function showFlash(msg: string, ms = 3500) {
+    setError("");
     setFlash(msg);
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(""), ms);
   }
 
-  async function persistAnalysis(next: Analysis) {
-    setJob((j) => (j ? { ...j, analysis: next } : j));
-    const { error } = await supabase.from("jobs").update({ analysis: next }).eq("id", id);
-    if (error) throw error;
+  function selectTab(t: Tab) {
+    setTab(t);
+    setError("");
   }
 
+  const setAnalysis = (fn: (a: Analysis) => Analysis) => setJob((j) => (j?.analysis ? { ...j, analysis: fn(j.analysis) } : j));
+
   function rejectSuggestion(bulletId: string) {
-    if (!analysis) return;
-    persistAnalysis({ ...analysis, dismissed: [...(analysis.dismissed ?? []), bulletId] }).catch((e) => setError(e.message));
+    setAnalysis((a) => ({ ...a, dismissed: [...(a.dismissed ?? []), bulletId] }));
+    setError("");
   }
 
   function acceptAll() {
@@ -266,18 +327,19 @@ export default function JobPage() {
     let next = resume;
     for (const p of pending) next = replaceBullet(next, p.id, p.rewrite);
     doc.set(next, true);
+    showFlash(`Accepted ${plural(pending.length, "suggested edit")} (Undo to go back)`);
   }
 
   function reviewNext() {
     const next = pending[0];
     if (!next) return;
-    setTab("resume");
+    selectTab("resume");
     setReveal({ id: next.id, n: Date.now() });
   }
 
   /** Jump to the first [placeholder] in the document and select it, ready to type over. */
   function goToPlaceholder() {
-    setTab("resume");
+    selectTab("resume");
     const fields = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(".doc-canvas input, .doc-canvas textarea");
     const el = Array.from(fields).find((f) => hasPlaceholder(f.value));
     if (!el) return;
@@ -303,7 +365,7 @@ export default function JobPage() {
     const next = planFill(text, feedback[q.bullet_id]?.suggestion ?? "", q.placeholder, value);
     if (next === null) return;
     doc.set(replaceBullet(resume, q.bullet_id, next), true);
-    setTab("resume");
+    selectTab("resume");
     setReveal({ id: q.bullet_id, n: Date.now() });
     showFlash(`Filled ${q.placeholder}. Edit the bullet if it reads oddly.`, 5000);
   }
@@ -317,29 +379,39 @@ export default function JobPage() {
     setWriting(false);
     if (error || typeof data?.cover_letter !== "string") return setCoverError(error ?? "The letter didn't come back. Try again.");
     setJob((j) => (j ? { ...j, cover_letter: data.cover_letter } : j));
+    setError("");
   }
 
-  /** Stores the answers on this analysis and updates the master's facts. True if new facts were written. */
-  async function saveAnswers(answers: Record<string, string>): Promise<boolean> {
-    if (!analysis) return false;
-    const { add, remove } = answerFactChanges(analysis.questions, analysis.answers, answers);
-    await persistAnalysis({ ...analysis, answers });
-    if (!add.length && !remove.length) return false;
-    const res = await updateMaster(supabase, (m) => {
-      const kept = removeFacts(m.facts, remove);
-      return addFacts(kept.length === (m.facts ?? []).length ? m : { ...m, facts: kept }, add);
+  /** Facts first (on the master), then the answers on this job; see saveAnswersInOrder. */
+  async function saveAnswers(answers: Record<string, string>): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+    const current = latest.current.analysis;
+    if (!current) return { ok: false, error: "Run the analysis first." };
+    const res = await saveAnswersInOrder({
+      analysis: current,
+      answers,
+      writeMaster: (mutate) => updateMaster(supabase, mutate),
+      // Queued on the analysis autosave (retries by itself); only answers change, on the analysis as it is now.
+      persist: (next) => setAnalysis((a) => ({ ...a, answers: next.answers })),
     });
-    if (!res.ok) throw new Error(res.error);
-    return add.length > 0;
+    if (!res.ok) {
+      console.warn("Saving answers failed at", res.stage, res.error);
+      return {
+        ok: false,
+        error: friendlyError(res.error, "Couldn't add them to your master resume's facts. Check your connection, then tap Retry."),
+      };
+    }
+    setMaster(res.master);
+    setError("");
+    return { ok: true, added: res.added };
   }
 
   async function downloadPdf() {
     if (!resume || !job) return;
     setPdfBusy(true);
     try {
-      await downloadResumePdf(stripBaseline(resume), `${resume.header.name} Resume ${job.company}`);
-    } catch {
-      setError("Couldn't build the PDF. Try again.");
+      if (await downloadResumePdf(stripBaseline(resume), `${resume.header.name} Resume ${job.company}`)) setError("");
+    } catch (e) {
+      fail(e, "Couldn't build the PDF. Try again.");
     } finally {
       setPdfBusy(false);
     }
@@ -348,7 +420,7 @@ export default function JobPage() {
   function copy(text: string, done: string) {
     navigator.clipboard.writeText(text).then(
       () => showFlash(done),
-      () => setError("Couldn't copy to the clipboard."),
+      (e) => fail(e, "Couldn't copy to the clipboard. Try again."),
     );
   }
 
@@ -359,23 +431,48 @@ export default function JobPage() {
 
   function copyCoverLetter() {
     if (!job || !confirmPlaceholders(countPlaceholders([job.cover_letter]), "This cover letter", "Copy")) return;
-    copy(job.cover_letter, "Copied");
+    copy(job.cover_letter, "Cover letter copied as text");
   }
 
   function pullFromMaster() {
     if (!resume || !master) return;
     const r = applyPull(resume, master);
     doc.set(r.resume, true);
-    const parts = [r.header ? "your name and contact line" : "", r.bullets ? `${r.bullets} bullet${r.bullets > 1 ? "s" : ""}` : ""];
+    const parts = [r.header ? "your name/contact line" : "", r.bullets ? plural(r.bullets, "bullet") : ""];
     const what = parts.filter(Boolean).join(" and ");
-    const kept = r.skipped ? ` Kept ${r.skipped} bullet${r.skipped > 1 ? "s" : ""} you edited in this tailored copy.` : "";
+    const kept = r.skipped || r.headerKept ? " Kept what you edited in this tailored copy." : "";
     showFlash(`Updated ${what || "nothing"} from your master resume (Undo to go back).${kept}`, 7000);
+  }
+
+  function addOne(a: PullAddition) {
+    if (!resume || !master) return;
+    doc.set(addFromMaster(resume, master, a), true);
+    showFlash(`Added the new ${a.kind === "item" ? "entry" : a.kind} from your master resume (Undo to go back)`);
+  }
+
+  function addAll() {
+    if (!resume || !master) return;
+    const n = pull.additions.length;
+    doc.set(addAllFromMaster(resume, master), true);
+    showFlash(`Added ${n} new item${n === 1 ? "" : "s"} from your master resume (Undo to go back)`);
+  }
+
+  function leaveOut() {
+    if (!resume || !master) return;
+    doc.set(dismissAdditions(resume, master, pull.additions), true);
+    showFlash("Left the new master content out of this tailored copy");
+  }
+
+  function onRemoval(r: PullRemoval, choice: "remove" | "keep") {
+    if (!resume) return;
+    doc.set(resolveRemoval(resume, r, choice), true);
+    showFlash(choice === "remove" ? "Removed here too (Undo to go back)" : "Kept in this tailored copy");
   }
 
   async function resetFromMaster() {
     if (!confirm("Discard this job's tailored edits and start over from your current master resume?")) return;
     const { data: m, error } = await supabase.from("resumes").select("content").eq("is_master", true).maybeSingle();
-    if (error) return setError(error.message);
+    if (error) return fail(error, "Couldn't load your master resume. Try again.");
     const fresh = m ? normalizeResume(m.content) : emptyResume();
     if (isEmptyResume(fresh)) return setError("Your master resume is empty. Import it on the Master resume page first.");
     setMaster(fresh);
@@ -394,28 +491,23 @@ export default function JobPage() {
     const body = stripBaseline(resume);
     // Keep the master's facts: they live only on the master.
     const res = await updateMaster(supabase, (current) => ({ ...body, ...(current.facts ? { facts: current.facts } : {}) }));
-    if (!res.ok) return setError(res.error);
+    if (!res.ok) return fail(res.error, "Couldn't update your master resume. Try again.");
     setMaster(res.content);
     doc.set({ ...resume, baseline: makeBaseline(res.content) }, true); // nothing differs from the master anymore
     showFlash("Master resume updated");
   }
 
-  function changeStatus(status: JobStatus) {
+  async function changeStatus(next: JobStatus) {
     if (!job) return;
-    const p: Partial<Job> = { status };
-    // Freeze exactly what was sent, the first time the job moves into a submitted status (someone may jump straight to Interview).
-    const firstSubmit = shouldSnapshot(status, job.submitted_at);
-    if (firstSubmit && resume && !confirmPlaceholders(placeholderCount, "Your tailored copy", `Mark as ${statusLabel(status)}`)) return;
-    if (
-      shouldOfferUnsubmit(status, job.submitted_at) &&
-      confirm(
-        `Clear the submitted copy and applied date?\n\nOK forgets what you sent on ${formatSubmitted(job.submitted_at!)} and its follow-up date. Cancel keeps them.`,
-      )
-    ) {
-      Object.assign(p, unsubmitPatch());
-    }
-    if (!job.date_applied && (firstSubmit || status === "applied")) Object.assign(p, applyDates());
-    if (firstSubmit && resume) Object.assign(p, snapshotPatch(stripBaseline(resume), master));
+    const p = await applyStatusChange({
+      job,
+      next,
+      sentResume: resume, // exactly what's on screen
+      master,
+      confirm: async (message) => window.confirm(message),
+    });
+    if (!p) return; // cancelled
+    setError("");
     setJob((j) => (j ? { ...j, ...p } : j));
   }
 
@@ -430,11 +522,21 @@ export default function JobPage() {
   async function deleteJob() {
     if (!confirm("Delete this job and its tailored copy?")) return;
     const { error } = await supabase.from("jobs").delete().eq("id", id);
-    if (error) return setError(error.message);
+    if (error) return fail(error, "Couldn't delete this job. Try again.");
     router.push("/");
   }
 
-  if (error && !job) return <p className="text-bad">{error}</p>;
+  if (loadFailed && !job) {
+    return (
+      <div role="alert" className="card p-6 space-y-3 max-w-lg">
+        <p className="text-bad">{error || "Couldn't load this job."}</p>
+        <div className="flex gap-2">
+          <button type="button" className="btn btn-primary min-h-10 sm:min-h-0" onClick={() => window.location.reload()}>Try again</button>
+          <Link href="/" className="btn min-h-10 sm:min-h-0">Back to tracker</Link>
+        </div>
+      </div>
+    );
+  }
   if (!job) return <p className="text-muted">Loading…</p>;
   const patch = (p: Partial<Job>) => setJob((j) => (j ? { ...j, ...p } : j));
   const coverPlaceholders = countPlaceholders([job.cover_letter]);
@@ -446,7 +548,10 @@ export default function JobPage() {
       onAnalyze={analyze}
       error={analyzeError}
       disabledReason={needsMaster ? "Import your resume first, then the analysis runs automatically." : !resume ? "Loading your resume…" : undefined}
+      drafts={drafts}
+      onDraftsChange={setDrafts}
       onSaveAnswers={saveAnswers}
+      missingFacts={missingFacts}
       pendingCount={pending.length}
       onReview={reviewNext}
       onAcceptAll={acceptAll}
@@ -532,26 +637,34 @@ export default function JobPage() {
 
       {migrationHint && (
         <div role="status" className="flex items-start gap-2 rounded-lg border border-ok/40 bg-ok-bg px-3 py-2 text-sm">
-          <span className="flex-1">{MIGRATION_HINT} Until then, deadlines and the copy of what you sent aren&apos;t saved.</span>
+          <span className="flex-1">
+            {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking) aren&apos;t saved.
+          </span>
           <button type="button" className="text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setMigrationHint(false)}>✕</button>
         </div>
       )}
-      {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+      {error && (
+        <div role="alert" className="flex items-start gap-2 rounded-lg border border-bad/40 bg-bad-bg px-3 py-2 text-sm">
+          <span className="flex-1 text-bad">{error}</span>
+          <button type="button" className="text-muted hover:text-fg px-1" aria-label="Dismiss" onClick={() => setError("")}>✕</button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div role="tablist" className="flex border-b border-border overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 sm:gap-1">
-        {TABS.map(([key, label]) => (
+        {TABS.map(([key, short, full]) => (
           <button
             key={key}
             type="button"
             role="tab"
             aria-selected={tab === key}
-            onClick={() => setTab(key)}
-            className={`shrink-0 px-2 sm:px-3 py-2 text-sm -mb-px border-b-2 flex items-center gap-1.5 ${key === "analysis" ? "lg:hidden" : ""} ${
+            onClick={() => selectTab(key)}
+            className={`shrink-0 px-2.5 sm:px-3 py-2 text-sm -mb-px border-b-2 flex items-center gap-1.5 ${key === "analysis" ? "lg:hidden" : ""} ${
               tab === key ? "border-accent text-fg font-medium" : "border-transparent text-muted hover:text-fg"
             }`}
           >
-            {label}
+            <span className="sm:hidden">{short}</span>
+            <span className="hidden sm:inline">{full}</span>
             {/* No room for the chip at phone width; the Analysis tab itself shows it. */}
             {key === "analysis" && fit && <span className="hidden sm:inline-flex"><FitBadge fit={fit} /></span>}
             {key === "analysis" && analyzeError && <span className="text-bad" aria-label="Analysis failed">!</span>}
@@ -565,7 +678,7 @@ export default function JobPage() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className={`min-w-0 space-y-3 ${tab === "analysis" ? "hidden lg:block" : ""}`}>
           {/* Kept mounted across tabs so selection and "Review" requests survive tab switches. */}
-          <div className={`space-y-3 ${tab === "resume" || tab === "analysis" ? "" : "hidden"}`}>
+          <div className={`space-y-2 sm:space-y-3 ${tab === "resume" || tab === "analysis" ? "" : "hidden"}`}>
             {needsMaster ? (
               <div className="card p-6 sm:p-10 text-center space-y-3">
                 <h2 className="text-lg font-semibold">Import your resume first</h2>
@@ -583,27 +696,43 @@ export default function JobPage() {
                   <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
                   {pending.length > 0 ? (
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-medium text-accent">{pending.length} suggestion{pending.length > 1 ? "s" : ""}</span>
-                      <button type="button" className="btn btn-sm" onClick={reviewNext}>Review</button>
-                      <button type="button" className="btn btn-sm btn-primary" onClick={acceptAll}>Accept all</button>
+                      <span className="hidden sm:inline text-xs font-medium text-accent">
+                        {plural(pending.length, "suggestion")}
+                      </span>
+                      <button type="button" className="btn btn-sm" onClick={reviewNext}>
+                        <span>Review<span className="sm:hidden"> {pending.length}</span></span>
+                      </button>
+                      <button type="button" className="hidden sm:inline-flex btn btn-sm btn-primary" onClick={acceptAll}>Accept all</button>
                     </div>
                   ) : analyzing ? (
-                    <span className="text-xs text-muted">Analyzing against the job…</span>
+                    <span className="text-xs text-muted">
+                      Analyzing<span className="hidden sm:inline"> against the job</span>…
+                    </span>
                   ) : analyzeError ? (
-                    <button type="button" className="btn btn-sm text-bad lg:hidden" onClick={() => setTab("analysis")}>
-                      Analysis failed · details
+                    <button type="button" className="btn btn-sm text-bad lg:hidden" onClick={() => selectTab("analysis")}>
+                      Analysis failed
                     </button>
                   ) : null}
                   <PlaceholderCount count={placeholderCount} onClick={goToPlaceholder} />
-                  <Toggle on={showFeedback} onChange={setShowFeedback} label="Feedback" />
+                  <span className="hidden sm:inline-flex"><Toggle on={showFeedback} onChange={setShowFeedback} label="Feedback" /></span>
+                  {showFeedback && (analysis || changedCount > 0) && (
+                    <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+                  )}
                   <span className="hidden md:inline"><PageCount {...measure} /></span>
                   <div className="ml-auto flex items-center gap-1.5">
-                    {flash && <span role="status" className="text-xs text-good max-w-64">{flash}</span>}
                     <button type="button" className="btn btn-sm btn-primary" onClick={downloadPdf} disabled={pdfBusy}>
-                      {pdfBusy ? "Building…" : "Download PDF"}
+                      {pdfBusy ? "Building…" : <span>Download<span className="hidden sm:inline"> PDF</span></span>}
                     </button>
                     <Menu label="More ▾">
+                      {pending.length > 0 && (
+                        <MenuItem className="sm:hidden" onSelect={acceptAll} hint="Apply every suggested edit (Undo to go back)">
+                          Accept all {plural(pending.length, "suggestion")}
+                        </MenuItem>
+                      )}
                       <MenuItem onSelect={copyText}>Copy as text</MenuItem>
+                      <MenuItem className="sm:hidden" onSelect={() => setShowFeedback((v) => !v)}>
+                        {showFeedback ? "Hide feedback and changes" : "Show feedback and changes"}
+                      </MenuItem>
                       <MenuItem onSelect={makeMaster} hint="Replaces your master resume with this tailored copy (facts are kept)">
                         Save this tailored copy as my master resume…
                       </MenuItem>
@@ -613,36 +742,14 @@ export default function JobPage() {
                     </Menu>
                   </div>
                 </DocToolbar>
-                {pull.total > 0 && (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-sm">
-                    <span className="flex-1 min-w-48">
-                      Your master resume changed since this tailored copy was made.
-                      {pull.skipped > 0 && (
-                        <span className="text-muted"> Bullets you edited here stay as they are.</span>
-                      )}
-                    </span>
-                    <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" onClick={pullFromMaster}>
-                      Pull {pull.total} update{pull.total > 1 ? "s" : ""}
-                    </button>
-                  </div>
-                )}
-                {showFeedback && (analysis || changedCount > 0) && (
-                  <p className="text-xs text-muted px-1 flex flex-wrap gap-x-3 gap-y-1">
-                    {analysis && (
-                      <>
-                        <span><span className="inline-block h-2 w-2 rounded-full bg-[#1f8a4c]" /> strong</span>
-                        <span><span className="inline-block h-2 w-2 rounded-full bg-[#c98a12]" /> okay</span>
-                        <span><span className="inline-block h-2 w-2 rounded-full bg-[#c53030]" /> weak</span>
-                        <span><span className="inline-block h-2 w-2 rounded-full bg-[#9a9a95]" /> updated</span>
-                      </>
-                    )}
-                    <span>
-                      <span className="inline-block h-2.5 w-[3px] rounded bg-[#2f5bd3]" /> changed from master resume
-                      {changedCount ? ` (${changedCount})` : ""}
-                    </span>
-                    <span>Tap a bullet to see feedback and suggested edits.</span>
-                  </p>
-                )}
+                <PullBanner
+                  plan={pull}
+                  onPull={pullFromMaster}
+                  onAdd={addOne}
+                  onAddAll={addAll}
+                  onDismissAdditions={leaveOut}
+                  onRemoval={onRemoval}
+                />
                 <ResumeDocument
                   value={resume}
                   onChange={doc.set}
@@ -690,12 +797,12 @@ export default function JobPage() {
                 <p className="text-sm text-muted flex-1 min-w-48">Only send one if the application asks. Replace every [placeholder] first.</p>
                 {coverPlaceholders > 0 && (
                   <span className="chip border-[#e0b100] bg-[#fff6d6] text-[#5c4300]">
-                    {coverPlaceholders} placeholder{coverPlaceholders > 1 ? "s" : ""} left
+                    {plural(coverPlaceholders, "placeholder")} left
                   </span>
                 )}
                 {job.cover_letter && (
                   <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={copyCoverLetter}>
-                    {flash === "Copied" ? "Copied" : "Copy"}
+                    Copy as text
                   </button>
                 )}
                 <button
@@ -713,8 +820,8 @@ export default function JobPage() {
                   <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={writeCoverLetter}>Retry</button>
                 </div>
               )}
-              <textarea
-                className="input w-full min-h-[50vh] text-sm leading-relaxed"
+              <PlaceholderTextarea
+                boxClassName="input w-full min-h-[50vh] text-sm leading-relaxed"
                 value={job.cover_letter}
                 placeholder="Draft a cover letter, or write your own here."
                 aria-label="Cover letter"
@@ -741,6 +848,7 @@ export default function JobPage() {
         />
       )}
 
+      <FlashToast message={flash} raised={saveState === "error"} onClose={() => setFlash("")} />
       <SaveErrorToast status={saveState} onRetry={retrySaves} />
     </div>
   );

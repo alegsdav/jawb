@@ -6,6 +6,7 @@ import type { Bullet, Item, Resume, Section } from "@/lib/types";
 import { emptyItem, isInlineItem, uid } from "@/lib/resume";
 import { PLACEHOLDER_RE } from "@/lib/facts";
 import type { BulletFeedback, Rating } from "@/lib/analysis";
+import { markPlaceholders } from "./PlaceholderTextarea";
 
 type Props = {
   value: Resume;
@@ -77,11 +78,6 @@ function AutoInput({
       />
     </span>
   );
-}
-
-/** The text with each [placeholder] wrapped in <mark> (for the highlight layer). */
-function markPlaceholders(text: string) {
-  return text.split(/(\[[^\]\n]+\])/g).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
 }
 
 /**
@@ -410,6 +406,8 @@ export function ResumeDocument({
               label="Delete entry"
               danger
               onClick={() => {
+                const name = [item.title, item.subtitle].map((x) => x.trim()).filter(Boolean).join(" — ");
+                if (!confirm(name ? `Delete the "${name}" entry?` : "Delete this entry?")) return;
                 updSection(sid, (s) => ({ ...s, items: s.items.filter((it) => it.id !== item.id) }), true);
                 setActive(null);
               }}

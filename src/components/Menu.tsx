@@ -103,11 +103,87 @@ export function Menu({
   );
 }
 
+/**
+ * Small "?"-style popover: a button and a panel of free content (e.g. a legend). Same dismissal rules
+ * as Menu (outside tap/click, Escape, or the button again), and it flips to stay on screen on phones.
+ */
+export function Popover({
+  label, title, children, buttonClassName = "btn btn-sm", panelClassName = "w-64",
+}: {
+  label: React.ReactNode;
+  /** Accessible name for the button (e.g. "What the colors mean"). */
+  title: string;
+  children: React.ReactNode;
+  buttonClassName?: string;
+  panelClassName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [alignLeft, setAlignLeft] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const id = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        button.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrap} className="relative">
+      <button
+        ref={button}
+        type="button"
+        className={buttonClassName}
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        aria-label={title}
+        title={title}
+        onClick={() => {
+          if (open) return setOpen(false);
+          const r = button.current?.getBoundingClientRect();
+          setAlignLeft(!!r && r.right < 272);
+          setOpen(true);
+        }}
+      >
+        {label}
+      </button>
+      {open && (
+        <div
+          id={id}
+          role="dialog"
+          aria-label={title}
+          className={`absolute z-40 mt-1 max-w-[calc(100vw-1.5rem)] rounded-xl border border-border bg-surface p-3 text-sm shadow-lg ${panelClassName} ${
+            alignLeft ? "left-0" : "right-0"
+          }`}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MenuItem({
-  onSelect, children, hint, danger, disabled,
+  onSelect, children, hint, danger, disabled, className = "",
 }: {
   onSelect: () => void;
   children: React.ReactNode;
+  /** Extra classes, e.g. "sm:hidden" for an item that only phones need (desktop has a button for it). */
+  className?: string;
   /** Secondary line under the label. */
   hint?: React.ReactNode;
   danger?: boolean;
@@ -125,7 +201,7 @@ export function MenuItem({
       }}
       className={`block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 focus:bg-black/5 focus:outline-none active:bg-black/10 disabled:opacity-50 dark:hover:bg-white/10 dark:focus:bg-white/10 ${
         danger ? "text-bad" : ""
-      }`}
+      } ${className}`}
     >
       {children}
       {hint && <span className="block text-xs text-muted">{hint}</span>}

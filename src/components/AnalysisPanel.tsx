@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Analysis } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { suggestFill } from "@/lib/analysis";
@@ -17,10 +17,18 @@ type Props = {
   /** When set, analysis can't run yet; shown in place of the usual blurb and the button is disabled. */
   disabledReason?: string;
   /**
-   * Store the answers on the analysis and update the master resume's facts.
-   * Resolves true when facts were written to the master; rejects on failure.
+   * What's typed in each answer box, by question id (kept by the page so a re-analysis can't wipe it).
+   * Starts as the stored answers.
    */
-  onSaveAnswers: (answers: Record<string, string>) => Promise<boolean>;
+  drafts: Record<string, string>;
+  onDraftsChange: (drafts: Record<string, string>) => void;
+  /**
+   * Write the answers' facts to the master resume, then store the answers on the analysis.
+   * `error` is a plain-language sentence. Never rejects.
+   */
+  onSaveAnswers: (answers: Record<string, string>) => Promise<{ ok: true; added: number } | { ok: false; error: string }>;
+  /** Ids of answered questions whose fact isn't on the master resume yet (e.g. an earlier save failed there). */
+  missingFacts: string[];
   /** Suggested edits still waiting (stale ones excluded). */
   pendingCount: number;
   onReview: () => void;
@@ -60,37 +68,39 @@ function FillRow({ q, answer, onFill }: { q: Question; answer: string; onFill: (
 export function AnalysisPanel(p: Props) {
   const a = p.analysis;
   const fit = fitOf(a);
-  const [answers, setAnswers] = useState<Record<string, string>>(a?.answers ?? {});
+  const answers = p.drafts;
   const [savedNote, setSavedNote] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [lastAnalyzed, setLastAnalyzed] = useState(a?.analyzed_at);
-  if (a?.analyzed_at !== lastAnalyzed) {
-    // New analysis arrived: sync the answer drafts with what's stored.
-    setLastAnalyzed(a?.analyzed_at);
-    setAnswers(a?.answers ?? {});
-  }
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const unanswered = a?.questions.filter((q) => !a.answers?.[q.id]?.trim()) ?? [];
   const answered = a?.questions.filter((q) => a.answers?.[q.id]?.trim()) ?? [];
   const norm = (r: Record<string, string> | undefined) =>
     JSON.stringify(Object.entries(r ?? {}).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v).sort());
   const dirty = norm(answers) !== norm(a?.answers);
+  // Saved on the job but not (yet) on the master: saving again repairs it.
+  const missing = p.missingFacts.length;
+  const canSave = (dirty || missing > 0) && !saving;
 
   async function save() {
     setSaving(true);
-    try {
-      const toFacts = await p.onSaveAnswers(answers);
-      setSavedNote(toFacts ? "Saved to your master resume's facts. Re-analyze to use them." : "Saved.");
-    } catch (e) {
-      setSavedNote(`Couldn't save: ${e instanceof Error ? e.message : "try again"}`);
-    }
+    const res = await p.onSaveAnswers(answers);
     setSaving(false);
-    setTimeout(() => setSavedNote(""), 6000);
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    if (!res.ok) {
+      setSavedNote("");
+      setSaveError(res.error); // stays until a save works
+      return;
+    }
+    setSaveError("");
+    setSavedNote(res.added ? "Saved to your master resume's facts. Re-analyze to use them." : "Saved.");
+    noteTimer.current = setTimeout(() => setSavedNote(""), 6000);
   }
 
   function fill(q: Question, value: string) {
     p.onFill?.(q, value);
-    if (dirty) void save(); // keep the answer too, so other jobs can use it
+    if (dirty || missing) void save(); // keep the answer too, so other jobs can use it
   }
 
   const field = (q: Question) => {
@@ -102,7 +112,7 @@ export function AnalysisPanel(p: Props) {
         <textarea
           className="input w-full h-16 text-sm"
           value={answer}
-          onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
+          onChange={(e) => p.onDraftsChange({ ...answers, [q.id]: e.target.value })}
           placeholder="Your answer (rough is fine; numbers help)"
           aria-label={q.question}
         />
@@ -113,10 +123,34 @@ export function AnalysisPanel(p: Props) {
 
   const saveRow = (
     <div className="flex flex-wrap items-center gap-2">
-      <button className="btn btn-sm min-h-10 sm:min-h-0" disabled={!dirty || saving} onClick={save}>
+      <button className="btn btn-sm min-h-10 sm:min-h-0" disabled={!canSave} onClick={save}>
         {saving ? "Saving…" : "Save answers"}
       </button>
       {dirty && !saving && <span className="text-xs text-muted">Unsaved answers</span>}
+    </div>
+  );
+
+  const errorBox = saveError && !saving && (
+    <div role="alert" className="card border-bad/40 bg-bad-bg p-3 text-sm space-y-2">
+      <p className="text-bad">
+        <strong>Your answers aren&apos;t saved yet.</strong> {saveError}
+      </p>
+      <p className="text-xs text-muted">They&apos;re still in the boxes below. Nothing is lost while this page is open.</p>
+      <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={save}>
+        Retry
+      </button>
+    </div>
+  );
+
+  const missingBox = missing > 0 && !dirty && !saveError && !saving && (
+    <div role="status" className="card border-ok/40 bg-ok-bg p-3 text-sm space-y-2">
+      <p>
+        {missing === 1 ? "1 answer isn't" : `${missing} answers aren't`} in your master resume&apos;s facts yet, so other jobs
+        can&apos;t use {missing === 1 ? "it" : "them"}.
+      </p>
+      <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={save}>
+        Save answers
+      </button>
     </div>
   );
 
@@ -171,6 +205,7 @@ export function AnalysisPanel(p: Props) {
 
       {a && (
         <>
+          {errorBox}
           {unanswered.length > 0 && (
             <div className="card p-4 space-y-3 border-accent">
               <h3 className="label text-accent">Questions for you</h3>
@@ -181,10 +216,11 @@ export function AnalysisPanel(p: Props) {
           )}
           {/* Outside the questions card: once everything is answered that card goes away. */}
           {savedNote && (
-            <p role="status" className={`card px-4 py-3 text-sm ${savedNote.startsWith("Couldn't") ? "text-bad" : "text-good"}`}>
+            <p role="status" className="card px-4 py-3 text-sm text-good">
               {savedNote}
             </p>
           )}
+          {missingBox}
 
           {answered.length > 0 && (
             <details className="card p-4 text-sm">
