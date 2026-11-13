@@ -3,14 +3,13 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { isAllowedEmail } from "@/lib/supabase/allowlist";
 
 type State = { message: string; ok?: boolean };
 
 function checkAllowed(email: string): string | null {
-  const allowed = (process.env.ALLOWED_EMAILS ?? "")
-    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
   if (!email) return "Enter your email.";
-  if (allowed.length && !allowed.includes(email)) return "That email isn't allowed to sign in.";
+  if (!isAllowedEmail(email)) return "That email isn't allowed to sign in.";
   return null;
 }
 

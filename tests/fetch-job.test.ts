@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchJobFromUrl, htmlToText } from "@/lib/fetch-job";
 
+// Every hostname resolves to a public address here (the SSRF guard looks hosts up before fetching).
+vi.mock("node:dns", () => {
+  const promises = { lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]) };
+  return { promises, default: { promises } };
+});
+
 type Route = (url: string) => Response | undefined;
 let routes: Route[] = [];
 const fetchMock = vi.fn(async (input: string | URL | Request) => {
