@@ -3,7 +3,7 @@
 A small, single-user web app for applying to internships and jobs:
 
 1. **Master resume**: a Google-Docs-style editor that shows your resume as a one-page Harvard-format document (Times, letter size, page-break guide). Import a PDF or pasted text; undo/redo with Ctrl/⌘+Z.
-2. **Bullet bank**: extra facts, numbers and bullets that don't fit on one page. The analyzer pulls from it per job.
+2. **Bullet bank**: fills itself with every bullet from your uploaded resume and every suggested rewrite you accept (always appended, never overwritten). Each job's **Bullets** tab also generates strong, role-specific example bullets modeled on your experience; their numbers are mock values in `[brackets]`, highlighted, and the PDF export warns if any are left in.
 3. **Add a job**: paste a link (Greenhouse, Lever, Ashby and other JSON-LD pages fetch automatically) or paste/drop the description.
 4. **Job workspace**: each job gets its own tailored copy of the master, analyzed automatically on first open. Bullets are highlighted strong/okay/weak; suggested rewrites appear as tracked changes (accept/reject one by one or all at once), edits are marked against the master, and the panel shows fit score, missing keywords, gaps and questions about numbers it needs from you.
 5. **Export**: ATS-friendly one-page PDF, plain-text copy, and an optional cover letter draft.

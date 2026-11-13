@@ -13,8 +13,10 @@ import { StatusSelect, applyDates, FitBadge } from "@/components/StatusSelect";
 import { DocToolbar, PageCount, Toggle, UndoRedo } from "@/components/DocToolbar";
 import { SaveStatus, useAutosave } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
+import { addToBank, isExample } from "@/lib/bank";
+import { JobBullets } from "@/components/JobBullets";
 
-type Tab = "resume" | "analysis" | "job" | "cover";
+type Tab = "resume" | "analysis" | "bullets" | "job" | "cover";
 
 export default function JobPage() {
   const { id } = useParams<{ id: string }>();
@@ -154,9 +156,24 @@ export default function JobPage() {
     persistAnalysis({ ...analysis, dismissed: [...(analysis.dismissed ?? []), bulletId] });
   }
 
+  /** Accepted rewrites are added to the bank as new bullets (existing bank entries are never changed). */
+  function saveAccepted(rows: { text: string; entryTitle: string }[]) {
+    addToBank(
+      supabase,
+      rows.map((r) => ({ source: r.entryTitle || job?.company || "Accepted", text: r.text, tags: ["accepted", `job:${id}`] })),
+    )
+      .then((added) => added.length && setBank((b) => [...b, ...added]))
+      .catch(() => {});
+  }
+
   function acceptAll() {
     if (!resume || !pending.length) return;
     const map = new Map(pending.map((p) => [p.id, p.rewrite]));
+    saveAccepted(
+      resume.sections.flatMap((s) =>
+        s.items.flatMap((it) => it.bullets.filter((b) => map.has(b.id)).map((b) => ({ text: map.get(b.id)!, entryTitle: it.title }))),
+      ),
+    );
     doc.set(
       {
         ...resume,
@@ -259,7 +276,7 @@ export default function JobPage() {
       onAnalyze={analyze}
       onSaveAnswers={saveAnswers}
       onAnswerToBank={answerToBank}
-      bank={bank}
+      bank={bank.filter((b) => !isExample(b))}
       resume={resume}
       onInsertBullet={insertBullet}
       pendingCount={pending.length}
@@ -314,6 +331,7 @@ export default function JobPage() {
           [
             ["resume", "Tailored resume"],
             ["analysis", "Analysis"],
+            ["bullets", "Bullets"],
             ["job", "Job description"],
             ["cover", "Cover letter"],
           ] as const
@@ -382,8 +400,22 @@ export default function JobPage() {
                 onReject={rejectSuggestion}
                 onMeasure={setMeasure}
                 actionsSlot={slot}
+                onAccept={(text, entryTitle) => saveAccepted([{ text, entryTitle }])}
               />
             </>
+          )}
+          {tab === "bullets" && (
+            <JobBullets
+              jobId={id}
+              roleLabel={[job.title, job.company].filter(Boolean).join(" at ")}
+              bank={bank}
+              onBankChange={setBank}
+              resume={resume}
+              onInsertBullet={(itemId, text) => {
+                insertBullet(itemId, text);
+              }}
+              recommended={(analysis?.bank_suggestions ?? []).map((b) => b.bank_id)}
+            />
           )}
           {tab === "job" && (
             <div className="card p-4 space-y-3">

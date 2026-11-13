@@ -6,6 +6,7 @@ import { normalizeResume, resumeToPromptText } from "@/lib/resume";
 import type { Analysis } from "@/lib/types";
 import { formatAnswers } from "@/lib/answers";
 import { normalizeAnalysis } from "@/lib/analysis";
+import { isExample } from "@/lib/bank";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
   const [{ data: job }, { data: resume }, { data: bank }] = await Promise.all([
     supabase.from("jobs").select("*").eq("id", jobId).single(),
     supabase.from("resumes").select("content").eq("job_id", jobId).maybeSingle(),
-    supabase.from("bullets").select("id, source, text").order("created_at"),
+    supabase.from("bullets").select("id, source, text, tags").order("created_at"),
   ]);
   if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
   if (!resume) return NextResponse.json({ error: "No tailored resume for this job yet" }, { status: 400 });
@@ -29,7 +30,8 @@ export async function POST(req: Request) {
       analyzePrompt({
         resume: resumeToPromptText(normalizeResume(resume.content)),
         job: `${job.title} at ${job.company} (${job.location})\n\n${job.description}`,
-        bank: (bank ?? []).map((b) => `[bank:${b.id}] (${b.source}) ${b.text}`).join("\n"),
+        // Only the user's own bullets; AI examples contain mock numbers and aren't real claims.
+        bank: (bank ?? []).filter((b) => !isExample(b)).map((b) => `[bank:${b.id}] (${b.source}) ${b.text}`).join("\n"),
         answers: formatAnswers(prev),
       }),
     ));

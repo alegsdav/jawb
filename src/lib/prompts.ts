@@ -112,3 +112,39 @@ RESUME TEXT:
 ${text.slice(0, 15000)}
 """`}`;
 }
+
+export function exampleBulletsPrompt(args: { job: string; entries: string; resume: string; mine: string }) {
+  return `You are an expert tech recruiter. Write EXAMPLE resume bullets showing what a top-tier candidate's bullets
+look like for this specific job, modeled on this candidate's real experiences. They are inspiration for the candidate,
+clearly labeled as examples, not claims.
+
+JOB POSTING:
+"""
+${args.job.slice(0, 12000)}
+"""
+
+CANDIDATE'S RESUME ENTRIES (tagged [entry:ID]):
+${args.entries}
+
+FULL RESUME:
+"""
+${args.resume}
+"""
+
+CANDIDATE'S OWN BULLET BANK (facts they've written; may be empty):
+"""
+${args.mine || "(empty)"}
+"""
+
+Rules:
+- Write 8-10 bullets total. Cover each entry that is relevant to this job (1-2 bullets each); skip irrelevant ones.
+- Stay close to what the candidate actually did at each entry (same organization, domain and tools), but phrase it the
+  way the strongest applicant for THIS role would, using the posting's language and priorities.
+- EVERY number, metric, count, percentage or scale MUST be a mock example wrapped in square brackets, e.g. "[40%]",
+  "[12K+ records]", "[3 teams]", "[~200 ms]". Pick values that are strong but realistic for a student intern.
+- One line each (~20-28 words), strong past-tense verb first, what + how (tools) + measurable result.
+- No first person, no fluff ("responsible for", "helped with").
+
+Return ONLY JSON:
+{ "examples": [ { "entry_id": "ID from [entry:ID], or \\"\\" if it fits no entry", "text": "bullet", "why": "one short phrase on what makes it strong for this role" } ] }`;
+}

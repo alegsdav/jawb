@@ -15,6 +15,7 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Analysis, Bullet, Item, Resume, Section } from "@/lib/types";
 import { emptyItem, isInlineItem, uid } from "@/lib/resume";
+import { hasMock } from "@/lib/bank";
 
 type Feedback = Analysis["bullets"][number];
 
@@ -35,6 +36,8 @@ type Props = {
   onMeasure?: (m: { pages: number; overflowLines: number }) => void;
   /** Element in the page toolbar where contextual actions (move/delete) render. */
   actionsSlot?: HTMLElement | null;
+  /** Called when the user accepts a suggested rewrite (so it can be saved to the bullet bank). */
+  onAccept?: (text: string, entryTitle: string) => void;
 };
 
 /** What's selected, by id (indexes would go stale after a drag). */
@@ -219,6 +222,7 @@ const isField = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, rejected, onReject, onMeasure, actionsSlot,
+  onAccept,
 }: Props) {
   const [active, setActive] = useState<Active>(null);
   const focusNext = useRef<string | null>(null);
@@ -518,7 +522,8 @@ export function ResumeDocument({
     const isNew = !!baseline && original === undefined;
     const changed = !!baseline && original !== undefined && original !== b.text;
     const suggestion = fb?.rewrite && fb.rewrite.trim() !== b.text.trim() && !rejected?.has(b.id) ? fb.rewrite : "";
-    const tint = showHighlights && fb ? RATING[fb.rating].tint : "";
+    const mock = hasMock(b.text);
+    const tint = showHighlights && fb ? RATING[fb.rating].tint : mock ? "bg-[#fff6d6]" : "";
     const replace = (text: string) => setBullets(sid, item.id, item.bullets.map((x) => (x.id === b.id ? { ...x, text } : x)), true);
 
     return (
@@ -569,8 +574,13 @@ export function ResumeDocument({
         </div>
 
         {/* Comment card for the selected bullet */}
-        {isActive && (fb || changed || isNew) && (
+        {isActive && (fb || changed || isNew || mock) && (
           <div data-no-drag className="doc-ui doc-comment">
+            {mock && (
+              <p className="mb-2 rounded bg-[#fff6d6] px-2 py-1 text-[#5c4300]">
+                Contains example values in [brackets]. Replace them with your real numbers (or remove them) before sending.
+              </p>
+            )}
             {fb && (
               <p>
                 <span className={`font-semibold ${RATING[fb.rating].text}`}>{RATING[fb.rating].label}.</span> {fb.note}
@@ -586,7 +596,10 @@ export function ResumeDocument({
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     className="rounded-md bg-[#2f5bd3] px-3 py-1.5 text-xs font-medium text-white"
-                    onClick={() => replace(suggestion)}
+                    onClick={() => {
+                      replace(suggestion);
+                      onAccept?.(suggestion, item.title);
+                    }}
                   >
                     ✓ Accept
                   </button>

@@ -3,12 +3,18 @@
 import { useState } from "react";
 import type { Resume } from "@/lib/types";
 import { resumeToPlainText } from "@/lib/resume";
+import { countMocks } from "@/lib/bank";
 
 export function ResumeActions({ resume, fileName }: { resume: Resume; fileName: string }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
   async function downloadPdf() {
+    const texts = [resume.header.name, resume.header.contact, ...resume.sections.flatMap((sec) => [
+      sec.title, ...sec.items.flatMap((it) => [it.title, it.subtitle, it.location, it.dates, ...it.bullets.map((b) => b.text)]),
+    ])];
+    const mocks = countMocks(texts);
+    if (mocks && !confirm(`This resume still has ${mocks} [bracketed] example value${mocks > 1 ? "s" : ""}. Download anyway?`)) return;
     setBusy(true);
     try {
       const [{ pdf }, { ResumePdf }] = await Promise.all([import("@react-pdf/renderer"), import("./ResumePdf")]);

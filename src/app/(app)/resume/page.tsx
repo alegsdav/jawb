@@ -10,6 +10,7 @@ import { DocToolbar, PageCount, UndoRedo } from "@/components/DocToolbar";
 import { ResumeImport } from "@/components/ResumeImport";
 import { SaveStatus, useAutosave } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
+import { addToBank, bulletsFromResume } from "@/lib/bank";
 
 export default function MasterResumePage() {
   const supabase = createClient();
@@ -17,6 +18,7 @@ export default function MasterResumePage() {
   const doc = useHistory<Resume>();
   const resume = doc.value;
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
@@ -57,6 +59,10 @@ export default function MasterResumePage() {
   const onImported = (r: Resume) => {
     doc.set(r, true);
     setImportOpen(false);
+    // Every bullet from an uploaded resume goes into the bank too (duplicates are skipped).
+    addToBank(supabase, bulletsFromResume(r))
+      .then((added) => setNote(added.length ? `Added ${added.length} bullet${added.length > 1 ? "s" : ""} to your bullet bank.` : ""))
+      .catch(() => setNote("Couldn't copy bullets to your bank."));
   };
 
   return (
@@ -104,6 +110,7 @@ export default function MasterResumePage() {
             </div>
           )}
           {error && <p className="text-sm text-bad">{error}</p>}
+      {note && <p className="text-sm text-good">{note}</p>}
 
           <p className="text-xs text-muted px-1">
             Click any line to edit. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it.
