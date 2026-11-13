@@ -3,9 +3,17 @@ import type { Resume } from "@/lib/types";
 
 const h = vi.hoisted(() => ({
   updateError: null as null | { message: string },
-  updates: [] as { table: string; values: Record<string, unknown> }[],
+  updates: [] as { table: string; values: Record<string, unknown>; ifUpdatedAt: unknown; matched: boolean }[],
   gemini: { json: null as unknown, text: "" },
+  /** The job row; updates only land when `updated_at` still matches (like the real conditional write). */
+  job: {} as Record<string, unknown>,
+  /** Runs before the next update lands (another device writing while the AI ran). */
+  before: null as null | (() => void),
 }));
+let clock = 1;
+const freshJob = () => ({
+  id: "j1", title: "Intern", company: "Acme", location: "NYC", description: "Founded in 2010, 50 engineers.", analysis: null, updated_at: "t1",
+});
 
 const tailored: Resume = {
   version: 2,
@@ -34,10 +42,15 @@ function fakeSupabase() {
         then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => {
           let out: unknown;
           if (values) {
-            h.updates.push({ table, values });
-            out = { data: null, error: h.updateError };
+            const run = h.before;
+            h.before = null;
+            run?.();
+            const matched = !h.updateError && filters.updated_at === h.job.updated_at;
+            h.updates.push({ table, values, ifUpdatedAt: filters.updated_at, matched });
+            if (matched) Object.assign(h.job, values, { updated_at: `t${++clock}` });
+            out = { data: h.updateError ? null : matched ? [{ updated_at: h.job.updated_at }] : [], error: h.updateError };
           } else if (table === "jobs") {
-            out = { data: { id: "j1", title: "Intern", company: "Acme", location: "NYC", description: "Founded in 2010, 50 engineers.", analysis: null }, error: null };
+            out = { data: { ...h.job }, error: null };
           } else if (filters.is_master) {
             out = { data: { content: { ...tailored, facts: ["Saved $1,200 a month (re: savings?)"] } }, error: null };
           } else {
@@ -67,6 +80,8 @@ const req = (body: unknown) => new Request("http://x/api", { method: "POST", bod
 beforeEach(() => {
   h.updateError = null;
   h.updates = [];
+  h.job = freshJob();
+  h.before = null;
 });
 
 describe("POST /api/analyze", () => {
@@ -97,6 +112,43 @@ describe("POST /api/analyze", () => {
     expect(body.analysis.bullets).toHaveLength(1);
   });
 
+  it("writes only over the row it read", async () => {
+    await analyze(req({ jobId: "j1" }));
+    expect(h.updates.map((u) => [u.ifUpdatedAt, u.matched])).toEqual([["t1", true]]);
+  });
+
+  it("an answer given on another device while the AI ran is kept: re-read, merge, write once more", async () => {
+    const phoneAnalysis = {
+      fit: "possible",
+      verdict: "",
+      questions: [{ id: "q1", question: "How many users?", why: "" }],
+      answers: { q1: "300" },
+    };
+    h.before = () => Object.assign(h.job, { analysis: phoneAnalysis, updated_at: "t-phone" });
+    const body = await (await analyze(req({ jobId: "j1" }))).json();
+    expect(h.updates.map((u) => [u.ifUpdatedAt, u.matched])).toEqual([
+      ["t1", false],
+      ["t-phone", true],
+    ]);
+    expect(body.saved).toBe(true);
+    expect(body.analysis.answers).toEqual({ q1: "300" });
+    expect(body.analysis.questions.map((q: { id: string }) => q.id)).toContain("q1");
+    expect((h.job.analysis as { answers: unknown }).answers).toEqual({ q1: "300" });
+  });
+
+  it("gives up after one retry and returns saved: false (the page stores it, merging)", async () => {
+    let n = 0;
+    const bump = () => Object.assign(h.job, { updated_at: `elsewhere${++n}` });
+    h.before = () => {
+      bump();
+      h.before = bump;
+    };
+    const body = await (await analyze(req({ jobId: "j1" }))).json();
+    expect(body.saved).toBe(false);
+    expect(h.updates).toHaveLength(2);
+    expect(h.updates.every((u) => !u.matched)).toBe(true);
+  });
+
   it("errors are plain language", async () => {
     const res = await analyze(req({}));
     expect(res.status).toBe(400);
@@ -114,5 +166,15 @@ describe("POST /api/cover-letter", () => {
       "Dear [Hiring Manager],\n\nAcme was founded in 2010 and has 50 engineers. I built a tool for 300 students and grew it [N]x to [N2] users. I'd join [N3] engineers who ship weekly.",
     );
     expect(body.saved).toBe(true);
+    expect(h.updates.map((u) => [u.ifUpdatedAt, u.matched])).toEqual([["t1", true]]);
+  });
+
+  it("doesn't overwrite a row changed meanwhile: saved: false, the page autosaves the letter", async () => {
+    h.gemini.text = "Dear [Hiring Manager],\n\nThanks.";
+    h.before = () => Object.assign(h.job, { cover_letter: "edited on the phone", updated_at: "t-phone" });
+    const body = await (await coverLetter(req({ jobId: "j1" }))).json();
+    expect(body.saved).toBe(false);
+    expect(body.cover_letter).toBe("Dear [Hiring Manager],\n\nThanks.");
+    expect(h.job.cover_letter).toBe("edited on the phone");
   });
 });

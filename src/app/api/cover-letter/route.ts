@@ -46,10 +46,20 @@ export async function POST(req: Request) {
       candidate: [...bulletTextMap(tailored).values(), ...(facts ?? []), ...Object.values(prev?.answers ?? {})],
       posting,
     });
-    const { error: saveError } = await supabase.from("jobs").update({ cover_letter: letter }).eq("id", jobId);
-    // The page also autosaves the letter it receives, so a failed write here isn't lost.
-    if (saveError) console.error("cover-letter: saving result failed:", saveError.message);
-    return NextResponse.json({ cover_letter: letter, saved: !saveError });
+    // Save only over the row as it was read; if it changed meanwhile (another device), `saved: false` and the
+    // page stores the letter itself through its conditional autosave, so nothing is overwritten blindly.
+    let saved = false;
+    if (typeof job.updated_at === "string") {
+      const { data: rows, error: saveError } = await supabase
+        .from("jobs")
+        .update({ cover_letter: letter })
+        .eq("id", jobId)
+        .eq("updated_at", job.updated_at)
+        .select("updated_at");
+      if (saveError) console.error("cover-letter: saving result failed:", saveError.message);
+      saved = !saveError && !!rows?.length;
+    }
+    return NextResponse.json({ cover_letter: letter, saved });
   } catch (e) {
     console.error("cover-letter failed:", e);
     return NextResponse.json({ error: friendlyError(e, "The cover letter couldn't be drafted. Try again in a minute.") }, { status: 502 });

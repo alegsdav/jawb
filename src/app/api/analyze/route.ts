@@ -55,10 +55,34 @@ export async function POST(req: Request) {
     // unit); anything else becomes a [placeholder] + a question.
     const answerValues = Object.values(prev?.answers ?? {}).filter((v) => v.trim());
     const honest = guardAnalysisNumbers(rated, [...(facts ?? []), ...answerValues], bulletTextMap(tailored));
-    const analysis = mergeAnalysis(prev, honest, new Date());
-    const { error: saveError } = await supabase.from("jobs").update({ analysis }).eq("id", jobId);
-    if (saveError) console.error("analyze: saving result failed:", saveError.message);
-    return NextResponse.json({ analysis, saved: !saveError });
+    const now = new Date();
+    let analysis = mergeAnalysis(prev, honest, now);
+    // Save only over the row as it was read. If it changed while the AI ran (answers given on another
+    // device), re-read it, carry its answers over and try once more; otherwise `saved: false` and the
+    // page stores the result itself (conditionally, merging with what's there).
+    let saved = false;
+    let known: string | null = typeof job.updated_at === "string" ? job.updated_at : null;
+    for (let attempt = 0; attempt < 2 && known; attempt++) {
+      const { data: rows, error: saveError } = await supabase
+        .from("jobs")
+        .update({ analysis })
+        .eq("id", jobId)
+        .eq("updated_at", known)
+        .select("updated_at");
+      if (saveError) {
+        console.error("analyze: saving result failed:", saveError.message);
+        break;
+      }
+      if (rows?.length) {
+        saved = true;
+        break;
+      }
+      const { data: latest, error: readError } = await supabase.from("jobs").select("analysis, updated_at").eq("id", jobId).maybeSingle();
+      if (readError || !latest) break;
+      known = typeof latest.updated_at === "string" ? latest.updated_at : null;
+      analysis = mergeAnalysis(latest.analysis ? normalizeAnalysis(latest.analysis as Analysis) : null, honest, now);
+    }
+    return NextResponse.json({ analysis, saved });
   } catch (e) {
     console.error("analyze failed:", e);
     return NextResponse.json({ error: friendlyError(e, "The analysis failed. Try again in a minute.") }, { status: 502 });
