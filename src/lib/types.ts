@@ -23,6 +23,11 @@ export type Resume = {
   version?: number;
   header: { name: string; contact: string };
   sections: Section[];
+  /**
+   * Master only: true facts about the candidate that don't fit on the page (numbers, tools, extra
+   * projects, answers to analysis questions). Never rendered or exported to PDF; fed to the AI as context.
+   */
+  facts?: string[];
 };
 
 export type JobStatus = "to_apply" | "applied" | "interview" | "offer" | "rejected" | "skipped";
@@ -36,14 +41,18 @@ export const STATUSES: { value: JobStatus; label: string }[] = [
   { value: "skipped", label: "Skipped" },
 ];
 
+/** Coarse fit bucket. A 0-100 score isn't calibrated or stable, so the UI only shows this. */
+export type Fit = "strong" | "possible" | "stretch";
+
 export type Analysis = {
-  fit_score: number;
+  fit: Fit;
+  /** @deprecated old analyses stored a number; normalizeAnalysis maps it to `fit`. */
+  fit_score?: number;
   verdict: string;
   keywords: { matched: string[]; missing: string[] };
   strengths: string[];
   gaps: { issue: string; severity: "high" | "medium" | "low"; fix: string }[];
   bullets: { bullet_id: string; rating: "strong" | "ok" | "weak"; note: string; rewrite: string }[];
-  bank_suggestions: { bank_id: string; reason: string }[];
   questions: { id: string; question: string; why: string }[];
   answers?: Record<string, string>;
   /** Bullet ids whose suggested rewrite the user rejected. */
@@ -64,16 +73,15 @@ export type Job = {
   notes: string;
   analysis: Analysis | null;
   cover_letter: string;
+  /** Application deadline (migration 0002). */
+  deadline: string | null;
+  /** Frozen copy of the tailored resume when the job was marked Applied (migration 0002). */
+  submitted_resume: Resume | null;
+  submitted_at: string | null;
+  /** Whether the submitted resume differed from the master at submit time (for outcome stats). */
+  submitted_tailored: boolean | null;
   created_at: string;
   updated_at: string;
-};
-
-export type BankBullet = {
-  id: string;
-  source: string;
-  text: string;
-  tags: string[];
-  created_at: string;
 };
 
 export type ResumeRow = {

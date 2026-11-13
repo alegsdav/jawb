@@ -32,6 +32,7 @@ export function normalizeResume(raw: unknown): Resume {
       name: r.header?.name ?? "",
       contact: r.header?.contact ?? "",
     },
+    ...(Array.isArray(r.facts) ? { facts: r.facts.filter((f): f is string => typeof f === "string") } : {}),
     sections: (r.sections ?? []).map((s) => ({
       id: s.id || uid(),
       title: s.title ?? "",
@@ -95,6 +96,17 @@ export function bulletTextMap(r: Resume): Map<string, string> {
   const m = new Map<string, string>();
   for (const s of r.sections) for (const it of s.items) for (const b of it.bullets) m.set(b.id, b.text);
   return m;
+}
+
+/**
+ * After a re-import, carry ids over from the previous version wherever content matches, so
+ * "Changes vs master" in existing jobs keeps meaning something. Sections match by title,
+ * items by title (+subtitle), bullets by identical text first and then by closest wording.
+ * TODO(worker A): implement; currently returns `next` unchanged.
+ */
+export function reconcileIds(prev: Resume, next: Resume): Resume {
+  void prev;
+  return next;
 }
 
 export function wordCount(r: Resume): number {
