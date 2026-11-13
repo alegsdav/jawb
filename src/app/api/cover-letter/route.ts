@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { geminiText } from "@/lib/gemini";
 import { coverLetterPrompt, formatFacts } from "@/lib/prompts";
-import { normalizeResume, resumeToPlainText } from "@/lib/resume";
+import { bulletTextMap, normalizeResume, resumeToPlainText } from "@/lib/resume";
 import { formatAnswers } from "@/lib/answers";
-import { guardNumbers, normalizeAnalysis } from "@/lib/analysis";
+import { guardCoverLetter, normalizeAnalysis } from "@/lib/analysis";
 import { friendlyError } from "@/lib/api";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
@@ -29,17 +29,23 @@ export async function POST(req: Request) {
   }
   if (!job || !resume) return NextResponse.json({ error: "This job or its tailored copy no longer exists. Reload the page." }, { status: 404 });
 
-  const resumeText = resumeToPlainText(normalizeResume(resume.content));
+  const tailored = normalizeResume(resume.content);
+  const resumeText = resumeToPlainText(tailored);
   const facts = master ? normalizeResume(master.content).facts : undefined;
-  const answers = formatAnswers(job.analysis ? normalizeAnalysis(job.analysis) : null);
+  const prev = job.analysis ? normalizeAnalysis(job.analysis) : null;
+  const answers = formatAnswers(prev);
   const posting = `${job.title} at ${job.company} (${job.location})\n\n${job.description}`;
   try {
     const raw = await geminiText(
       coverLetterPrompt({ resume: resumeText, job: posting, facts: formatFacts(facts), answers }),
       { temperature: 0.6 },
     );
-    // Honesty: numbers must come from the resume, facts, answers or the posting itself (company details).
-    const letter = guardNumbers(raw.trim(), [resumeText, ...(facts ?? []), answers, posting]).text;
+    // Honesty: numbers about the candidate must come from the resume's bullets, the facts or the answers.
+    // Posting numbers are kept only in sentences that restate the posting (no "I", "my", "we").
+    const letter = guardCoverLetter(raw.trim(), {
+      candidate: [...bulletTextMap(tailored).values(), ...(facts ?? []), ...Object.values(prev?.answers ?? {})],
+      posting,
+    });
     const { error: saveError } = await supabase.from("jobs").update({ cover_letter: letter }).eq("id", jobId);
     // The page also autosaves the letter it receives, so a failed write here isn't lost.
     if (saveError) console.error("cover-letter: saving result failed:", saveError.message);

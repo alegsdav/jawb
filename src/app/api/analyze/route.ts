@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { geminiJSON } from "@/lib/gemini";
 import { analyzePrompt, formatFacts } from "@/lib/prompts";
-import { normalizeResume, resumeToPlainText, resumeToPromptText } from "@/lib/resume";
+import { bulletTextMap, normalizeResume, resumeToPromptText } from "@/lib/resume";
 import type { Analysis } from "@/lib/types";
 import { formatAnswers } from "@/lib/answers";
 import { attachOriginals, guardAnalysisNumbers, mergeAnalysis, normalizeAnalysis } from "@/lib/analysis";
@@ -49,10 +49,13 @@ export async function POST(req: Request) {
         }),
       ),
     );
-    // Honesty: a number in a rewrite that the candidate never gave becomes a [placeholder] + a question.
-    const honest = guardAnalysisNumbers(fresh, [resumeToPlainText(tailored), ...(facts ?? []), answers]);
     // Remember what each bullet said when it was rated, so the page can hide feedback once it's edited.
-    const analysis = attachOriginals(mergeAnalysis(prev, honest, new Date()), tailored);
+    const rated = attachOriginals(fresh, tailored);
+    // Honesty: a number in a rewrite must be in that bullet's own text, the facts or the answers (same
+    // unit); anything else becomes a [placeholder] + a question.
+    const answerValues = Object.values(prev?.answers ?? {}).filter((v) => v.trim());
+    const honest = guardAnalysisNumbers(rated, [...(facts ?? []), ...answerValues], bulletTextMap(tailored));
+    const analysis = mergeAnalysis(prev, honest, new Date());
     const { error: saveError } = await supabase.from("jobs").update({ analysis }).eq("id", jobId);
     if (saveError) console.error("analyze: saving result failed:", saveError.message);
     return NextResponse.json({ analysis, saved: !saveError });

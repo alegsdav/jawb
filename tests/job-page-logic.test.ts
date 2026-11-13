@@ -185,7 +185,7 @@ describe("saveAnswersInOrder", () => {
     expect(state.calls).toEqual(["master", "answers"]);
     expect(res).toMatchObject({ ok: true, added: 1 });
     expect(persist).toHaveBeenCalledWith(expect.objectContaining({ answers: { q1: "300" } }));
-    expect(state.content.facts).toEqual(["300 (re: How many users?)"]);
+    expect(state.content.facts).toEqual(["Users: 300"]);
   });
 
   it("persists nothing when the master write fails, and a retry repairs the gap", async () => {
@@ -211,7 +211,7 @@ describe("saveAnswersInOrder", () => {
     expect(missingAnswerFacts(stored.questions, stored.answers, state.content.facts)).toEqual(["q1"]);
     const res = await saveAnswersInOrder({ analysis: stored, answers: { q1: "300" }, writeMaster, persist: () => {} });
     expect(res).toMatchObject({ ok: true, added: 1 });
-    expect(state.content.facts).toEqual(["300 (re: How many users?)"]);
+    expect(state.content.facts).toEqual(["Users: 300"]);
   });
 
   it("an edited answer replaces its old fact; reports a failed answer write as stage 'answers'", async () => {
@@ -225,7 +225,7 @@ describe("saveAnswersInOrder", () => {
       },
     });
     expect(res).toMatchObject({ ok: false, stage: "answers" });
-    expect(state.content.facts).toEqual(["other", "350 (re: How many users?)"]);
+    expect(state.content.facts).toEqual(["other", "Users: 350"]);
   });
 });
 

@@ -105,12 +105,13 @@ describe("POST /api/analyze", () => {
 });
 
 describe("POST /api/cover-letter", () => {
-  it("replaces invented numbers but keeps ones from the resume, facts and posting", async () => {
-    h.gemini.text = "Dear [Hiring Manager],\n\nSince Acme was founded in 2010 with 50 engineers, I built a tool for 300 students and grew it 5x to 2,000 users.";
+  it("replaces invented numbers; posting numbers only where the letter restates the posting", async () => {
+    h.gemini.text =
+      "Dear [Hiring Manager],\n\nAcme was founded in 2010 and has 50 engineers. I built a tool for 300 students and grew it 5x to 2,000 users. I'd join 50 engineers who ship weekly.";
     const res = await coverLetter(req({ jobId: "j1" }));
     const body = await res.json();
     expect(body.cover_letter).toBe(
-      "Dear [Hiring Manager],\n\nSince Acme was founded in 2010 with 50 engineers, I built a tool for 300 students and grew it [N]x to [N] users.",
+      "Dear [Hiring Manager],\n\nAcme was founded in 2010 and has 50 engineers. I built a tool for 300 students and grew it [N]x to [N2] users. I'd join [N3] engineers who ship weekly.",
     );
     expect(body.saved).toBe(true);
   });

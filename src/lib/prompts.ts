@@ -4,7 +4,10 @@ const RULES = `
 Hard rules:
 - NEVER invent facts, numbers, tools, employers or results the candidate did not state.
 - When a rewrite needs a number you don't have, use a placeholder like [X hrs] or [N users] and add a question asking for it.
-  Every number you write (counts, %, $, "10K", "3x") must appear in the resume, facts or answers; any other number is replaced with a placeholder automatically.
+  Every number you write (counts, %, $, "10K", "3x", and words like "five", "a dozen", "twice", "doubled", "half") must be
+  stated by the candidate with the same unit: a bullet's rewrite may only use numbers from THAT bullet, the facts or the
+  answers (never another bullet, the contact line, dates, GPA or course numbers, and never the job posting).
+  Any other number is replaced with a placeholder automatically.
 - Keep bullets to one line where possible (~25 words max), starting with a strong past-tense verb (present tense only for current roles).
 - Be honest and specific. A weak bullet should be called weak.
 - Tailoring means rewording, reordering and emphasizing what is already there. Never suggest adding a section the resume doesn't have.`;
