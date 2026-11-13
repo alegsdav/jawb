@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { authErrorMessage } from "@/lib/authErrors";
 import { isAllowedEmail } from "@/lib/supabase/allowlist";
 
 type State = { message: string; ok?: boolean };
@@ -23,11 +24,8 @@ export async function signInWithPassword(_: State, form: FormData): Promise<Stat
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
-    return {
-      message: /invalid login/i.test(error.message)
-        ? "Wrong email or password. No password yet? Use \"Email me a sign-in link\" below, then set one under Account."
-        : error.message,
-    };
+    console.error("sign-in failed:", error.message);
+    return { message: authErrorMessage(error, "sign-in") };
   }
   redirect("/");
 }
@@ -44,8 +42,9 @@ export async function sendMagicLink(_: State, form: FormData): Promise<State> {
     email,
     options: { emailRedirectTo: `${origin}/auth/callback?next=/account`, shouldCreateUser: false },
   });
+  if (error) console.error("magic link failed:", error.message);
   return error
-    ? { message: error.message }
+    ? { message: authErrorMessage(error, "link") }
     : { message: "Check your inbox. The link signs you in and opens Account so you can set a password.", ok: true };
 }
 
@@ -56,7 +55,8 @@ export async function updatePassword(_: State, form: FormData): Promise<State> {
   if (password !== confirm) return { message: "Passwords don't match." };
   const supabase = await createClient();
   const { error } = await supabase.auth.updateUser({ password });
-  return error ? { message: error.message } : { message: "Password saved. You can sign in with it from now on.", ok: true };
+  if (error) console.error("password update failed:", error.message);
+  return error ? { message: authErrorMessage(error, "password") } : { message: "Password saved. You can sign in with it from now on.", ok: true };
 }
 
 export async function signOut() {
