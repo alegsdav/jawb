@@ -106,3 +106,18 @@ describe("outcomes", () => {
     expect(stats).toEqual({ tailored: { applied: 3, interviews: 2 }, untailored: { applied: 2, interviews: 1 } });
   });
 });
+
+import { shouldSnapshot } from "@/lib/outcomes";
+import { describe as d2, it as i2, expect as e2 } from "vitest";
+d2("shouldSnapshot", () => {
+  i2("snapshots the first move into any submitted status", () => {
+    e2(shouldSnapshot("applied", null)).toBe(true);
+    e2(shouldSnapshot("interview", null)).toBe(true);
+    e2(shouldSnapshot("rejected", undefined)).toBe(true);
+  });
+  i2("never re-snapshots or snapshots unsent statuses", () => {
+    e2(shouldSnapshot("interview", "2026-11-01T00:00:00Z")).toBe(false);
+    e2(shouldSnapshot("to_apply", null)).toBe(false);
+    e2(shouldSnapshot("skipped", null)).toBe(false);
+  });
+});

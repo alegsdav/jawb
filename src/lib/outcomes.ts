@@ -7,6 +7,12 @@ export function isTailored(resume: Resume, master: Resume | null): boolean {
   return resumeToPlainText(resume) !== resumeToPlainText(master);
 }
 
+/** Statuses that imply the application was sent. The first move into one of these freezes a snapshot. */
+export const SUBMITTED_STATUSES = new Set(["applied", "interview", "offer", "rejected"]);
+
+export const shouldSnapshot = (status: string, submittedAt: string | null | undefined) =>
+  SUBMITTED_STATUSES.has(status) && !submittedAt;
+
 /** Fields to store on a job when it's marked Applied: a frozen copy of exactly what was sent. */
 export function snapshotPatch(resume: Resume, master: Resume | null) {
   const { facts: _facts, ...sent } = resume; // facts are never sent to employers

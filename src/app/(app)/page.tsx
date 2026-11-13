@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { STATUSES, type Job, type JobStatus } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { isEmptyResume, normalizeResume } from "@/lib/resume";
-import { snapshotPatch } from "@/lib/outcomes";
+import { snapshotPatch, shouldSnapshot } from "@/lib/outcomes";
 import { FitBadge, StatusSelect, applyDates } from "@/components/StatusSelect";
 import { AddJobForm, stashCapture } from "@/components/AddJobForm";
 import { OutcomeStats } from "@/components/OutcomeStats";
@@ -86,11 +86,12 @@ export default function TrackerPage() {
     return save(id, patch);
   }
 
-  /** Marking Applied also freezes a copy of exactly what was sent (once), for the outcome stats. */
+  /** The first move to Applied/Interview/Offer/Rejected also freezes a copy of exactly what was sent (once), for the outcome stats. */
   async function setStatus(j: Job, status: JobStatus) {
-    const patch: Partial<Job> = { status, ...(status === "applied" && !j.date_applied ? applyDates() : {}) };
+    const sending = shouldSnapshot(status, j.submitted_at);
+    const patch: Partial<Job> = { status, ...(sending && !j.date_applied ? applyDates() : {}) };
     setJobs((cur) => cur.map((x) => (x.id === j.id ? { ...x, ...patch } : x)));
-    if (status === "applied" && !j.submitted_at && !needsMigration) {
+    if (sending && !needsMigration) {
       const [tailored, master] = await Promise.all([
         supabase.from("resumes").select("content").eq("job_id", j.id).maybeSingle(),
         supabase.from("resumes").select("content").eq("is_master", true).maybeSingle(),
