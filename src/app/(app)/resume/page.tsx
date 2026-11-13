@@ -14,7 +14,7 @@ import { ResumeActions } from "@/components/ResumeActions";
 import { DocToolbar, PageCount, UndoRedo } from "@/components/DocToolbar";
 import { ResumeImport } from "@/components/ResumeImport";
 import { FactsPanel } from "@/components/FactsPanel";
-import { SaveStatus, useAutosave } from "@/lib/useAutosave";
+import { SaveErrorToast, SaveStatus, useAutosave } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
 
 // LEGACY bullet bank (retired): a one-time offer to move the user's own notes into facts. Intentional
@@ -238,8 +238,8 @@ export default function MasterResumePage() {
         </>
       )}
 
-      {/* TODO(round2, orchestrator): render Worker D's save-failure toast here once useAutosave exports it:
-          <SaveErrorToast status={status} />   (import { SaveErrorToast } from "@/lib/useAutosave") */}
+      {/* Fixed "Not saved — retrying…" notice; visible even when the toolbar has scrolled away on phones. */}
+      <SaveErrorToast status={status} />
     </div>
   );
 }
