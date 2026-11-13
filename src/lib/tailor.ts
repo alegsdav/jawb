@@ -119,6 +119,17 @@ export function applyPull(copy: Resume, master: Resume): { resume: Resume } & Pu
   return { resume, ...plan };
 }
 
+/** The resume with one bullet's text replaced (accepting a suggestion, filling a placeholder). */
+export function replaceBullet(r: Resume, bulletId: string, text: string): Resume {
+  return {
+    ...r,
+    sections: r.sections.map((s) => ({
+      ...s,
+      items: s.items.map((it) => ({ ...it, bullets: it.bullets.map((b) => (b.id === bulletId ? { ...b, text } : b)) })),
+    })),
+  };
+}
+
 /** Columns the job page autosaves (analysis is written separately). */
 export const JOB_FIELDS = [
   "company", "title", "location", "url", "description", "status", "date_applied", "follow_up_date", "notes",

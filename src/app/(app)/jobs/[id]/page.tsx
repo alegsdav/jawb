@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  bulletTextMap, countChangedBullets, emptyResume, isEmptyResume, normalizeResume, replaceBullet, resumeToPlainText,
+  bulletTextMap, countChangedBullets, emptyResume, isEmptyResume, normalizeResume, resumeToPlainText,
 } from "@/lib/resume";
 import { STATUSES, type Analysis, type Job, type JobStatus, type Resume } from "@/lib/types";
 import { postApi } from "@/lib/api";
@@ -17,7 +17,7 @@ import { isMissingColumn, isUniqueViolation, MIGRATION_0002_COLUMNS, MIGRATION_H
 import { updateMaster } from "@/lib/master";
 import {
   applyPull, cloneForJob, compareMap, diffFields, ensureBaseline, JOB_FIELDS, makeBaseline, omitKeys, planPull, readBaseline,
-  stripBaseline,
+  replaceBullet, stripBaseline,
 } from "@/lib/tailor";
 import { ResumeDocument } from "@/components/ResumeDocument";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
