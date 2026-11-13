@@ -1,4 +1,5 @@
 import "server-only";
+import { pasteOnlySite } from "./jobsites";
 
 export type FetchedJob = {
   title: string;
@@ -40,8 +41,10 @@ async function tryKnownBoards(u: URL): Promise<FetchedJob | null> {
   const parts = u.pathname.split("/").filter(Boolean);
   if (/greenhouse\.io$/.test(u.hostname)) {
     const i = parts.indexOf("jobs");
-    const board = parts[0];
-    const id = i >= 0 ? parts[i + 1] : u.searchParams.get("gh_jid");
+    // Embedded boards look like /embed/job_app?for=<board>&token=<id>.
+    const embed = parts[0] === "embed";
+    const board = embed ? u.searchParams.get("for") : parts[0];
+    const id = embed ? u.searchParams.get("token") : i >= 0 ? parts[i + 1] : u.searchParams.get("gh_jid");
     if (board && id) {
       const j = await getJSON(`https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}`);
       return {
@@ -77,7 +80,9 @@ function fromJsonLd(html: string): FetchedJob | null {
     try {
       const data = JSON.parse(raw);
       const nodes = Array.isArray(data) ? data : data["@graph"] ?? [data];
-      const jp = nodes.find((n: { "@type"?: string }) => n?.["@type"] === "JobPosting");
+      const isPosting = (n: { "@type"?: string | string[] }) =>
+        n?.["@type"] === "JobPosting" || (Array.isArray(n?.["@type"]) && n["@type"].includes("JobPosting"));
+      const jp = nodes.find(isPosting);
       if (jp) {
         const loc = Array.isArray(jp.jobLocation) ? jp.jobLocation[0] : jp.jobLocation;
         const a = loc?.address ?? {};
@@ -96,21 +101,29 @@ function fromJsonLd(html: string): FetchedJob | null {
   return null;
 }
 
+const pasteMessage = (site: string | null) =>
+  site
+    ? `${site} postings can't be read automatically. Paste the job description and keep the link.`
+    : "That page needs a login or loads with JavaScript. Paste the job description and keep the link.";
+
 export async function fetchJobFromUrl(rawUrl: string): Promise<FetchedJob> {
   const u = new URL(rawUrl);
   if (!/^https?:$/.test(u.protocol)) throw new Error("Only http(s) links are supported.");
+  const site = pasteOnlySite(rawUrl);
+  if (site) throw new Error(pasteMessage(site));
   const known = await tryKnownBoards(u).catch(() => null);
   if (known?.description) return known;
 
   const res = await fetch(u, { headers: { "User-Agent": UA, Accept: "text/html" }, redirect: "follow" });
-  if (!res.ok) throw new Error(`The site returned HTTP ${res.status}. Paste the description instead.`);
+  if (!res.ok) throw new Error(`The site returned HTTP ${res.status}. Paste the job description and keep the link.`);
   const html = await res.text();
   const ld = fromJsonLd(html);
   if (ld?.description && ld.description.length > 200) return ld;
 
   const text = htmlToText(html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? html);
   if (text.length < 300 || /sign in|log in to view|join now/i.test(text.slice(0, 600))) {
-    throw new Error("That page needs a login or loads with JavaScript (LinkedIn, Handshake, Workday). Paste the description instead.");
+    // A link can redirect to a login wall on another host (e.g. a short link to LinkedIn).
+    throw new Error(pasteMessage((res.url && pasteOnlySite(res.url)) || null));
   }
   const title = html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
   return { title, company: "", location: "", description: text.slice(0, 20000) };

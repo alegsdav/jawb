@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
 import { geminiText } from "@/lib/gemini";
-import { coverLetterPrompt } from "@/lib/prompts";
+import { coverLetterPrompt, formatFacts } from "@/lib/prompts";
 import { normalizeResume, resumeToPlainText } from "@/lib/resume";
 import { formatAnswers } from "@/lib/answers";
+import { normalizeAnalysis } from "@/lib/analysis";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
@@ -13,9 +14,10 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   const { jobId } = (await req.json()) as { jobId: string };
 
-  const [{ data: job }, { data: resume }] = await Promise.all([
+  const [{ data: job }, { data: resume }, { data: master }] = await Promise.all([
     supabase.from("jobs").select("*").eq("id", jobId).single(),
     supabase.from("resumes").select("content").eq("job_id", jobId).maybeSingle(),
+    supabase.from("resumes").select("content").eq("is_master", true).maybeSingle(),
   ]);
   if (!job || !resume) return NextResponse.json({ error: "Job or resume not found" }, { status: 404 });
 
@@ -24,7 +26,8 @@ export async function POST(req: Request) {
       coverLetterPrompt({
         resume: resumeToPlainText(normalizeResume(resume.content)),
         job: `${job.title} at ${job.company} (${job.location})\n\n${job.description}`,
-        answers: formatAnswers(job.analysis),
+        facts: formatFacts(master ? normalizeResume(master.content).facts : undefined),
+        answers: formatAnswers(job.analysis ? normalizeAnalysis(job.analysis) : null),
       }),
       { temperature: 0.6 },
     );

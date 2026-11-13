@@ -3,11 +3,17 @@ import { requireUser } from "@/lib/supabase/server";
 import { fetchJobFromUrl } from "@/lib/fetch-job";
 import { geminiJSON } from "@/lib/gemini";
 import { extractJobMetaPrompt } from "@/lib/prompts";
+import { pasteOnlySite } from "@/lib/jobsites";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
 
-/** Create a job from a URL and/or pasted description. Returns { id }. */
+/**
+ * Create a job from a URL and/or pasted description. Returns { id }.
+ * - url only: fetch the posting (422 { error, pasteOnly } for sites that can't be read server-side).
+ * - url + text: store both; the pasted text is the description and nothing is fetched.
+ * - text only: store the text.
+ */
 export async function POST(req: Request) {
   const { supabase, user } = await requireUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
@@ -16,6 +22,16 @@ export async function POST(req: Request) {
   const url = body.url?.trim() ?? "";
   let description = body.text?.trim() ?? "";
   let meta = { company: "", title: "", location: "" };
+
+  if (url && !description) {
+    const site = pasteOnlySite(url);
+    if (site) {
+      return NextResponse.json(
+        { error: `${site} postings can't be read automatically. Paste the job description and keep the link.`, pasteOnly: site },
+        { status: 422 },
+      );
+    }
+  }
 
   try {
     if (url && !description) {
