@@ -1,19 +1,11 @@
 "use client";
 
 import type { Resume } from "@/lib/types";
-import { countPlaceholders } from "@/lib/facts";
+import { countPlaceholders, plural } from "@/lib/facts";
+import { visibleTexts } from "@/lib/status";
 
-/** Every visible text field on the page (facts are never exported). */
-export function resumeTexts(r: Resume): string[] {
-  return [
-    r.header.name,
-    r.header.contact,
-    ...r.sections.flatMap((sec) => [
-      sec.title,
-      ...sec.items.flatMap((it) => [it.title, it.subtitle, it.location, it.dates, ...it.bullets.map((b) => b.text)]),
-    ]),
-  ];
-}
+/** Every visible text field on the page (facts are never exported). Same function as visibleTexts in @/lib/status. */
+export const resumeTexts = visibleTexts;
 
 /**
  * Ask before something with [placeholders] leaves the app. True when there are none or the user goes ahead.
@@ -22,7 +14,7 @@ export function resumeTexts(r: Resume): string[] {
 export function confirmPlaceholders(n: number, what: string, action: string): boolean {
   if (!n) return true;
   return confirm(
-    `${what} still has ${n} [bracketed] placeholder${n > 1 ? "s" : ""}. Replace ${n > 1 ? "them" : "it"} with your real numbers before you send it.\n\n${action} anyway?`,
+    `${what} still has ${plural(n, "[bracketed] placeholder")}. Replace ${n > 1 ? "them" : "it"} with your real numbers before you send it.\n\n${action} anyway?`,
   );
 }
 

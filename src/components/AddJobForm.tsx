@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { pasteOnlySite } from "@/lib/jobsites";
 import { postApi } from "@/lib/api";
+import { findDuplicateJob } from "@/lib/status";
+import type { Job } from "@/lib/types";
 import { Bookmarklet } from "./Bookmarklet";
 
 const URL_RE = /^https?:\/\/\S+$/i;
@@ -61,24 +63,42 @@ function takeCapture(): Capture | null {
   return null;
 }
 
+
+/** An existing job, for the duplicate check. */
+export type ExistingJob = Pick<Job, "id" | "url" | "company" | "title" | "created_at">;
+
+type IntakeBody = { url?: string; text?: string };
+
+/** "Nov 13" for a timestamp, in the user's time zone ("" if it can't be read). */
+function addedOn(createdAt: string): string {
+  const d = new Date(createdAt);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 /**
  * "Add a job": one box for a link or a pasted description. For sites the server can't read
  * (LinkedIn, Handshake, Workday…) it switches to two fields: the link plus the pasted description.
- * With `collapsible` (the tracker once it has jobs) it starts as a one-line "+ Add a job" button so
+ * With `collapsible` (the job list once it has jobs) it starts as a one-line "+ Add job" button so
  * the job list starts on the first screen of a phone; a bookmarklet capture opens it.
+ *
+ * Adding a job that's already on the list (same link, or same company and title as the server reads
+ * them) asks "You already added this job (added Nov 13). Open it instead?" with Open it / Add anyway.
+ * `existing` lets a same-link duplicate be caught before anything is fetched.
  */
-export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
+export function AddJobForm({ collapsible = false, existing = [] }: { collapsible?: boolean; existing?: readonly ExistingJob[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"one" | "paste">("one");
   const [input, setInput] = useState("");
   const [link, setLink] = useState("");
   const [desc, setDesc] = useState("");
-  /** Why we're in paste mode. */
-  const [reason, setReason] = useState<{ site?: string; captured?: string; failed?: boolean } | null>(null);
+  /** Why we're in paste mode. `failed` carries the message, shown once as the instruction. */
+  const [reason, setReason] = useState<{ site?: string; captured?: string; failed?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
+  /** A job already on the list that matches what's being added. */
+  const [dup, setDup] = useState<{ id: string; created_at: string; body: IntakeBody; fromUrl: string | null } | null>(null);
 
   useEffect(() => {
     const c = takeCapture();
@@ -104,23 +124,30 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
     setDesc("");
     setReason(null);
     setError("");
+    setDup(null);
   }
 
-  async function send(body: { url?: string; text?: string }, fromUrl: string | null) {
-    setBusy(true);
+  async function send(body: IntakeBody, fromUrl: string | null, force = false) {
     setError("");
-    const r = await postApi<{ id: string }>("/api/intake", body);
+    setDup(null);
+    if (!force && body.url) {
+      const same = findDuplicateJob(existing, { url: body.url });
+      if (same) return setDup({ id: same.id, created_at: same.created_at, body, fromUrl });
+    }
+    setBusy(true);
+    const r = await postApi<{ id: string }>("/api/intake", force ? { ...body, force: true } : body);
     if (r.data?.id) {
       router.push(`/jobs/${r.data.id}`);
       return;
     }
     setBusy(false);
-    if (r.pasteOnly) {
+    if (r.duplicate) {
+      setDup({ ...r.duplicate, body, fromUrl });
+    } else if (r.pasteOnly) {
       toPaste(fromUrl ?? link, { site: r.pasteOnly });
     } else if (fromUrl && mode === "one") {
-      // Couldn't read the page: keep the link and ask for the text instead.
-      toPaste(fromUrl, { failed: true });
-      setError(r.error ?? "Couldn't read that page.");
+      // Couldn't read the page: keep the link and ask for the text instead (the message says so once).
+      toPaste(fromUrl, { failed: r.error ?? "Couldn't read that page. Paste the job description and keep the link." });
     } else {
       setError(r.error ?? "Something went wrong.");
     }
@@ -169,6 +196,19 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
 
   const isUrl = URL_RE.test(input.trim());
   const site = isUrl ? pasteOnlySite(input.trim()) : null;
+  /** What "Add job" will do, under the button. */
+  const hint =
+    mode === "paste"
+      ? link.trim()
+        ? "Saves the description and keeps the link."
+        : ""
+      : !input.trim()
+        ? ""
+        : site
+          ? `${site} needs a login: next you'll paste the description.`
+          : isUrl
+            ? "Reads the posting from the link."
+            : "Uses the pasted description.";
 
   if (collapsible && !open) {
     return (
@@ -176,7 +216,7 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
         <h1 className="text-lg font-semibold">Jobs</h1>
         <p className="hidden md:block text-sm text-muted truncate">Paste a link or a description, or use the bookmarklet.</p>
         <button className="btn btn-primary ml-auto min-h-10 px-4" aria-expanded={false} onClick={() => setOpen(true)}>
-          ＋ Add a job
+          ＋ Add job
         </button>
       </div>
     );
@@ -202,6 +242,7 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
               onClick={() => {
                 setOpen(false);
                 setError("");
+                setDup(null);
               }}
               disabled={busy}
             >
@@ -222,6 +263,9 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
             <strong className="text-fg">{reason.site} needs a login</strong>, so the app can&apos;t read that link. Open the
             posting, copy the job description, and paste it below. The link is kept so you can find it again.
           </p>
+        ) : reason?.failed ? (
+          // The fetch failed: its message is the instruction, shown once (not repeated by the buttons).
+          <p role="alert" className="text-sm text-bad">{reason.failed}</p>
         ) : (
           <p className="text-sm text-muted">Paste the job description below. The link is kept so you can find it again.</p>
         )}
@@ -234,7 +278,10 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
           autoFocus={collapsible}
           placeholder="https://job-boards.greenhouse.io/… or paste the description"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            setDup(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
           }}
@@ -249,7 +296,10 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
               className="input w-full"
               placeholder="https://www.linkedin.com/jobs/view/…"
               value={link}
-              onChange={(e) => setLink(e.target.value)}
+              onChange={(e) => {
+                setLink(e.target.value);
+                setDup(null);
+              }}
             />
           </label>
           <label className="block space-y-1">
@@ -268,21 +318,44 @@ export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          className="btn btn-primary py-2 w-full sm:w-auto"
-          disabled={busy || (mode === "one" ? !input.trim() : !desc.trim())}
-          onClick={submit}
-        >
-          {busy ? "Reading job…" : mode === "one" && isUrl && !site ? "Fetch job" : site && mode === "one" ? "Next" : "Add job"}
-        </button>
-        {mode === "paste" && (
-          <button className="btn py-2 w-full sm:w-auto" onClick={reset} disabled={busy}>
-            Cancel
+      {/* Messages sit above the buttons, so on a phone they're seen before the full-width button. */}
+      {error && (
+        <p role="alert" className="text-sm text-bad">
+          {error}
+        </p>
+      )}
+
+      {dup ? (
+        <div role="alert" className="rounded-lg border border-ok/50 bg-ok-bg p-3 space-y-2">
+          <p className="text-sm">
+            You already added this job{addedOn(dup.created_at) ? ` (added ${addedOn(dup.created_at)})` : ""}. Open it instead?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-primary py-2 flex-1 sm:flex-none" onClick={() => router.push(`/jobs/${dup.id}`)}>
+              Open it
+            </button>
+            <button className="btn py-2 flex-1 sm:flex-none" disabled={busy} onClick={() => send(dup.body, dup.fromUrl, true)}>
+              Add anyway
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <button
+            className="btn btn-primary py-2 w-full sm:w-auto"
+            disabled={busy || (mode === "one" ? !input.trim() : !desc.trim())}
+            onClick={submit}
+          >
+            {busy ? (isUrl && mode === "one" ? "Reading job…" : "Adding…") : "Add job"}
           </button>
-        )}
-        {error && <p className="text-sm text-bad">{error}</p>}
-      </div>
+          {mode === "paste" && (
+            <button className="btn py-2 w-full sm:w-auto" onClick={reset} disabled={busy}>
+              Cancel
+            </button>
+          )}
+          {hint && !busy && <span className="text-xs text-muted">{hint}</span>}
+        </div>
+      )}
 
       <Bookmarklet />
     </div>

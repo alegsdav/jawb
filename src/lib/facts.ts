@@ -22,3 +22,6 @@ export const PLACEHOLDER_RE = /\[[^\]\n]+\]/g;
 export const hasPlaceholder = (text: string) => /\[[^\]\n]+\]/.test(text);
 export const countPlaceholders = (texts: string[]) =>
   texts.reduce((n, t) => n + (t.match(PLACEHOLDER_RE)?.length ?? 0), 0);
+
+/** "1 placeholder", "3 placeholders", "2 entries" (pass `many` for irregular plurals). */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

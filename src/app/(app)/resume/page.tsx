@@ -17,13 +17,6 @@ import { FactsPanel } from "@/components/FactsPanel";
 import { SaveErrorToast, SaveStatus, useAutosaveWithRetry } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
 
-// LEGACY bullet bank (retired): a one-time offer to move the user's own notes into facts. Intentional
-// transition code; remove once nobody has rows in the old `bullets` table.
-/** Old bullet-bank tags that were not the user's own notes (AI examples, copies of resume lines). */
-const NOT_NOTES = ["example", "from-resume", "accepted"];
-const LEGACY_DISMISSED_KEY = "jp:legacy-bank-dismissed";
-const norm = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
-
 /** Re-import keeps bullet ids stable and carries the master's facts over (reconcileIds merges them). */
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
 
@@ -120,8 +113,6 @@ export default function MasterResumePage() {
   const [justImported, setJustImported] = useState(false);
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
-  const [legacyNotes, setLegacyNotes] = useState<string[]>([]);
-  const [legacyDismissed, setLegacyDismissed] = useState(true);
 
   useEffect(() => {
     loadOrCreateMaster(supabase).then(
@@ -136,22 +127,6 @@ export default function MasterResumePage() {
         setError(dbErrorMessage(e, "load"));
       },
     );
-    // LEGACY: one-time move of the user's own notes from the retired bullet bank. The table may be gone: ignore errors.
-    try {
-      setLegacyDismissed(localStorage.getItem(LEGACY_DISMISSED_KEY) === "1");
-    } catch {
-      setLegacyDismissed(false);
-    }
-    Promise.resolve(supabase.from("bullets").select("text, tags"))
-      .then(({ data }) => {
-        const rows = (data ?? []) as { text: string | null; tags: string[] | null }[];
-        setLegacyNotes(
-          rows
-            .filter((b) => b.text?.trim() && !(b.tags ?? []).some((t) => NOT_NOTES.includes(t)))
-            .map((b) => b.text!.trim()),
-        );
-      })
-      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -225,21 +200,6 @@ export default function MasterResumePage() {
     setDoc({ ...merged }, true); // a new value, so autosave runs
   }
 
-  // LEGACY: bank notes that aren't already facts (case/whitespace-insensitive, de-duplicated).
-  const pendingLegacy = useMemo(() => {
-    if (legacyDismissed || !resume) return [];
-    const have = new Set((resume.facts ?? []).map(norm));
-    const out: string[] = [];
-    for (const t of legacyNotes) {
-      const k = norm(t);
-      if (!have.has(k)) {
-        have.add(k);
-        out.push(t);
-      }
-    }
-    return out;
-  }, [legacyNotes, legacyDismissed, resume]);
-
   if (error && !resume) return <p className="text-bad">{error}</p>;
   if (!resume) return <p className="text-muted">Loading…</p>;
 
@@ -251,14 +211,6 @@ export default function MasterResumePage() {
     if (empty) setJustImported(true);
   };
   const setFacts = (facts: string[]) => doc.set((cur) => ({ ...cur, facts }), true);
-  const dismissLegacy = () => {
-    setLegacyDismissed(true);
-    try {
-      localStorage.setItem(LEGACY_DISMISSED_KEY, "1");
-    } catch {
-      /* private mode: dismissal lasts for this visit */
-    }
-  };
 
   return (
     <div className="max-w-5xl lg:max-w-7xl mx-auto space-y-3">
@@ -334,9 +286,6 @@ export default function MasterResumePage() {
                 facts={resume.facts ?? []}
                 onChange={setFacts}
                 onAdd={(lines) => doc.set((cur) => addFacts(cur, lines), true)}
-                legacy={pendingLegacy}
-                onImportLegacy={() => doc.set((cur) => addFacts(cur, pendingLegacy), true)}
-                onDismissLegacy={dismissLegacy}
               />
             </div>
           </div>

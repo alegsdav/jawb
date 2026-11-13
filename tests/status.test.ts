@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyStatusChange, placeholderQuestion, statusChangePatch, UNSUBMIT_QUESTION, visibleTexts } from "@/lib/status";
+import {
+  applyStatusChange, findDuplicateJob, normalizeJobUrl, placeholderQuestion, UNSUBMIT_QUESTION, visibleTexts,
+} from "@/lib/status";
+import { plural } from "@/lib/facts";
 import { reachedInterview, snapshotPatch, tailoringStats } from "@/lib/outcomes";
 import type { Job, JobStatus, Resume } from "@/lib/types";
 
@@ -216,15 +219,31 @@ describe("snapshotPatch", () => {
   });
 });
 
-describe("statusChangePatch (deprecated helper)", () => {
-  const s = { date_applied: "2026-11-01", submitted_at: "2026-11-01T15:00:00Z" };
-  it("still behaves as before", () => {
-    expect(statusChangePatch(s, "skipped", () => false)).toEqual({ status: "skipped" });
-    expect(statusChangePatch(s, "interview", () => true)).toEqual({ status: "interview" });
-    expect(statusChangePatch({ date_applied: null, submitted_at: null }, "applied", () => true, now)).toEqual({
-      status: "applied",
-      date_applied: "2026-11-13",
-      follow_up_date: "2026-11-23",
-    });
+describe("shared helpers", () => {
+  it("plural", () => {
+    expect(plural(1, "placeholder")).toBe("1 placeholder");
+    expect(plural(3, "placeholder")).toBe("3 placeholders");
+    expect(plural(2, "entry", "entries")).toBe("2 entries");
+    expect(placeholderQuestion(1)).toContain("1 [bracketed] placeholder. It'll");
+    expect(placeholderQuestion(2)).toContain("2 [bracketed] placeholders. They'll");
+  });
+});
+
+describe("duplicate jobs", () => {
+  const jobs = [
+    { id: "a", url: "https://boards.greenhouse.io/acme/jobs/1?gh_src=x", company: "Acme", title: "Data Analyst Intern" },
+    { id: "b", url: "", company: "Globex", title: "Software Engineer Intern" },
+  ];
+  it("normalizes links: no query or hash, no trailing slash, lowercase host", () => {
+    expect(normalizeJobUrl("https://Boards.Greenhouse.io/acme/jobs/1/?utm=1#apply")).toBe("https://boards.greenhouse.io/acme/jobs/1");
+    expect(normalizeJobUrl("not a link")).toBe("");
+    expect(normalizeJobUrl("")).toBe("");
+  });
+  it("matches the same link or the same company and title", () => {
+    expect(findDuplicateJob(jobs, { url: "https://boards.greenhouse.io/acme/jobs/1/" })?.id).toBe("a");
+    expect(findDuplicateJob(jobs, { company: " globex ", title: "software  engineer intern" })?.id).toBe("b");
+    expect(findDuplicateJob(jobs, { url: "https://boards.greenhouse.io/acme/jobs/2", company: "Acme", title: "Other" })).toBeNull();
+    expect(findDuplicateJob(jobs, { company: "Globex", title: "" })).toBeNull();
+    expect(findDuplicateJob(jobs, {})).toBeNull();
   });
 });

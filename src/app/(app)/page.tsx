@@ -3,184 +3,50 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { STATUSES, type Job, type JobStatus, type Resume } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { isEmptyResume, normalizeResume } from "@/lib/resume";
 import { shouldSnapshot, SUBMITTED_STATUSES } from "@/lib/outcomes";
 import { dbErrorMessage, isMissingColumn, MIGRATION_HINT, OPTIONAL_JOB_COLUMNS } from "@/lib/db";
-import { localToday, shortDate } from "@/lib/dates";
+import { addDays, localToday, shortDate } from "@/lib/dates";
 import { applyStatusChange } from "@/lib/status";
-import { RETRY_DELAYS, SaveErrorToast } from "@/lib/useAutosave";
+import { useJobWrites, type RowSaveState } from "@/lib/jobWrites";
+import { SaveErrorToast } from "@/lib/useAutosave";
 import { FitBadge, StatusSelect } from "@/components/StatusSelect";
 import { AddJobForm, stashCapture } from "@/components/AddJobForm";
 import { OutcomeStats } from "@/components/OutcomeStats";
 import { DeadlineField, deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 
-const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at";
+const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
 const COLS_0002 = "deadline, submitted_at, submitted_tailored";
 /** Added by migration 0003. */
 const COLS_0003 = "reached_interview";
 
+/** "Followed up" moves the next follow-up this many days out (with Undo). */
+const FOLLOW_UP_AGAIN_DAYS = 7;
+/** After this long, "Loading…" says "Still loading…" so a slow phone connection doesn't look stuck. */
+const SLOW_MS = 3000;
+
 type Filter = JobStatus | "all" | "closing";
 type Sort = "newest" | "deadline";
 
-// ---------- per-row write queue: retries failed writes, rolls back on Discard ----------
+/** A follow-up is due: applied, and the follow-up date is today or past. */
+const followUpDue = (j: Job, today: string) => j.status === "applied" && !!j.follow_up_date && j.follow_up_date <= today;
 
-type RowWrite = {
-  /** Fields not yet sent (merged while a write is in flight or failing). */
-  pending: Partial<Job> | null;
-  inFlight: boolean;
-  /** Last known server values of every field this row has changed (what Discard rolls back to). */
-  server: Partial<Job>;
-  failures: number;
-  timer: ReturnType<typeof setTimeout> | null;
-};
-
-/** "error": a write failed and waits for a retry. "retrying": that retry is running. */
-type RowSaveState = "error" | "retrying";
-
-/**
- * Writes for tracker rows (status, deadline, applied and follow-up dates). The screen updates right
- * away; writes for one row run one at a time and merge while one is in flight. A failed write keeps
- * its value and retries after 3s, 10s, then every 30s, when the browser comes back online, and on
- * Retry now. Discard puts the row back to the server's values. Pending writes are flushed when the
- * page is hidden or left, and closing the tab asks first while anything is unsaved.
- */
-function useJobWrites(
-  supabase: SupabaseClient,
-  opts: {
-    /** Remove columns the database doesn't have (missing migration). */
-    strip: (p: Partial<Job>) => Partial<Job>;
-    /** A write hit a missing column: return true if something new is now stripped (retry at once). */
-    onMissingColumn: (e: { code?: string; message?: string }, sent: Partial<Job>) => boolean;
-    /** Put these server values back on the row (Discard). */
-    rollback: (id: string, values: Partial<Job>) => void;
-  },
-) {
-  const rows = useRef(new Map<string, RowWrite>());
-  const optsRef = useRef(opts);
-  optsRef.current = opts;
-  const mounted = useRef(true);
-  const [states, setStates] = useState<ReadonlyMap<string, RowSaveState>>(new Map());
-
-  const refresh = useCallback(() => {
-    if (!mounted.current) return;
-    const next = new Map<string, RowSaveState>();
-    for (const [id, r] of rows.current) if (r.failures > 0) next.set(id, r.inFlight ? "retrying" : "error");
-    setStates(next);
-  }, []);
-
-  const flushRef = useRef<(id: string) => void>(() => {});
-  flushRef.current = (id: string) => {
-    const r = rows.current.get(id);
-    if (!r || r.inFlight || !r.pending) return;
-    if (r.timer) {
-      clearTimeout(r.timer);
-      r.timer = null;
-    }
-    const sent = r.pending;
-    r.pending = null;
-    r.inFlight = true;
-    refresh();
-    const body = optsRef.current.strip(sent);
-    const request: PromiseLike<{ error: { code?: string; message?: string } | null }> = Object.keys(body).length
-      ? supabase.from("jobs").update(body).eq("id", id)
-      : Promise.resolve({ error: null });
-    Promise.resolve(request).then(
-      ({ error }) => done(id, sent, error),
-      (e: { message?: string }) => done(id, sent, { message: e?.message ?? "network error" }),
-    );
-  };
-
-  function done(id: string, sent: Partial<Job>, error: { code?: string; message?: string } | null) {
-    const r = rows.current.get(id);
-    if (!r) return;
-    r.inFlight = false;
-    if (!error) {
-      Object.assign(r.server, sent);
-      r.failures = 0;
-      if (r.pending) return flushRef.current(id);
-      rows.current.delete(id);
-      return refresh();
-    }
-    r.pending = { ...sent, ...(r.pending ?? {}) };
-    if (isMissingColumn(error) && optsRef.current.onMissingColumn(error, sent)) return flushRef.current(id);
-    console.warn("Tracker save failed (will retry):", error);
-    if (mounted.current) {
-      const wait = RETRY_DELAYS[Math.min(r.failures, RETRY_DELAYS.length - 1)];
-      r.timer = setTimeout(() => {
-        r.timer = null;
-        flushRef.current(id);
-      }, wait);
-    }
-    r.failures++;
-    refresh();
-  }
-
-  /** Queue `patch` for `job` (pass the row as it was before the change, i.e. the server's values). */
-  const queue = useCallback((job: Job, patch: Partial<Job>) => {
-    let r = rows.current.get(job.id);
-    if (!r) {
-      r = { pending: null, inFlight: false, server: {}, failures: 0, timer: null };
-      rows.current.set(job.id, r);
-    }
-    const server = r.server as Record<string, unknown>;
-    for (const k of Object.keys(patch)) if (!(k in server)) server[k] = (job as Record<string, unknown>)[k] ?? null;
-    r.pending = { ...(r.pending ?? {}), ...patch };
-    flushRef.current(job.id);
-  }, []);
-
-  const retryAll = useCallback(() => {
-    for (const [id, r] of rows.current) if (r.pending) flushRef.current(id);
-  }, []);
-
-  /** Abandon a failing row's unsaved change and show the server's values again. */
-  const discard = useCallback(
-    (id: string) => {
-      const r = rows.current.get(id);
-      if (!r || r.inFlight) return;
-      if (r.timer) clearTimeout(r.timer);
-      const back: Record<string, unknown> = {};
-      for (const k of Object.keys(r.pending ?? {})) back[k] = (r.server as Record<string, unknown>)[k] ?? null;
-      rows.current.delete(id);
-      optsRef.current.rollback(id, back as Partial<Job>);
-      refresh();
-    },
-    [refresh],
-  );
-
+/** True once `active` has stayed true for `ms`. */
+function useSlow(active: boolean, ms = SLOW_MS) {
+  const [slow, setSlow] = useState(false);
   useEffect(() => {
-    mounted.current = true;
-    const map = rows.current;
-    const flushAll = () => {
-      for (const [id, r] of map) if (r.pending) flushRef.current(id);
-    };
-    const onVisibility = () => document.visibilityState === "hidden" && flushAll();
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (![...map.values()].some((r) => r.pending || r.inFlight)) return;
-      flushAll();
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("online", retryAll);
-    window.addEventListener("pagehide", flushAll);
-    window.addEventListener("beforeunload", onBeforeUnload);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("online", retryAll);
-      window.removeEventListener("pagehide", flushAll);
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      document.removeEventListener("visibilitychange", onVisibility);
-      mounted.current = false;
-      flushAll(); // leaving the page (e.g. opening a job): send what's pending, fire-and-forget
-      for (const r of map.values()) if (r.timer) clearTimeout(r.timer);
-    };
-  }, [retryAll]);
-
-  return { queue, retryAll, discard, states };
+    if (!active) {
+      setSlow(false);
+      return;
+    }
+    const t = setTimeout(() => setSlow(true), ms);
+    return () => clearTimeout(t);
+  }, [active, ms]);
+  return slow;
 }
 
 /** "Not saved · Discard" next to a row whose write is failing. */
@@ -202,6 +68,41 @@ function RowSaveNote({ state, onDiscard }: { state: RowSaveState | undefined; on
   );
 }
 
+/** "Followed up" on a row whose follow-up is due. */
+function FollowedUpButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="btn btn-sm min-h-9 sm:min-h-0 border-ok/60 text-ok"
+      onClick={onClick}
+      title={`Mark the follow-up done; the next one is due in ${FOLLOW_UP_AGAIN_DAYS} days`}
+    >
+      ✓ Followed up
+    </button>
+  );
+}
+
+/** A short confirmation with Undo, above the phone tab bar (and above the save-error notice when it shows). */
+function UndoToast({ message, onUndo, onClose, raised }: { message: string; onUndo: () => void; onClose: () => void; raised: boolean }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`fixed z-40 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:max-w-md flex items-center gap-3 rounded-xl border border-good/40 bg-surface px-4 py-2.5 text-sm shadow-lg ${
+        raised ? "bottom-[calc(9rem+env(safe-area-inset-bottom))] sm:bottom-20" : "bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:bottom-4"
+      }`}
+    >
+      <span className="flex-1 min-w-0 text-good">{message}</span>
+      <button type="button" className="btn btn-sm shrink-0 min-h-9 sm:min-h-0" onClick={onUndo}>
+        Undo
+      </button>
+      <button type="button" className="shrink-0 text-muted hover:text-fg px-1 min-h-8" aria-label="Dismiss" onClick={onClose}>
+        ✕
+      </button>
+    </div>
+  );
+}
+
 const RESUME_LOAD_ERROR =
   "Couldn't load your resume to save a copy of what you sent. Check your connection and try again.";
 
@@ -220,8 +121,11 @@ export default function TrackerPage() {
   const [sort, setSort] = useState<Sort>("newest");
   /** Job whose status change is loading its resume (for the snapshot). */
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** "Followed up" just moved a follow-up date: Undo puts the old one back. */
+  const [undo, setUndo] = useState<{ id: string; prev: string | null; message: string } | null>(null);
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
+  const slow = useSlow(!ready || loading);
 
   const markMissing = useCallback((cols: readonly string[]) => {
     let added = false;
@@ -234,7 +138,16 @@ export default function TrackerPage() {
     return added;
   }, []);
 
+  /** The columns to read, without the ones this database doesn't have. */
+  const columns = useCallback(() => {
+    if (missing.current.has("deadline")) return BASE_COLS;
+    if (missing.current.has("reached_interview")) return `${BASE_COLS}, ${COLS_0002}`;
+    return `${BASE_COLS}, ${COLS_0002}, ${COLS_0003}`;
+  }, []);
+
+  // Row writes: retried, merged while in flight, conditional on updated_at (see src/lib/jobWrites.ts).
   const writes = useJobWrites(supabase, {
+    columns,
     strip: (p) => {
       const out: Record<string, unknown> = { ...p };
       for (const c of missing.current) delete out[c];
@@ -244,7 +157,9 @@ export default function TrackerPage() {
       const named = OPTIONAL_JOB_COLUMNS.filter((c) => (e.message ?? "").includes(c));
       return markMissing(named.length ? named : OPTIONAL_JOB_COLUMNS.filter((c) => c in sent));
     },
-    rollback: (id, values) => setJobs((cur) => cur.map((j) => (j.id === id ? { ...j, ...values } : j))),
+    // Discard (the saved values) or another device's changes after a conflict.
+    onRowValues: (id, values) => setJobs((cur) => cur.map((j) => (j.id === id ? { ...j, ...values } : j))),
+    onGone: (id) => setJobs((cur) => cur.filter((j) => j.id !== id)),
   });
 
   useEffect(() => {
@@ -302,11 +217,20 @@ export default function TrackerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!undo) return;
+    const t = setTimeout(() => setUndo(null), 8000);
+    return () => clearTimeout(t);
+  }, [undo]);
+
   /** Show the change now and save it in the background (retrying on failure). */
   function setField(j: Job, patch: Partial<Job>) {
     writes.queue(j, patch);
     setJobs((cur) => cur.map((x) => (x.id === j.id ? { ...x, ...patch } : x)));
   }
+
+  /** The row as it is on screen now (it may have changed since a handler captured it). */
+  const current = (j: Job) => jobsRef.current.find((x) => x.id === j.id) ?? j;
 
   /**
    * All status logic lives in applyStatusChange: the first move into a sent status freezes the saved
@@ -345,8 +269,21 @@ export default function TrackerPage() {
     });
     if (!patch) return; // cancelled: the select still shows the saved status
     // Use the row as it is now (the user may have edited it while the resumes loaded).
-    const current = jobsRef.current.find((x) => x.id === j.id) ?? j;
-    setField(current, patch);
+    setField(current(j), patch);
+  }
+
+  /** "Followed up": the next follow-up is due a week from today, which clears today's flag. Undo puts it back. */
+  function followedUp(j: Job) {
+    const next = addDays(localToday(), FOLLOW_UP_AGAIN_DAYS);
+    setField(j, { follow_up_date: next });
+    setUndo({ id: j.id, prev: j.follow_up_date, message: `Followed up. Next follow-up ${shortDate(next)}.` });
+  }
+
+  function undoFollowUp() {
+    if (!undo) return;
+    const j = jobsRef.current.find((x) => x.id === undo.id);
+    if (j) setField(j, { follow_up_date: undo.prev });
+    setUndo(null);
   }
 
   const needsMigration = missingCols.has("deadline");
@@ -359,7 +296,7 @@ export default function TrackerPage() {
     }
     return c;
   }, [jobs, today]);
-  const due = jobs.filter((j) => j.follow_up_date && j.follow_up_date <= today && j.status === "applied");
+  const due = jobs.filter((j) => followUpDue(j, today));
   const shown = useMemo(() => {
     const list =
       filter === "all"
@@ -376,7 +313,8 @@ export default function TrackerPage() {
     );
   }, [jobs, filter, sort, today]);
 
-  if (!ready) return <p className="text-muted">Loading…</p>;
+  const loadingText = slow ? "Still loading…" : "Loading…";
+  if (!ready) return <p role="status" className="text-muted">{loadingText}</p>;
 
   const noJobs = !loading && !loadError && jobs.length === 0;
   const chips: { value: Filter; label: string }[] = [
@@ -422,8 +360,8 @@ export default function TrackerPage() {
     <div className="space-y-3 sm:space-y-5">
       {migrationBanner}
 
-      {/* Once there are jobs (or while they load), "Add a job" is a one-line button so the list starts on the first screen. */}
-      <AddJobForm collapsible />
+      {/* Once there are jobs (or while they load), "Add job" is a one-line button so the list starts on the first screen. */}
+      <AddJobForm collapsible existing={jobs} />
 
       {due.length > 0 && (
         <div className="card px-3 py-2 border-ok bg-ok-bg/50 text-sm flex items-baseline gap-2 overflow-x-auto whitespace-nowrap">
@@ -480,13 +418,14 @@ export default function TrackerPage() {
       {/* Phones: one card per job */}
       <div className="sm:hidden space-y-2">
         {loading ? (
-          <p className="text-sm text-muted">Loading…</p>
+          <p role="status" className="text-sm text-muted">{loadingText}</p>
         ) : shown.length === 0 ? (
           <p className="text-sm text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
         ) : (
           shown.map((j) => {
             const urgency = deadlineUrgency(j.deadline, j.status, today);
             const fit = fitOf(j.analysis);
+            const isDue = followUpDue(j, today);
             return (
               <div
                 key={j.id}
@@ -515,10 +454,11 @@ export default function TrackerPage() {
                   )}
                   {j.date_applied && <span className="text-xs text-muted">Applied {shortDate(j.date_applied)}</span>}
                   {j.follow_up_date && j.status === "applied" && (
-                    <span className={`text-xs ${j.follow_up_date <= today ? "text-ok font-medium" : "text-muted"}`}>
+                    <span className={`text-xs ${isDue ? "text-ok font-medium" : "text-muted"}`}>
                       Follow up {shortDate(j.follow_up_date)}
                     </span>
                   )}
+                  {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
                   <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
                 </div>
               </div>
@@ -542,7 +482,7 @@ export default function TrackerPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td className="p-3 text-muted" colSpan={7}>Loading…</td></tr>
+              <tr><td role="status" className="p-3 text-muted" colSpan={7}>{loadingText}</td></tr>
             ) : shown.length === 0 ? (
               <tr>
                 <td className="p-3 text-muted" colSpan={7}>{jobs.length ? "No jobs match this filter." : ""}</td>
@@ -550,6 +490,7 @@ export default function TrackerPage() {
             ) : (
               shown.map((j) => {
                 const fit = fitOf(j.analysis);
+                const isDue = followUpDue(j, today);
                 return (
                   <tr key={j.id} className="border-b border-border last:border-0 hover:bg-bg/60 align-top">
                     <td className="p-3">
@@ -564,6 +505,8 @@ export default function TrackerPage() {
                       <div className="flex flex-col items-start gap-1">
                         <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
                         {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
+                        {/* In the status column so it shows at every width (the follow-up column hides below md). */}
+                        {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
                         <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
                       </div>
                     </td>
@@ -582,7 +525,7 @@ export default function TrackerPage() {
                       <input
                         type="date"
                         aria-label="Follow-up date"
-                        className="ghost-input text-xs"
+                        className={`ghost-input text-xs ${isDue ? "text-ok font-medium" : ""}`}
                         value={j.follow_up_date ?? ""}
                         onChange={(e) => setField(j, { follow_up_date: e.target.value || null })}
                       />
@@ -595,6 +538,7 @@ export default function TrackerPage() {
         </table>
       </div>
 
+      {undo && <UndoToast message={undo.message} onUndo={undoFollowUp} onClose={() => setUndo(null)} raised={anyFailing} />}
       {/* Fixed "Not saved — retrying…" notice while any row's write is failing. */}
       <SaveErrorToast status={anyFailing ? "error" : "saved"} onRetry={writes.retryAll} />
     </div>

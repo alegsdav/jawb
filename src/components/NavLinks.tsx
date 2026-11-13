@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/", label: "Tracker", short: "Tracker", desktop: true },
+  { href: "/", label: "Jobs", short: "Jobs", desktop: true },
   { href: "/resume", label: "Master resume", short: "Master", desktop: true },
   // On desktop, Account lives in the header's top-right corner instead.
   { href: "/account", label: "Account", short: "Account", desktop: false },

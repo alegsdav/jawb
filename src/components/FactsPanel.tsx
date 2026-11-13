@@ -8,17 +8,13 @@ import { useState } from "react";
  * the AI when tailoring. The parent owns the list (undo + autosave).
  */
 export function FactsPanel({
-  facts, onChange, onAdd, legacy = [], onImportLegacy, onDismissLegacy,
+  facts, onChange, onAdd,
 }: {
   facts: string[];
   /** Replace the whole list (edit/delete). */
   onChange: (next: string[]) => void;
   /** Append new facts (the parent de-duplicates). */
   onAdd: (lines: string[]) => void;
-  /** LEGACY: notes from the retired bullet bank that aren't in facts yet (one-time transition offer). */
-  legacy?: string[];
-  onImportLegacy?: () => void;
-  onDismissLegacy?: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<{ i: number; text: string } | null>(null);
@@ -48,29 +44,6 @@ export function FactsPanel({
           they&apos;re never printed.
         </p>
       </div>
-
-      {/* LEGACY transition: offer the old bullet bank's notes as facts until imported or dismissed. */}
-      {legacy.length > 0 && onImportLegacy && (
-        <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
-          <p className="text-sm font-medium">
-            Bring {legacy.length} note{legacy.length > 1 ? "s" : ""} over from your old bullet bank
-          </p>
-          <details className="text-sm">
-            <summary className="cursor-pointer text-muted">See them</summary>
-            <ul className="mt-1 list-disc pl-5 space-y-0.5 break-words">
-              {legacy.map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ul>
-          </details>
-          <div className="flex flex-wrap gap-2">
-            <button className="btn btn-sm btn-primary" onClick={onImportLegacy}>Add them as facts</button>
-            {onDismissLegacy && (
-              <button className="btn btn-sm" onClick={onDismissLegacy}>No thanks</button>
-            )}
-          </div>
-        </div>
-      )}
 
       {facts.length > 0 && (
         <ul className="divide-y divide-border border-y border-border">

@@ -85,11 +85,6 @@ export function useAutosaveWithRetry<T>(
   return { status, retry };
 }
 
-/** Same as useAutosaveWithRetry, returning only the status (failed saves still retry automatically). */
-export function useAutosave<T>(value: T | null, save: (v: T) => Promise<unknown>, delay = 800): SaveState {
-  return useAutosaveWithRetry(value, save, delay).status;
-}
-
 /** Combine several autosave statuses into the one to show: error > saving > unsaved > saved. */
 export function worstStatus(...all: SaveState[]): SaveState {
   for (const s of ["error", "saving", "unsaved"] as const) if (all.includes(s)) return s;

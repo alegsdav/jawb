@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
+import { dbErrorMessage } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,11 @@ export async function GET() {
     Promise.resolve(supabase.from("bullets").select("*").order("created_at")).catch(() => ({ data: null, error: null })),
   ]);
   const failed = resumes.error ?? jobs.error;
-  if (failed) return NextResponse.json({ error: failed.message }, { status: 500 });
+  if (failed) {
+    // The raw database message goes to the server log, never to the page.
+    console.error("export: loading failed:", failed);
+    return NextResponse.json({ error: dbErrorMessage(failed, "load") }, { status: 500 });
+  }
 
   const now = new Date();
   const body = {
