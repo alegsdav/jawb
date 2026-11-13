@@ -1,5 +1,12 @@
 /** POST to one of our API routes. Never throws; turns timeouts/HTML error pages into readable messages. */
-export async function postApi<T>(path: string, body: unknown): Promise<{ data?: T; error?: string }> {
+export type ApiResult<T> = {
+  data?: T;
+  error?: string;
+  /** Set when the intake API refuses a login-walled job board (e.g. "LinkedIn"); switch to the paste flow. */
+  pasteOnly?: string;
+};
+
+export async function postApi<T>(path: string, body: unknown): Promise<ApiResult<T>> {
   try {
     const res = await fetch(path, {
       method: "POST",
@@ -13,7 +20,9 @@ export async function postApi<T>(path: string, body: unknown): Promise<{ data?: 
       /* not JSON */
     }
     if (!res.ok) {
-      if (json?.error) return { error: String(json.error) };
+      if (json?.error) {
+        return { error: String(json.error), ...(json.pasteOnly ? { pasteOnly: String(json.pasteOnly) } : {}) };
+      }
       if (res.status === 504) return { error: "The AI took too long to respond. Try again in a moment." };
       if (res.status === 413) return { error: "That file is too large." };
       return { error: `Request failed (HTTP ${res.status}).` };
