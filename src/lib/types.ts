@@ -101,6 +101,8 @@ export type Job = {
   submitted_at: string | null;
   /** Whether the submitted resume differed from the master at submit time (for outcome stats). */
   submitted_tailored: boolean | null;
+  /** Set the first time the status enters Interview or Offer; stays true after a later Rejected (migration 0003). */
+  reached_interview?: boolean | null;
   created_at: string;
   updated_at: string;
 };
