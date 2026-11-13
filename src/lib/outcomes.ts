@@ -24,6 +24,15 @@ export function snapshotPatch(resume: Resume, master: Resume | null) {
   };
 }
 
+/** Undo a submission (e.g. status set back to To apply after a mis-tap): forget the snapshot and dates. */
+export function unsubmitPatch() {
+  return { submitted_resume: null, submitted_at: null, submitted_tailored: null, date_applied: null, follow_up_date: null };
+}
+
+/** True when moving to this status should offer to clear an existing submission. */
+export const shouldOfferUnsubmit = (status: string, submittedAt: string | null | undefined) =>
+  !SUBMITTED_STATUSES.has(status) && !!submittedAt;
+
 type Counts = { applied: number; interviews: number };
 const REACHED_INTERVIEW = new Set(["interview", "offer"]);
 
@@ -34,7 +43,7 @@ export function tailoringStats(jobs: Pick<Job, "status" | "submitted_at" | "subm
     untailored: { applied: 0, interviews: 0 },
   };
   for (const j of jobs) {
-    if (!j.submitted_at) continue;
+    if (!j.submitted_at || !SUBMITTED_STATUSES.has(j.status)) continue;
     const bucket = j.submitted_tailored ? out.tailored : out.untailored;
     bucket.applied++;
     if (REACHED_INTERVIEW.has(j.status)) bucket.interviews++;

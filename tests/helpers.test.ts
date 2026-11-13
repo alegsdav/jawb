@@ -121,3 +121,27 @@ d2("shouldSnapshot", () => {
     e2(shouldSnapshot("skipped", null)).toBe(false);
   });
 });
+
+import { shouldOfferUnsubmit, unsubmitPatch } from "@/lib/outcomes";
+import { isMissingColumn } from "@/lib/db";
+d2("unsubmit", () => {
+  i2("offers to clear a submission when moving back to an unsent status", () => {
+    e2(shouldOfferUnsubmit("to_apply", "2026-11-01")).toBe(true);
+    e2(shouldOfferUnsubmit("skipped", "2026-11-01")).toBe(true);
+    e2(shouldOfferUnsubmit("interview", "2026-11-01")).toBe(false);
+    e2(shouldOfferUnsubmit("to_apply", null)).toBe(false);
+    e2(unsubmitPatch().submitted_at).toBeNull();
+  });
+  i2("stats ignore jobs moved back to an unsent status", () => {
+    const s = tailoringStats([
+      { status: "to_apply", submitted_at: "x", submitted_tailored: true },
+      { status: "interview", submitted_at: "x", submitted_tailored: true },
+    ]);
+    e2(s.tailored).toEqual({ applied: 1, interviews: 1 });
+  });
+  i2("detects a missing-column error", () => {
+    e2(isMissingColumn({ code: "42703" })).toBe(true);
+    e2(isMissingColumn({ message: "Could not find the 'deadline' column of 'jobs'" })).toBe(true);
+    e2(isMissingColumn({ code: "23505" })).toBe(false);
+  });
+});

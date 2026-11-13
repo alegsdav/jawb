@@ -8,6 +8,7 @@ import { STATUSES, type Job, type JobStatus } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { isEmptyResume, normalizeResume } from "@/lib/resume";
 import { snapshotPatch, shouldSnapshot } from "@/lib/outcomes";
+import { isMissingColumn } from "@/lib/db";
 import { FitBadge, StatusSelect, applyDates } from "@/components/StatusSelect";
 import { AddJobForm, stashCapture } from "@/components/AddJobForm";
 import { OutcomeStats } from "@/components/OutcomeStats";
@@ -18,8 +19,6 @@ const BASE_COLS = "id, company, title, location, url, status, date_applied, foll
 const NEW_COLS = "deadline, submitted_at, submitted_tailored";
 const MIGRATION_HINT = "Database update needed: run supabase/migrations/0002_deadlines_snapshots.sql in your Supabase SQL editor";
 
-const isMissingColumn = (e: { code?: string; message?: string }) =>
-  e.code === "42703" || e.code === "PGRST204" || /column .* does not exist|could not find the .* column/i.test(e.message ?? "");
 
 type Filter = JobStatus | "all" | "closing";
 type Sort = "newest" | "deadline";
