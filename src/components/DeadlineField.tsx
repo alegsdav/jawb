@@ -1,16 +1,9 @@
 "use client";
 
-/** Today's date in the user's time zone, as YYYY-MM-DD (deadlines are calendar dates, not instants). */
-export function localToday(now = new Date()) {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
-}
+import { daysUntil, localToday, shortDate } from "@/lib/dates";
 
-/** Whole days from `today` to `date` (both YYYY-MM-DD); negative when overdue. */
-export function daysUntil(date: string, today = localToday()) {
-  const ms = (d: string) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10));
-  return Math.round((ms(date) - ms(today)) / 86400000);
-}
+// The date helpers live in @/lib/dates; re-exported so existing imports keep working.
+export { daysUntil, localToday };
 
 export type Urgency = "overdue" | "soon" | null;
 
@@ -42,10 +35,14 @@ export function DeadlineField({
   status: string;
   onChange: (v: string | null) => void;
   today?: string;
-  /** Phones: label inline with the input. */
+  /** Phone cards: label inline with the input, and read-only once the status is past To apply. */
   compact?: boolean;
 }) {
   const urgency = deadlineUrgency(value, status, today);
+  // Phones: once the job is past To apply the deadline no longer matters; show it read-only (if set).
+  if (compact && status !== "to_apply") {
+    return value ? <span className="text-xs text-muted">Deadline {shortDate(value)}</span> : null;
+  }
   return (
     <div className={compact ? "flex flex-wrap items-center gap-x-2 gap-y-1" : "flex flex-col items-start gap-0.5"}>
       <label className="inline-flex items-center gap-1.5">

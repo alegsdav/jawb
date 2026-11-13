@@ -80,19 +80,6 @@ export function resumeToPlainText(r: Resume): string {
   return resumeToPromptText(r).replace(/\[b:[^\]]+\] /g, "• ");
 }
 
-export function replaceBullet(r: Resume, bulletId: string, text: string): Resume {
-  return {
-    ...r,
-    sections: r.sections.map((s) => ({
-      ...s,
-      items: s.items.map((it) => ({
-        ...it,
-        bullets: it.bullets.map((b) => (b.id === bulletId ? { ...b, text } : b)),
-      })),
-    })),
-  };
-}
-
 export function bulletTextMap(r: Resume): Map<string, string> {
   const m = new Map<string, string>();
   for (const s of r.sections) for (const it of s.items) for (const b of it.bullets) m.set(b.id, b.text);
@@ -212,8 +199,4 @@ export function reconcileIds(prev: Resume, next: Resume): Resume {
   delete out.facts;
   if (!prev.facts?.length && !next.facts?.length) return out;
   return addFacts({ ...out, facts: [...(prev.facts ?? [])] }, next.facts ?? []);
-}
-
-export function wordCount(r: Resume): number {
-  return resumeToPlainText(r).split(/\s+/).filter(Boolean).length;
 }

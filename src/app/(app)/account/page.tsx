@@ -39,7 +39,11 @@ export default function AccountPage() {
       <section className="card p-4 space-y-2">
         <h2 className="font-semibold">Export your data</h2>
         <p className="text-sm text-muted">
-          Downloads a JSON backup of your resumes (including extra facts) and every job you&apos;ve tracked.
+          Downloads a JSON backup of your master resume (including your facts), every tailored copy, and every job
+          you&apos;ve tracked.
+        </p>
+        <p className="text-xs text-muted">
+          The backup is for safekeeping. There&apos;s no import button: restoring it is done by hand in Supabase.
         </p>
         <a href="/api/export" download className="btn w-full py-2.5">
           Download backup (.json)

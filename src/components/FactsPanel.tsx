@@ -3,8 +3,9 @@
 import { useState } from "react";
 
 /**
- * "Extra facts" on the master resume: true things that don't fit on the page. Shown below the
- * document, never printed, fed to the AI when tailoring. The parent owns the list (undo + autosave).
+ * Facts on the master resume: true things that don't fit on the page. Shown beside the document on
+ * desktop and below it on phones (`id="facts"` is the toolbar's jump target); never printed, fed to
+ * the AI when tailoring. The parent owns the list (undo + autosave).
  */
 export function FactsPanel({
   facts, onChange, onAdd, legacy = [], onImportLegacy, onDismissLegacy,
@@ -14,7 +15,7 @@ export function FactsPanel({
   onChange: (next: string[]) => void;
   /** Append new facts (the parent de-duplicates). */
   onAdd: (lines: string[]) => void;
-  /** Notes from the old bullet bank that aren't in facts yet. */
+  /** LEGACY: notes from the retired bullet bank that aren't in facts yet (one-time transition offer). */
   legacy?: string[];
   onImportLegacy?: () => void;
   onDismissLegacy?: () => void;
@@ -37,10 +38,10 @@ export function FactsPanel({
   };
 
   return (
-    <section className="card p-4 sm:p-5 space-y-3" aria-labelledby="facts-heading">
+    <section id="facts" className="card p-4 sm:p-5 space-y-3 scroll-mt-16" aria-labelledby="facts-heading">
       <div>
         <h2 id="facts-heading" className="font-semibold">
-          Extra facts <span className="text-sm font-normal text-muted">· {facts.length}</span>
+          Facts <span className="text-sm font-normal text-muted">· {facts.length}</span>
         </h2>
         <p className="text-sm text-muted">
           True things that don&apos;t fit on the page — numbers, tools, side projects. The AI uses them when tailoring;
@@ -48,6 +49,7 @@ export function FactsPanel({
         </p>
       </div>
 
+      {/* LEGACY transition: offer the old bullet bank's notes as facts until imported or dismissed. */}
       {legacy.length > 0 && onImportLegacy && (
         <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 space-y-2">
           <p className="text-sm font-medium">

@@ -54,9 +54,12 @@ function takeCapture(): Capture | null {
 /**
  * "Add a job": one box for a link or a pasted description. For sites the server can't read
  * (LinkedIn, Handshake, Workday…) it switches to two fields: the link plus the pasted description.
+ * With `collapsible` (the tracker once it has jobs) it starts as a one-line "+ Add a job" button so
+ * the job list starts on the first screen of a phone; a bookmarklet capture opens it.
  */
-export function AddJobForm() {
+export function AddJobForm({ collapsible = false }: { collapsible?: boolean }) {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"one" | "paste">("one");
   const [input, setInput] = useState("");
   const [link, setLink] = useState("");
@@ -70,6 +73,7 @@ export function AddJobForm() {
   useEffect(() => {
     const c = takeCapture();
     if (!c) return;
+    setOpen(true);
     setMode("paste");
     setLink(c.url ?? "");
     setDesc(c.text ?? "");
@@ -135,8 +139,9 @@ export function AddJobForm() {
     setDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file) {
-      if (/pdf|word|officedocument/.test(file.type)) {
-        setError("PDF/Word files aren't supported yet. Open the file and paste the text instead.");
+      // A PDF can't be read as text in the browser; text files and dropped links/selections can.
+      if (!/^text\//.test(file.type) && !/\.(txt|md)$/i.test(file.name)) {
+        setError("Drop a link or text; for a PDF, open it and paste the text.");
         return;
       }
       const text = await file.text();
@@ -155,6 +160,18 @@ export function AddJobForm() {
   const isUrl = URL_RE.test(input.trim());
   const site = isUrl ? pasteOnlySite(input.trim()) : null;
 
+  if (collapsible && !open) {
+    return (
+      <div className="flex items-center gap-3">
+        <h1 className="text-lg font-semibold">Jobs</h1>
+        <p className="hidden md:block text-sm text-muted truncate">Paste a link or a description, or use the bookmarklet.</p>
+        <button className="btn btn-primary ml-auto min-h-10 px-4" aria-expanded={false} onClick={() => setOpen(true)}>
+          ＋ Add a job
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       onDragOver={(e) => {
@@ -166,7 +183,22 @@ export function AddJobForm() {
       className={`card p-4 space-y-3 transition ${dragging ? "border-accent ring-2 ring-accent/30" : ""}`}
     >
       <div>
-        <h1 className="text-lg font-semibold">Add a job</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-semibold">Add a job</h1>
+          {collapsible && (
+            <button
+              className="btn btn-sm ml-auto min-h-9"
+              aria-expanded
+              onClick={() => {
+                setOpen(false);
+                setError("");
+              }}
+              disabled={busy}
+            >
+              Close
+            </button>
+          )}
+        </div>
         {mode === "one" ? (
           <p className="text-sm text-muted">
             Paste a job link (Greenhouse, Lever, Ashby and most company pages work) or the full description.
@@ -188,6 +220,8 @@ export function AddJobForm() {
       {mode === "one" ? (
         <textarea
           className="input w-full h-24 sm:h-28"
+          aria-label="Job link or description"
+          autoFocus={collapsible}
           placeholder="https://job-boards.greenhouse.io/… or paste the description"
           value={input}
           onChange={(e) => setInput(e.target.value)}

@@ -17,7 +17,7 @@ export function ResumeImport({
   const [error, setError] = useState("");
 
   async function run(file?: File) {
-    if (replaceWarning && !confirm("Replace your current master resume with the imported one? Your extra facts are kept.")) return;
+    if (replaceWarning && !confirm("Replace your current master resume with the imported one? Your facts are kept.")) return;
     setBusy(true);
     setError("");
     let body: FormData | { text: string };
@@ -39,7 +39,7 @@ export function ResumeImport({
       {replaceWarning && (
         <p className="text-sm">
           <strong>Re-importing replaces the current master.</strong>{" "}
-          <span className="text-muted">Your extra facts are kept.</span>
+          <span className="text-muted">Your facts are kept.</span>
         </p>
       )}
       <label

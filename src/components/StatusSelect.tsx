@@ -3,6 +3,10 @@
 import { STATUSES, type Fit, type JobStatus } from "@/lib/types";
 import { FIT_LABEL } from "@/lib/fit";
 
+// Kept here so existing `import { applyDates } from "@/components/StatusSelect"` keeps working.
+export { applyDates } from "@/lib/dates";
+export { statusChangePatch } from "@/lib/status";
+
 const COLORS: Record<JobStatus, string> = {
   to_apply: "",
   applied: "text-accent",
@@ -15,6 +19,7 @@ const COLORS: Record<JobStatus, string> = {
 export function StatusSelect({ value, onChange }: { value: JobStatus; onChange: (s: JobStatus) => void }) {
   return (
     <select
+      aria-label="Status"
       className={`input py-1 text-xs ${COLORS[value]}`}
       value={value}
       onChange={(e) => onChange(e.target.value as JobStatus)}
@@ -24,13 +29,6 @@ export function StatusSelect({ value, onChange }: { value: JobStatus; onChange: 
       ))}
     </select>
   );
-}
-
-/** Applying sets today's date and a follow-up 10 days out. */
-export function applyDates() {
-  const now = new Date();
-  const follow = new Date(now.getTime() + 10 * 86400000);
-  return { date_applied: now.toISOString().slice(0, 10), follow_up_date: follow.toISOString().slice(0, 10) };
 }
 
 const FIT_CLS: Record<Fit, string> = {

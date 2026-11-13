@@ -8,17 +8,17 @@ import { STATUSES, type Job, type JobStatus } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { isEmptyResume, normalizeResume } from "@/lib/resume";
 import { snapshotPatch, shouldSnapshot } from "@/lib/outcomes";
-import { isMissingColumn } from "@/lib/db";
-import { FitBadge, StatusSelect, applyDates } from "@/components/StatusSelect";
+import { isMissingColumn, MIGRATION_HINT } from "@/lib/db";
+import { localToday } from "@/lib/dates";
+import { statusChangePatch, UNSUBMIT_QUESTION } from "@/lib/status";
+import { FitBadge, StatusSelect } from "@/components/StatusSelect";
 import { AddJobForm, stashCapture } from "@/components/AddJobForm";
 import { OutcomeStats } from "@/components/OutcomeStats";
-import { DeadlineField, deadlineUrgency, isClosingSoon, localToday } from "@/components/DeadlineField";
+import { DeadlineField, deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at";
 /** Added by migration 0002. */
 const NEW_COLS = "deadline, submitted_at, submitted_tailored";
-const MIGRATION_HINT = "Database update needed: run supabase/migrations/0002_deadlines_snapshots.sql in your Supabase SQL editor";
-
 
 type Filter = JobStatus | "all" | "closing";
 type Sort = "newest" | "deadline";
@@ -85,10 +85,13 @@ export default function TrackerPage() {
     return save(id, patch);
   }
 
-  /** The first move to Applied/Interview/Offer/Rejected also freezes a copy of exactly what was sent (once), for the outcome stats. */
+  /**
+   * The first move to Applied/Interview/Offer/Rejected also freezes a copy of exactly what was sent
+   * (once), for the outcome stats. Moving back to To apply/Skipped offers to clear that submission.
+   */
   async function setStatus(j: Job, status: JobStatus) {
     const sending = shouldSnapshot(status, j.submitted_at);
-    const patch: Partial<Job> = { status, ...(sending && !j.date_applied ? applyDates() : {}) };
+    const patch = statusChangePatch(j, status, () => confirm(UNSUBMIT_QUESTION));
     setJobs((cur) => cur.map((x) => (x.id === j.id ? { ...x, ...patch } : x)));
     if (sending && !needsMigration) {
       const [tailored, master] = await Promise.all([
@@ -141,7 +144,7 @@ export default function TrackerPage() {
   ];
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-3 sm:space-y-5">
       {needsMigration && (
         <div className="card border-ok bg-ok-bg p-3 text-sm">
           <strong>Database update needed:</strong> run{" "}
@@ -150,15 +153,16 @@ export default function TrackerPage() {
         </div>
       )}
 
-      <AddJobForm />
+      {/* Once there are jobs (or while they load), "Add a job" is a one-line button so the list starts on the first screen. */}
+      <AddJobForm collapsible={loading || jobs.length > 0} />
 
       {due.length > 0 && (
-        <div className="card p-3 border-ok bg-ok-bg/50 text-sm">
-          <strong>Follow-ups due:</strong>{" "}
+        <div className="card px-3 py-2 border-ok bg-ok-bg/50 text-sm flex items-baseline gap-2 overflow-x-auto whitespace-nowrap">
+          <strong className="shrink-0">Follow-ups due ({due.length}):</strong>
           {due.map((j, i) => (
-            <span key={j.id}>
-              {i > 0 && ", "}
+            <span key={j.id} className="shrink-0">
               <Link href={`/jobs/${j.id}`} className="underline">{j.company || j.title}</Link>
+              {i < due.length - 1 && ","}
             </span>
           ))}
         </div>
@@ -174,7 +178,8 @@ export default function TrackerPage() {
             <button
               key={s.value}
               onClick={() => setFilter(s.value)}
-              className={`chip shrink-0 py-1 ${
+              aria-pressed={filter === s.value}
+              className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-1 ${
                 filter === s.value
                   ? "bg-fg text-bg border-fg"
                   : s.value === "closing" && counts.closing
@@ -189,7 +194,7 @@ export default function TrackerPage() {
         {!needsMigration && (
           <label className="shrink-0 pb-1 flex items-center gap-2 self-end sm:self-auto">
             <span className="text-xs text-muted">Sort</span>
-            <select className="input py-1 text-xs" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+            <select className="input py-1 text-xs min-h-10 sm:min-h-0" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
               <option value="newest">Newest added</option>
               <option value="deadline">Deadline soonest</option>
             </select>
