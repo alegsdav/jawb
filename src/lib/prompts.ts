@@ -172,3 +172,81 @@ Rules:
 
 Return ONLY JSON: {"facts": ["...", "..."]}`;
 }
+
+/** What the coaching prompts know about the entry being coached (the student's own resume text). */
+export type CoachContext = {
+  /** "Acme Corp | Data Analyst Intern | Boston, MA | Jun 2025 – Aug 2025". */
+  entry: string;
+  /** The entry's bullets, as written. */
+  bullets: string[];
+  /** The selected bullet, when a bullet (not the whole entry) is selected. */
+  bullet: string;
+  /** Output of formatFacts(...) for the relevant active facts. */
+  facts: string;
+  /** The job posting on a job tab; "" on the master resume. */
+  job: string;
+};
+
+function coachHeader(c: CoachContext, task: string) {
+  const target = c.job
+    ? `They are tailoring it to the job posting below: use the posting's language and priorities (what this employer will look for).`
+    : `This is their master resume (no specific job): aim for what makes a bullet strong to any recruiter for this kind of role.`;
+  return `You are a warm, honest resume coach for college students who don't yet know what recruiters value. ${task}
+${target}
+
+RESUME ENTRY:
+"""
+${c.entry || "(untitled entry)"}
+${c.bullets.map((b) => `- ${b}`).join("\n") || "(no bullets yet)"}
+"""
+
+${c.bullet ? `SELECTED BULLET:\n"""\n${c.bullet}\n"""\n` : ""}
+STUDENT'S FACTS (true, things they told us; may be empty):
+"""
+${c.facts || "(none)"}
+"""
+${c.job ? `\nJOB POSTING:\n"""\n${c.job.slice(0, 8000)}\n"""\n` : ""}${RULES}
+- Never fabricate employers, tools, technologies, titles or results the student did not state in the entry or facts.
+- In coaching, a metric you don't know is a blank token like {{b1}} (described below), not a [placeholder].`;
+}
+
+/**
+ * Example bullets with a blank for every metric. `round` > 1 ("More examples") asks for different
+ * angles; earlier examples are never sent back (they're ephemeral and must not reach any prompt).
+ */
+export function coachExamplesPrompt(c: CoachContext & { round: number }) {
+  return `${coachHeader(c, `Show the student up to 3 example bullets for ${c.bullet ? "the selected bullet" : "this entry"}, so they can see what a strong version looks like.`)}
+
+How to write the examples:
+- Build each example only from what the entry, the selected bullet and the facts say the student did. Same employer,
+  same tools, same kind of work. You may suggest a stronger verb, clearer scope, and WHERE a result or metric would go.
+- EVERY metric (any count, %, $, time, frequency, size, rank, or number word like "five" or "twice") must be a blank token
+  {{b1}}, {{b2}}... in the text. Never write a number outside a blank, and never use [brackets]. Examples with a stray
+  number are thrown away automatically.
+- If one of the STUDENT'S FACTS states the value for a blank, set "from_fact" to that fact copied exactly and "fact_value"
+  to the value exactly as the fact writes it. Otherwise leave both "".
+- "why": one line on why a recruiter for this kind of role cares about this bullet. No statistics or numbers.
+- "anatomy": label the parts, each with a span copied exactly from the text: "verb" (the opening action), "scope" (who/what/
+  how big), "tool" (method or technology, if any), "result" (the outcome or impact).
+- For each blank: "label" (what to measure, 2-5 words, e.g. "students tutored per week"), "hint" (a typical honest range
+  for a student, phrased as a hint, e.g. "Most student tutors see somewhere between a handful and a few dozen a week"),
+  "example_value" (an illustrative value with its unit, e.g. "15"), and "question" (plain language: how to find the real
+  number, with an estimation tip, e.g. "Count a typical week and multiply by the weeks in the semester").
+${c.round > 1 ? `- This is set #${c.round}: take different angles than the most obvious ones (for example lead with the outcome, the process, collaboration, or who benefited), with different verbs.\n` : ""}
+Return ONLY JSON:
+{ "examples": [ { "text": "Led {{b1}} weekly calculus review sessions...", "why": "", "anatomy": [{ "part": "verb", "span": "Led" }],
+  "blanks": [{ "key": "b1", "label": "", "hint": "", "example_value": "", "question": "", "from_fact": "", "fact_value": "" }] } ] }`;
+}
+
+/** 3 to 5 questions that help the student find the real details and numbers for an entry. */
+export function coachQuestionsPrompt(c: CoachContext) {
+  return `${coachHeader(c, `Ask the student 3 to 5 short questions that would let them write a strong bullet for ${c.bullet ? "the selected bullet" : "this entry"}: real numbers, scope, tools, and results they may not realize count.`)}
+
+- Ask about what they actually did; never assume results.
+- Don't ask anything the STUDENT'S FACTS already answer.
+- Each question must be answerable in rough form ("about 20", "maybe 3 hours a week") or skipped.
+- "why": one line on why it matters to a recruiter. "tip": how to estimate if they don't know exactly
+  (e.g. "Think of a typical week and multiply").
+
+Return ONLY JSON: { "questions": [ { "question": "", "why": "", "tip": "" } ] }`;
+}

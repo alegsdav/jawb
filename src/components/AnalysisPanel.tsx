@@ -42,6 +42,12 @@ type Props = {
    * questions, suggested edits or re-analyze), since edits no longer change what was sent.
    */
   quiet?: boolean;
+  /**
+   * Shown at the top in place of the "N suggested edits" box: the job tab's priority list (rewrites
+   * to review first, then missing keywords). Everything below (verdict, questions, gaps, strengths)
+   * stays as it is.
+   */
+  top?: React.ReactNode;
 };
 
 const SEVERITY: Record<string, string> = { high: "text-bad", medium: "text-ok", low: "text-muted" };
@@ -198,7 +204,8 @@ export function AnalysisPanel(p: Props) {
           )
         )}
         {a && <p className="text-sm">{a.verdict}</p>}
-        {a && !p.quiet && p.pendingCount > 0 && (
+        {a && !p.quiet && p.top}
+        {a && !p.quiet && !p.top && p.pendingCount > 0 && (
           <div className="rounded-lg bg-accent/5 border border-accent/30 p-3 space-y-2">
             <p className="text-sm">
               <strong>{p.pendingCount} suggested edit{p.pendingCount > 1 ? "s" : ""}</strong> to tailor your resume for this job.

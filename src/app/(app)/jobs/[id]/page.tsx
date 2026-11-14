@@ -5,9 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  bulletTextMap, countChangedBullets, emptyResume, isEmptyResume, normalizeResume, resumeToPlainText,
+  bulletTextMap, countChangedBullets, emptyResume, isEmptyResume, normalizeResume, resumeToPlainText, uid,
 } from "@/lib/resume";
-import type { Analysis, Job, JobStatus, Resume } from "@/lib/types";
+import type { Analysis, Fact, Job, JobStatus, Resume } from "@/lib/types";
 import { friendlyError, postApi } from "@/lib/api";
 import { countPlaceholders, hasPlaceholder, plural } from "@/lib/facts";
 import { fitOf } from "@/lib/fit";
@@ -29,7 +29,13 @@ import {
   planSaveAsMaster, planTailoredRefresh, readJob, rebaseJob, saveTailoredDocument, statusConflictOutcome, tailoredFromRow,
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
-import { ResumeDocument } from "@/components/ResumeDocument";
+import { ResumeDocument, type DocSelection } from "@/components/ResumeDocument";
+import { CoachPanel } from "@/components/CoachPanel";
+import { PriorityList } from "@/components/PriorityList";
+import { FactsPanel } from "@/components/FactsPanel";
+import { SideTabs } from "@/components/SideTabs";
+import { UndoToast } from "@/components/UndoToast";
+import { insertCoachedBullet, priorityItems, type CoachTarget } from "@/lib/coaching";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, FitBadge } from "@/components/StatusSelect";
 import { DeadlineField } from "@/components/DeadlineField";
@@ -126,6 +132,12 @@ export default function JobPage() {
   const facts = useFacts(supabase);
   const mirrorRef = useRef(facts.mirror);
   mirrorRef.current = facts.mirror;
+  /** The entry or bullet the coaching panel is about (follows the document's selection; "Back" clears it). */
+  const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
+  const [sideTab, setSideTab] = useState<"coach" | "facts">("coach");
+  /** This job's tailored copy's row id (facts coached here link to it). */
+  const [tailoredId, setTailoredId] = useState<string | null>(null);
+  const [factUndo, setFactUndo] = useState<Fact | null>(null);
 
   const autoRan = useRef(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -233,6 +245,7 @@ export default function JobPage() {
 
       const open = async (row: { id: string; content: unknown; updated_at: string }) => {
         resumeIdRef.current = row.id;
+        setTailoredId(row.id);
         const stored = tailoredFromRow(row.content);
         resumeBase.current = { content: stored, updatedAt: row.updated_at };
         let start: Resume;
@@ -522,6 +535,7 @@ export default function JobPage() {
   const pull = useMemo(() => planPull(resume, master), [resume, master]);
   const placeholderCount = useMemo(() => (resume ? countPlaceholders(resumeTexts(resume)) : 0), [resume]);
   const factTexts = useMemo(() => facts.facts.map((f) => f.text), [facts.facts]);
+  const priority = useMemo(() => (resume && !quiet ? priorityItems(resume, feedback) : []), [resume, feedback, quiet]);
   const missingFacts = useMemo(
     () =>
       analysis && facts.status === "ready" ? missingAnswerFacts(analysis.questions, analysis.answers, factTexts, analysis.bullets) : [],
@@ -666,6 +680,26 @@ export default function JobPage() {
     }
     setError("");
     return { ok: true, added: res.added };
+  }
+
+  /** The document's selection drives the coaching panel (a section alone doesn't). */
+  const onSelection = useCallback((sel: DocSelection | null) => {
+    if (!sel || sel.kind === "section") return;
+    setCoachTarget((cur) => {
+      const next = { sectionId: sel.sectionId, entryId: sel.entryId, bulletId: sel.kind === "bullet" ? sel.bulletId : null };
+      return cur && cur.entryId === next.entryId && cur.bulletId === next.bulletId ? cur : next;
+    });
+    setSideTab("coach");
+  }, []);
+
+  /** Put a coached bullet on this tailored copy (an undo step); returns its id. */
+  function insertBullet(target: CoachTarget, text: string, mode: "add" | "replace"): string | null {
+    const cur = docLatest.current;
+    if (!cur || !cur.sections.some((sec) => sec.items.some((it) => it.id === target.entryId))) return null;
+    const { resume: next, bulletId } = insertCoachedBullet(cur, target, text, mode, uid());
+    doc.set(next, true);
+    setReveal({ id: bulletId, n: Date.now() });
+    return bulletId;
   }
 
   async function downloadPdf() {
@@ -878,7 +912,69 @@ export default function JobPage() {
       canFill={(q) => fillTarget(q) !== null}
       onFill={fillAnswer}
       quiet={quiet}
+      top={
+        priority.length || analysis?.keywords.missing.length ? (
+          <PriorityList
+            items={priority}
+            missingKeywords={analysis?.keywords.missing ?? []}
+            onAccept={(bid, rewrite) => {
+              if (!resume) return;
+              doc.set(replaceBullet(resume, bid, rewrite), true);
+              showFlash("Accepted the suggested edit (Undo to go back)");
+            }}
+            onReject={rejectSuggestion}
+            onShow={(bid) => {
+              selectTab("resume");
+              setReveal({ id: bid, n: Date.now() });
+            }}
+            onAcceptAll={acceptAll}
+          />
+        ) : null
+      }
     />
+  );
+
+  const coach =
+    coachTarget && resume ? (
+      <CoachPanel
+        key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}`}
+        resume={resume}
+        resumeId={tailoredId}
+        jobId={id}
+        target={coachTarget}
+        facts={facts}
+        onBack={() => setCoachTarget(null)}
+        onInsert={insertBullet}
+        disabledReason={quiet ? "You've applied with this copy. Turn on “Keep editing (for a re-apply)” to coach it again." : undefined}
+      />
+    ) : null;
+
+  const side = (
+    <div className="space-y-3">
+      <SideTabs
+        label="Panel"
+        value={sideTab}
+        onChange={setSideTab}
+        tabs={[
+          { key: "coach", label: "Coach" },
+          { key: "facts", label: `Facts (${facts.facts.length})` },
+        ]}
+      />
+      {sideTab === "facts" ? (
+        <FactsPanel
+          facts={facts.facts}
+          status={facts.status}
+          error={facts.error}
+          onAdd={(lines) => facts.add(lines.map((text) => ({ text, source: "manual" })))}
+          onEdit={facts.edit}
+          onDelete={async (f) => {
+            if (await facts.remove([f.id])) setFactUndo(f);
+          }}
+        />
+      ) : (
+        (coach ?? panel)
+      )}
+    </div>
   );
 
   const followUp = (
@@ -1128,6 +1224,7 @@ export default function JobPage() {
                   actionsSlot={slot}
                   reveal={reveal}
                   quiet={quiet}
+                  onSelectionChange={onSelection}
                 />
               </>
             )}
@@ -1205,7 +1302,7 @@ export default function JobPage() {
         <aside
           className={`${tab === "analysis" ? "" : "hidden"} lg:block lg:sticky lg:top-[4.5rem] lg:self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto`}
         >
-          {panel}
+          {side}
         </aside>
       </div>
 
@@ -1232,6 +1329,16 @@ export default function JobPage() {
         <TailoredConflictBanner conflicts={conflict.conflicts} busy={resolving} onReload={reloadTheirs} onKeepMine={keepMine} />
       )}
 
+      {factUndo && (
+        <UndoToast
+          message="Fact deleted"
+          onUndo={() => {
+            void facts.restore([factUndo]);
+            setFactUndo(null);
+          }}
+          onClose={() => setFactUndo(null)}
+        />
+      )}
       <FlashToast
         message={flash.message}
         action={flash.action}

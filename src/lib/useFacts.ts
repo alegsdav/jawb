@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Fact, Resume } from "./types";
-import { factIsActive, type NewFact } from "./facts";
+import { factIsActive, type FactPatch, type NewFact } from "./facts";
 import { deleteFacts, FACTS_MIGRATION_HINT, insertFacts, loadFacts, mirrorFacts, updateFact } from "./factStore";
 
 export type FactsStatus = "loading" | "ready" | "missing" | "error";
@@ -114,6 +114,33 @@ export function useFacts(supabase: SupabaseClient) {
     [add],
   );
 
+  /** Change fields of a fact as they are (no unlinking): e.g. a coached bullet's fact taking its new text. */
+  const patch = useCallback(
+    async (id: string, p: FactPatch): Promise<boolean> => {
+      const cur = ref.current.find((f) => f.id === id);
+      if (!cur) return false;
+      set(ref.current.map((f) => (f.id === id ? { ...f, ...p } : f)));
+      const res = await updateFact(supabase, id, p);
+      if (!res.ok) {
+        set(ref.current.map((f) => (f.id === id ? cur : f)));
+        setError(res.error);
+        return false;
+      }
+      return true;
+    },
+    [supabase, set],
+  );
+
+  /** Add rows the server already inserted (e.g. /api/extract-facts) to the list. */
+  const absorb = useCallback(
+    (rows: Fact[]) => {
+      const have = new Set(ref.current.map((f) => f.id));
+      const fresh = rows.filter((f) => !have.has(f.id));
+      if (fresh.length) set([...ref.current, ...fresh]);
+    },
+    [set],
+  );
+
   /** Mirror facts linked to `resumeId` onto `resume` (see planMirror). Throws on failure. */
   const mirror = useCallback(
     async (resumeId: string, resume: Resume) => {
@@ -125,8 +152,8 @@ export function useFacts(supabase: SupabaseClient) {
   );
 
   return useMemo(
-    () => ({ facts, status, error, setError, add, edit, remove, restore, mirror, reload, replace: set }),
-    [facts, status, error, add, edit, remove, restore, mirror, reload, set],
+    () => ({ facts, status, error, setError, add, edit, patch, absorb, remove, restore, mirror, reload, replace: set }),
+    [facts, status, error, add, edit, patch, absorb, remove, restore, mirror, reload, set],
   );
 }
 

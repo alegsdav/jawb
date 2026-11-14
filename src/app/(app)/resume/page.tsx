@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { emptyResume, emptySection, isEmptyResume, normalizeResume, reconcileIds } from "@/lib/resume";
+import { emptyResume, emptySection, isEmptyResume, normalizeResume, reconcileIds, uid } from "@/lib/resume";
 import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
 import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import type { Fact, Resume } from "@/lib/types";
-import { ResumeDocument } from "@/components/ResumeDocument";
+import { ResumeDocument, type DocSelection } from "@/components/ResumeDocument";
+import { CoachPanel } from "@/components/CoachPanel";
+import { SideTabs } from "@/components/SideTabs";
+import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
 import { ResumeActions } from "@/components/ResumeActions";
 import { DocToolbar, PageCount, UndoRedo } from "@/components/DocToolbar";
 import { ResumeImport } from "@/components/ResumeImport";
@@ -120,6 +123,21 @@ export default function MasterResumePage() {
   mirrorRef.current = facts.mirror;
   /** "Fact deleted · Undo" */
   const [undo, setUndo] = useState<{ message: string; restore: Fact[] } | null>(null);
+  /** The entry or bullet the coaching panel is about (follows the selection; "Back" clears it). */
+  const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
+  const [coachStart, setCoachStart] = useState<"questions" | undefined>(undefined);
+  const [sideTab, setSideTab] = useState<"coach" | "facts">("coach");
+  const latestDoc = useRef<Resume | null>(null);
+  latestDoc.current = resume;
+  const onSelection = useCallback((sel: DocSelection | null) => {
+    if (!sel || sel.kind === "section") return;
+    setCoachTarget((cur) => {
+      const next = { sectionId: sel.sectionId, entryId: sel.entryId, bulletId: sel.kind === "bullet" ? sel.bulletId : null };
+      return cur && cur.entryId === next.entryId && cur.bulletId === next.bulletId ? cur : next;
+    });
+    setCoachStart(undefined);
+    setSideTab("coach");
+  }, []);
 
   useEffect(() => {
     loadOrCreateMaster(supabase).then(
@@ -225,6 +243,14 @@ export default function MasterResumePage() {
     // Every bullet you imported is a fact the AI can use, linked to its bullet (it follows your edits).
     if (id) void facts.add(importedBulletFacts(next, id, facts.facts));
   };
+  /** Put a coached bullet on the master (an undo step); returns its id. */
+  const insertBullet = (target: CoachTarget, text: string, mode: "add" | "replace"): string | null => {
+    const cur = latestDoc.current;
+    if (!cur || !cur.sections.some((sec) => sec.items.some((it) => it.id === target.entryId))) return null;
+    const { resume: next, bulletId } = insertCoachedBullet(cur, target, text, mode, uid());
+    doc.set(next, true);
+    return bulletId;
+  };
   const deleteFact = async (f: Fact) => {
     if (await facts.remove([f.id])) setUndo({ message: "Fact deleted", restore: [f] });
   };
@@ -267,7 +293,13 @@ export default function MasterResumePage() {
                 <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
                 <SaveStatus status={conflict ? "error" : status} />
                 <span className="hidden md:inline"><PageCount {...measure} /></span>
-                <a href="#facts" className="btn btn-sm lg:hidden">Facts ({factCount})</a>
+                <a
+                  href="#side-panel"
+                  className="btn btn-sm lg:hidden"
+                  onClick={() => setSideTab("facts")}
+                >
+                  Facts ({factCount})
+                </a>
                 <div className="ml-auto flex flex-wrap items-center gap-1.5">
                   <button className="btn btn-sm" onClick={() => setImportOpen((o) => !o)}>Re-import</button>
                   <button
@@ -295,10 +327,41 @@ export default function MasterResumePage() {
                 Click any line to edit. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it.
                 Undo with Ctrl/⌘+Z.
               </p>
-              <ResumeDocument value={resume} onChange={doc.set} onMeasure={setMeasure} actionsSlot={slot} />
+              <ResumeDocument value={resume} onChange={doc.set} onMeasure={setMeasure} actionsSlot={slot} onSelectionChange={onSelection} />
             </div>
 
-            <div className="lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto">
+            <div id="side-panel" className="lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto space-y-3 scroll-mt-16">
+              <SideTabs
+                label="Panel"
+                value={sideTab}
+                onChange={setSideTab}
+                tabs={[
+                  { key: "coach", label: "Coach" },
+                  { key: "facts", label: `Facts (${factCount})` },
+                ]}
+              />
+              {sideTab === "coach" &&
+                (coachTarget ? (
+                  <CoachPanel
+                    key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}:${coachStart ?? ""}`}
+                    resume={resume}
+                    resumeId={id}
+                    target={coachTarget}
+                    facts={facts}
+                    startWith={coachStart}
+                    onBack={() => setCoachTarget(null)}
+                    onInsert={insertBullet}
+                  />
+                ) : (
+                  <section className="card p-4 space-y-2" aria-labelledby="coach-intro">
+                    <h2 id="coach-intro" className="font-semibold">Coach</h2>
+                    <p className="text-sm text-muted">
+                      Select any entry or bullet on your resume to see examples of strong bullets, or answer a few questions
+                      that help you find your real numbers. Nothing goes on your resume until you choose it.
+                    </p>
+                  </section>
+                ))}
+              {sideTab === "facts" && (
               <FactsPanel
                 facts={facts.facts}
                 status={facts.status}
@@ -311,6 +374,7 @@ export default function MasterResumePage() {
                 onEdit={facts.edit}
                 onDelete={deleteFact}
               />
+              )}
             </div>
           </div>
         </>
