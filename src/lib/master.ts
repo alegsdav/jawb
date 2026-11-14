@@ -6,8 +6,8 @@ import { dbErrorMessage } from "./db";
 /**
  * Conflict-safe writes to the master resume.
  *
- * Several places write the master's whole JSON (the master page's autosave, "add these answers to my
- * facts" and "save this version as my master" on a job). A plain update would let a stale copy in
+ * Several places write the master's whole JSON (the master page's autosave and "save this version as
+ * my master" on a job). A plain update would let a stale copy in
  * one tab or device silently wipe what another just saved. Every write here is conditional on the
  * row's `updated_at` (bumped by a trigger on each update): if 0 rows match, someone else saved in
  * between, so we re-read and either re-apply (updateMaster) or three-way merge (saveMasterDocument).
@@ -82,7 +82,6 @@ export function sameJson(a: unknown, b: unknown): boolean {
   );
 }
 
-const normFact = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
 const short = (t: string, n = 40) => {
   const s = t.replace(/\s+/g, " ").trim();
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
@@ -165,31 +164,13 @@ function mergeList<T extends { id: string }>(
   return order.map((id) => keep.get(id)!);
 }
 
-/** Facts merge as sets (case/whitespace-insensitive): additions from both sides, deletions from either stick. */
-export function mergeFacts(base: string[] | undefined, local: string[] | undefined, server: string[] | undefined) {
-  if (!local && !server) return undefined;
-  const keys = (xs: string[] | undefined) => new Set((xs ?? []).map(normFact));
-  const bk = keys(base);
-  const lk = keys(local);
-  const sk = keys(server);
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const f of [...(local ?? []), ...(server ?? [])]) {
-    const k = normFact(f);
-    if (!k || seen.has(k)) continue;
-    if (bk.has(k) && (!lk.has(k) || !sk.has(k))) continue; // deleted on one side
-    seen.add(k);
-    out.push(f);
-  }
-  return out;
-}
-
 /**
  * Three-way merge of the master resume. `base` is what this page last loaded or saved, `local` is
  * what's on screen, `server` is the row as it is now. Bullets, entry fields, header fields and
  * section titles are matched by id: whichever side changed something relative to base wins;
  * additions from either side are kept; a deletion wins only if the other side didn't edit that
- * node; facts merge as sets. Where both sides changed the same thing differently, it's listed in
+ * node. Facts live in their own table (migration 0005); the old `facts` JSON is carried over as stored,
+ * never merged. Where both sides changed the same thing differently, it's listed in
  * `conflicts` and `merged` holds the local value (so `merged` is "keep mine" for conflicts and
  * "take theirs" for everything only they changed).
  */
@@ -234,8 +215,9 @@ export function mergeResumes(base: Resume, local: Resume, server: Resume): Merge
     },
     sections: dedupeIds(sections, conflicts),
   };
-  const facts = mergeFacts(base.facts, local.facts, server.facts);
-  if (facts) merged.facts = facts;
+  // Legacy `content.facts`: nobody writes it any more; keep whatever the row has.
+  const legacy = server.facts ?? local.facts;
+  if (legacy) merged.facts = legacy;
   else delete merged.facts;
   return { merged, conflicts };
 }

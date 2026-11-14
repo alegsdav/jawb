@@ -211,12 +211,13 @@ describe("reconcileIds", () => {
     expect(out.sections[0].items[0].bullets[0].id).toBe("b1");
   });
 
-  it("carries facts over from the previous version and merges new ones without duplicates", () => {
+  it("keeps the previous version's legacy facts JSON as stored (facts live in their own table now)", () => {
     const prev = master();
     const next = reparsed(prev);
     expect(reconcileIds(prev, next).facts).toEqual(["Tutored 30 students in calculus"]);
-    next.facts = ["tutored 30 students  in calculus", "Fluent in Mandarin"];
-    expect(reconcileIds(prev, next).facts).toEqual(["Tutored 30 students in calculus", "Fluent in Mandarin"]);
+    next.facts = ["Fluent in Mandarin"];
+    expect(reconcileIds(prev, next).facts).toEqual(["Tutored 30 students in calculus"]);
+    expect(reconcileIds({ ...prev, facts: undefined }, next)).not.toHaveProperty("facts");
   });
 
   it("keeps the version and the new header", () => {

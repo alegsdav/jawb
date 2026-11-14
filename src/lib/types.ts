@@ -24,8 +24,8 @@ export type Resume = {
   header: { name: string; contact: string };
   sections: Section[];
   /**
-   * Master only: true facts about the candidate that don't fit on the page (numbers, tools, extra
-   * projects, answers to analysis questions). Never rendered or exported to PDF; fed to the AI as context.
+   * Legacy: the master's facts before they moved to the `facts` table (migration 0005 copied them).
+   * Kept as stored (never read or written by the app); see `Fact`.
    */
   facts?: string[];
   /**
@@ -34,6 +34,28 @@ export type Resume = {
    * user edited in the copy and which ones can safely take a newer master wording. Never rendered.
    */
   baseline?: Record<string, string>;
+};
+
+/** Where a fact came from (shown as a small label in the Facts panel). */
+export type FactSource = "resume" | "builder" | "answer" | "coaching" | "manual" | "extracted" | "legacy";
+
+/**
+ * One true thing about the student (migration 0005), fed to the AI so it doesn't re-ask. Never printed,
+ * exported to PDF or put in a snapshot. A fact linked to a bullet (resume_id + bullet_id) mirrors that
+ * bullet's text; the link is cleared (the fact stays) when the bullet is emptied or deleted. A fact
+ * with a [placeholder] is a draft (`active: false`) until the placeholder is filled; the AI sees only
+ * active facts.
+ */
+export type Fact = {
+  id: string;
+  text: string;
+  source: FactSource;
+  active: boolean;
+  resume_id: string | null;
+  bullet_id: string | null;
+  entry_id: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type JobStatus = "to_apply" | "applied" | "interview" | "offer" | "rejected" | "skipped";

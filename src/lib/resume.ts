@@ -1,5 +1,4 @@
 import type { Bullet, Item, Resume, Section } from "./types";
-import { addFacts } from "./facts";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -167,8 +166,8 @@ function matchSections(next: Section[], prev: Section[]): Map<number, number> {
  * After a re-import, carry ids over from the previous version wherever content matches, so
  * "Changes vs master" in existing jobs keeps meaning something. Sections match by title,
  * items by title (+subtitle), bullets by identical text first and then by closest wording
- * (each old id is used at most once). Unmatched things keep their new ids. Facts from the
- * previous version are kept and merged with any in `next`.
+ * (each old id is used at most once). Unmatched things keep their new ids. The previous version's
+ * legacy `facts` JSON is kept as stored (facts live in their own table, migration 0005).
  */
 export function reconcileIds(prev: Resume, next: Resume): Resume {
   const carried = { section: new Set<string>(), item: new Set<string>(), bullet: new Set<string>() };
@@ -197,6 +196,6 @@ export function reconcileIds(prev: Resume, next: Resume): Resume {
 
   const out: Resume = { ...next, version: next.version ?? prev.version ?? RESUME_VERSION, sections };
   delete out.facts;
-  if (!prev.facts?.length && !next.facts?.length) return out;
-  return addFacts({ ...out, facts: [...(prev.facts ?? [])] }, next.facts ?? []);
+  if (prev.facts) out.facts = prev.facts;
+  return out;
 }

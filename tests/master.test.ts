@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { mergeFacts, mergeResumes, sameJson, saveMasterDocument, updateMaster } from "@/lib/master";
+import { mergeResumes, sameJson, saveMasterDocument, updateMaster } from "@/lib/master";
 import { addFacts } from "@/lib/facts";
 import type { Item, Resume } from "@/lib/types";
 
@@ -248,26 +248,18 @@ describe("mergeResumes", () => {
     expect(ids.filter((x) => x === "b3")).toHaveLength(1);
   });
 
-  it("merges facts as sets: additions from both sides, deletions stick", () => {
-    const local = edit(base, (d) => (d.facts = ["Speaks Spanish", "Ran a 5k"])); // deleted "Eagle Scout", added one
-    const server = edit(base, (d) => (d.facts = ["Speaks Spanish", "Eagle Scout", "Knows Excel"])); // added one
+  it("facts live in their own table: the legacy facts JSON is carried as the row has it, never merged", () => {
+    const local = edit(base, (d) => {
+      d.facts = ["Speaks Spanish", "Ran a 5k"];
+      setBullet(d, "b1", "Built a React dashboard");
+    });
+    const server = edit(base, (d) => (d.facts = ["Speaks Spanish"]));
     const { merged, conflicts } = mergeResumes(base, local, server);
     expect(conflicts).toEqual([]);
-    expect(merged.facts).toEqual(["Speaks Spanish", "Ran a 5k", "Knows Excel"]);
-  });
-
-  it("a fact deleted on the server stays deleted even though this page still has it", () => {
-    const server = edit(base, (d) => (d.facts = ["Speaks Spanish"]));
-    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
-    const { merged } = mergeResumes(base, local, server);
     expect(merged.facts).toEqual(["Speaks Spanish"]);
     expect(bullets(merged, "i1")?.[0]).toBe("Built a React dashboard");
-  });
-
-  it("an edited fact is a delete plus an add on that side", () => {
-    const local = edit(base, (d) => (d.facts = ["Speaks fluent Spanish", "Eagle Scout"]));
-    const server = edit(base, (d) => (d.facts = ["Speaks Spanish", "Eagle Scout", "New"]));
-    expect(mergeResumes(base, local, server).merged.facts).toEqual(["Speaks fluent Spanish", "Eagle Scout", "New"]);
+    const noFacts = edit(base, (d) => delete d.facts);
+    expect(mergeResumes(noFacts, edit(noFacts, (d) => setBullet(d, "b2", "x")), edit(noFacts, (d) => setBullet(d, "b3", "y"))).merged).not.toHaveProperty("facts");
   });
 
   it("handles a server copy replaced by 'Save as master' (same ids, new wording) without losing local edits elsewhere", () => {
@@ -291,15 +283,6 @@ describe("mergeResumes", () => {
     const [b0, l0, s0] = [clone(base), clone(local), clone(server)];
     mergeResumes(base, local, server);
     expect([base, local, server]).toEqual([b0, l0, s0]);
-  });
-});
-
-describe("mergeFacts", () => {
-  it("is case/whitespace-insensitive and handles missing lists", () => {
-    expect(mergeFacts(["A"], ["a ", "B"], ["A", "C"])).toEqual(["a ", "B", "C"]);
-    expect(mergeFacts(undefined, undefined, undefined)).toBeUndefined();
-    expect(mergeFacts(undefined, undefined, ["X"])).toEqual(["X"]);
-    expect(mergeFacts(["X"], [], ["X"])).toEqual([]);
   });
 });
 

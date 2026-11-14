@@ -18,6 +18,8 @@ import { snapshotPatch } from "@/lib/outcomes";
 import { applyStatusChange } from "@/lib/status";
 import { isUniqueViolation, MIGRATION_HINT, OPTIONAL_JOB_COLUMNS } from "@/lib/db";
 import { sameJson, updateMaster, type MergeConflict } from "@/lib/master";
+import { factListWriter, unlinkResumeFacts } from "@/lib/factStore";
+import { useFacts } from "@/lib/useFacts";
 import {
   addAllFromMaster, addFromMaster, applyPull, cloneForJob, compareMap, dismissAdditions, ensureBaseline, planPull,
   replaceBullet, resolveRemoval, stripBaseline, type PullAddition, type PullRemoval,
@@ -120,6 +122,10 @@ export default function JobPage() {
   const [saveMasterBusy, setSaveMasterBusy] = useState(false);
   /** After applying: the tailoring tools are folded away unless this is on ("Keep editing (for a re-apply)"). */
   const [reapply, setReapply] = useState(false);
+  /** The student's facts (migration 0005): answers are saved here; facts coached on this page follow its bullets. */
+  const facts = useFacts(supabase);
+  const mirrorRef = useRef(facts.mirror);
+  mirrorRef.current = facts.mirror;
 
   const autoRan = useRef(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -343,19 +349,23 @@ export default function JobPage() {
         const base = resumeBase.current;
         const local = docLatest.current;
         if (!rid || !base || !local || conflictRef.current) return;
-        if (sameJson(local, base.content)) return;
-        const out = await saveTailoredDocument(supabase, rid, local, base);
-        if (out.kind === "conflict") {
-          setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts });
-          return;
+        if (!sameJson(local, base.content)) {
+          const out = await saveTailoredDocument(supabase, rid, local, base);
+          if (out.kind === "conflict") {
+            setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts });
+            return;
+          }
+          resumeBase.current = { content: out.content, updatedAt: out.updatedAt };
+          if (out.merged) {
+            // Edits typed while the save was in flight are merged on top (base = what was sent).
+            const cur = docLatest.current ?? local;
+            showDoc(cur === local ? out.content : mergeTailored(local, cur, out.content).merged, "set");
+            showFlash("Merged changes from another device.", 5000);
+          }
         }
-        resumeBase.current = { content: out.content, updatedAt: out.updatedAt };
-        if (out.merged) {
-          // Edits typed while the save was in flight are merged on top (base = what was sent).
-          const cur = docLatest.current ?? local;
-          showDoc(cur === local ? out.content : mergeTailored(local, cur, out.content).merged, "set");
-          showFlash("Merged changes from another device.", 5000);
-        }
+        // Same save: facts coached on this copy's bullets follow their text (standalone once a bullet is
+        // emptied or deleted). Throws on failure, so the autosave retries this step too.
+        await mirrorRef.current(rid, (resumeBase.current ?? base).content);
       }),
     [serial, supabase, setConflict, showDoc, showFlash],
   );
@@ -511,9 +521,11 @@ export default function JobPage() {
   const changedCount = useMemo(() => (resume && compareTo ? countChangedBullets(resume, compareTo) : 0), [resume, compareTo]);
   const pull = useMemo(() => planPull(resume, master), [resume, master]);
   const placeholderCount = useMemo(() => (resume ? countPlaceholders(resumeTexts(resume)) : 0), [resume]);
+  const factTexts = useMemo(() => facts.facts.map((f) => f.text), [facts.facts]);
   const missingFacts = useMemo(
-    () => (analysis && master ? missingAnswerFacts(analysis.questions, analysis.answers, master.facts, analysis.bullets) : []),
-    [analysis, master],
+    () =>
+      analysis && facts.status === "ready" ? missingAnswerFacts(analysis.questions, analysis.answers, factTexts, analysis.bullets) : [],
+    [analysis, factTexts, facts.status],
   );
 
   // The latest values, for async work that finishes later (an analysis takes 20-60s; drafts typed meanwhile count).
@@ -634,14 +646,14 @@ export default function JobPage() {
     setError("");
   }
 
-  /** Facts first (on the master), then the answers on this job; see saveAnswersInOrder. */
+  /** Facts first (the facts table), then the answers on this job; see saveAnswersInOrder. */
   async function saveAnswers(answers: Record<string, string>): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
     const current = latest.current.analysis;
     if (!current) return { ok: false, error: "Run the analysis first." };
     const res = await saveAnswersInOrder({
       analysis: current,
       answers,
-      writeMaster: (mutate) => updateMaster(supabase, mutate),
+      writeMaster: factListWriter(supabase, "answer", facts.replace),
       // Queued on the job autosave (retries by itself, merges with other devices); only answers change.
       persist: (next) => setAnalysis((a) => ({ ...a, answers: next.answers })),
     });
@@ -649,10 +661,9 @@ export default function JobPage() {
       console.warn("Saving answers failed at", res.stage, res.error);
       return {
         ok: false,
-        error: friendlyError(res.error, "Couldn't add them to your master resume's facts. Check your connection, then tap Retry."),
+        error: friendlyError(res.error, "Couldn't save them to your facts. Check your connection, then tap Retry."),
       };
     }
-    setMaster(res.master);
     setError("");
     return { ok: true, added: res.added };
   }
@@ -828,6 +839,8 @@ export default function JobPage() {
 
   async function deleteJob() {
     if (!confirm("Delete this job and its tailored copy?")) return;
+    // Facts coached on this job's bullets stay, as standalone facts (the database does this too).
+    if (resumeIdRef.current) await unlinkResumeFacts(supabase, resumeIdRef.current);
     const { error } = await supabase.from("jobs").delete().eq("id", id);
     if (error) return fail(error, "Couldn't delete this job. Try again.");
     router.push("/");

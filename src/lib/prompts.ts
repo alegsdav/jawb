@@ -136,3 +136,39 @@ RESUME TEXT:
 ${text.slice(0, 15000)}
 """`}`;
 }
+
+/**
+ * Split one of the student's answers into atomic facts. The model may only restate what the student
+ * wrote; the server also drops any fact with a number the answer doesn't contain (guardNumbers).
+ */
+export function extractFactsPrompt(args: { answer: string; question: string; context: string }) {
+  return `A college student answered a question about their own experience. Turn their answer into short, atomic facts
+that can be reused on a resume later.
+
+QUESTION THEY WERE ASKED (for context only; it is NOT a source of facts):
+"""
+${args.question.slice(0, 600) || "(none)"}
+"""
+
+THE RESUME LINE OR ENTRY IT'S ABOUT (for context only; it is NOT a source of facts):
+"""
+${args.context.slice(0, 1500) || "(none)"}
+"""
+
+THE STUDENT'S ANSWER (the ONLY source of facts):
+"""
+${args.answer.slice(0, 4000)}
+"""
+
+Rules:
+- Restate ONLY what the student literally wrote in their answer. Never add, infer, round, combine or improve anything.
+- NEVER invent numbers, tools, employers, titles or results. Every number in a fact must appear in the answer exactly
+  (same value and unit); any fact with another number is thrown away automatically.
+- Each fact is one self-contained statement that makes sense without the question, in resume style without "I"
+  (e.g. "Tutored about 20 students a week in calculus"). Name what it's about (the club, class, job or project) when the
+  answer or the context makes that clear.
+- Skip anything vague, joking, or not about the student (e.g. "not sure", "n/a"). Zero facts is a fine answer.
+- At most 6 facts.
+
+Return ONLY JSON: {"facts": ["...", "..."]}`;
+}

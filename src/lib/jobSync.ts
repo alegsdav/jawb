@@ -322,7 +322,8 @@ export type SaveAsMasterPlan = {
  * What "Save this tailored copy as my master resume" does: apply this copy's edits relative to its
  * baseline (reworded bullets and lines, plus bullets/entries/sections added here, placed next to their
  * neighbours) to the CURRENT master, keeping everything the master has that the copy lacks. Where both
- * changed the same line, the copy's wording wins (that's what the user asked for). Facts are kept.
+ * changed the same line, the copy's wording wins (that's what the user asked for). The master's legacy
+ * `facts` JSON is left as stored (facts live in their own table).
  */
 export function planSaveAsMaster(copy: Resume, master: Resume): SaveAsMasterPlan {
   const base = copy.baseline ?? {};

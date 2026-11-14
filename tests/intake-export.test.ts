@@ -110,6 +110,13 @@ describe("one error wording", () => {
 });
 
 describe("GET /api/export", () => {
+  it("includes the facts table", async () => {
+    h.jobs = [{ id: "row" }];
+    const body = await (await exportAll()).json();
+    expect(Object.keys(body)).toEqual(["exported_at", "resumes", "jobs", "facts", "legacy_bullets"]);
+    expect(body.facts).toEqual([{ id: "row" }]);
+  });
+
   it("never returns raw database messages", async () => {
     h.selectError = { message: 'relation "public.jobs" does not exist', code: "42P01" };
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});

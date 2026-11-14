@@ -7,6 +7,8 @@ import { formatAnswers } from "@/lib/answers";
 import { guardCoverLetter, normalizeAnalysis } from "@/lib/analysis";
 import { friendlyError } from "@/lib/api";
 import { budgetErrorResponse, withAiBudget } from "@/lib/aiBudget";
+import { loadFacts } from "@/lib/factStore";
+import { factsForPrompt, legacyFacts } from "@/lib/facts";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
@@ -18,12 +20,13 @@ export async function POST(req: Request) {
   const { jobId } = ((await req.json().catch(() => ({}))) ?? {}) as { jobId?: string };
   if (!jobId) return NextResponse.json({ error: "Which job? Reload the page and try again." }, { status: 400 });
 
-  const [{ data: job, error: eJ }, { data: resume, error: eR }, { data: master, error: eM }] = await Promise.all([
+  const [{ data: job, error: eJ }, { data: resume, error: eR }, { data: master, error: eM }, factRows] = await Promise.all([
     supabase.from("jobs").select("*").eq("id", jobId).maybeSingle(),
     supabase.from("resumes").select("content").eq("job_id", jobId).maybeSingle(),
     supabase.from("resumes").select("content").eq("is_master", true).maybeSingle(),
+    loadFacts(supabase),
   ]);
-  const loadError = eJ ?? eR ?? eM;
+  const loadError = eJ ?? eR ?? eM ?? (factRows.error ? { message: factRows.error } : null);
   if (loadError) {
     console.error("cover-letter: loading failed:", loadError.message);
     return NextResponse.json({ error: friendlyError(loadError, "Couldn't load this job. Try again.") }, { status: 503 });
@@ -32,7 +35,8 @@ export async function POST(req: Request) {
 
   const tailored = normalizeResume(resume.content);
   const resumeText = resumeToPlainText(tailored);
-  const facts = master ? normalizeResume(master.content).facts : undefined;
+  // Active facts not already on the page (before migration 0005: the master's old list).
+  const facts = factRows.missing ? legacyFacts(master?.content) : factsForPrompt(factRows.facts, tailored).map((f) => f.text);
   const prev = job.analysis ? normalizeAnalysis(job.analysis) : null;
   const answers = formatAnswers(prev);
   const posting = `${job.title} at ${job.company} (${job.location})\n\n${job.description}`;
@@ -46,7 +50,7 @@ export async function POST(req: Request) {
     // Honesty: numbers about the candidate must come from the resume's bullets, the facts or the answers.
     // Posting numbers are kept only in sentences that restate the posting (no "I", "my", "we").
     const letter = guardCoverLetter(raw.trim(), {
-      candidate: [...bulletTextMap(tailored).values(), ...(facts ?? []), ...Object.values(prev?.answers ?? {})],
+      candidate: [...bulletTextMap(tailored).values(), ...facts, ...Object.values(prev?.answers ?? {})],
       posting,
     });
     // Save only over the row as it was read; if it changed meanwhile (another device), `saved: false` and the

@@ -5,19 +5,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { emptyResume, emptySection, isEmptyResume, normalizeResume, reconcileIds } from "@/lib/resume";
-import { addFacts } from "@/lib/facts";
 import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
 import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
-import type { Resume } from "@/lib/types";
+import type { Fact, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
 import { ResumeActions } from "@/components/ResumeActions";
 import { DocToolbar, PageCount, UndoRedo } from "@/components/DocToolbar";
 import { ResumeImport } from "@/components/ResumeImport";
 import { FactsPanel } from "@/components/FactsPanel";
+import { UndoToast } from "@/components/UndoToast";
+import { useFacts } from "@/lib/useFacts";
+import { importedBulletFacts, plural } from "@/lib/facts";
 import { SaveErrorToast, SaveStatus, useAutosaveWithRetry } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
 
-/** Re-import keeps bullet ids stable and carries the master's facts over (reconcileIds merges them). */
+/** Re-import keeps bullet ids stable (so jobs' "changes vs master" and linked facts stay right). */
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
 
 type MasterRow = { id: string; content: unknown; updated_at: string };
@@ -113,6 +115,11 @@ export default function MasterResumePage() {
   const [justImported, setJustImported] = useState(false);
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
+  const facts = useFacts(supabase);
+  const mirrorRef = useRef(facts.mirror);
+  mirrorRef.current = facts.mirror;
+  /** "Fact deleted · Undo" */
+  const [undo, setUndo] = useState<{ message: string; restore: Fact[] } | null>(null);
 
   useEffect(() => {
     loadOrCreateMaster(supabase).then(
@@ -145,18 +152,23 @@ export default function MasterResumePage() {
   const save = useCallback(
     async (r: Resume) => {
       if (!id || !base.current || conflictRef.current) return;
-      if (sameJson(r, base.current.content)) return; // nothing new (e.g. right after a merge)
-      const out = await saveMasterDocument(supabase, id, r, base.current);
-      if (out.kind === "conflict") {
-        setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts });
-        return;
+      // Nothing new in the document (e.g. right after a merge, or a retry after the facts step failed).
+      if (!sameJson(r, base.current.content)) {
+        const out = await saveMasterDocument(supabase, id, r, base.current);
+        if (out.kind === "conflict") {
+          setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts });
+          return;
+        }
+        base.current = { content: out.content, updatedAt: out.updatedAt };
+        if (out.merged) {
+          // Edits typed while this save was in flight are merged on top (base = what we sent).
+          setDoc((cur) => (cur === r ? out.content : mergeResumes(r, cur, out.content).merged), true);
+          setNotice("Merged changes made on another device.");
+        }
       }
-      base.current = { content: out.content, updatedAt: out.updatedAt };
-      if (out.merged) {
-        // Edits typed while this save was in flight are merged on top (base = what we sent).
-        setDoc((cur) => (cur === r ? out.content : mergeResumes(r, cur, out.content).merged), true);
-        setNotice("Merged changes made on another device.");
-      }
+      // Same save: facts linked to master bullets follow their bullet's text (or become standalone when
+      // the bullet is emptied or deleted). Throws on failure, so autosave retries this step too.
+      await mirrorRef.current(id, base.current.content);
     },
     [id, supabase, setDoc],
   );
@@ -204,13 +216,18 @@ export default function MasterResumePage() {
   if (!resume) return <p className="text-muted">Loading…</p>;
 
   const empty = isEmptyResume(resume);
-  const factCount = resume.facts?.length ?? 0;
+  const factCount = facts.facts.length;
   const onImported = (r: Resume) => {
-    doc.set((cur) => mergeImport(cur, r), true);
+    const next = mergeImport(resume, r);
+    doc.set(next, true);
     setImportOpen(false);
     if (empty) setJustImported(true);
+    // Every bullet you imported is a fact the AI can use, linked to its bullet (it follows your edits).
+    if (id) void facts.add(importedBulletFacts(next, id, facts.facts));
   };
-  const setFacts = (facts: string[]) => doc.set((cur) => ({ ...cur, facts }), true);
+  const deleteFact = async (f: Fact) => {
+    if (await facts.remove([f.id])) setUndo({ message: "Fact deleted", restore: [f] });
+  };
 
   return (
     <div className="max-w-5xl lg:max-w-7xl mx-auto space-y-3">
@@ -283,15 +300,33 @@ export default function MasterResumePage() {
 
             <div className="lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto">
               <FactsPanel
-                facts={resume.facts ?? []}
-                onChange={setFacts}
-                onAdd={(lines) => doc.set((cur) => addFacts(cur, lines), true)}
+                facts={facts.facts}
+                status={facts.status}
+                error={facts.error}
+                onAdd={async (lines) => {
+                  const added = await facts.add(lines.map((text) => ({ text, source: "manual" })));
+                  if (added?.length) setNotice(`Saved ${plural(added.length, "fact")}.`);
+                  else if (added) setNotice("You already have that fact.");
+                }}
+                onEdit={facts.edit}
+                onDelete={deleteFact}
               />
             </div>
           </div>
         </>
       )}
 
+      {undo && (
+        <UndoToast
+          message={undo.message}
+          onUndo={() => {
+            void facts.restore(undo.restore);
+            setUndo(null);
+          }}
+          onClose={() => setUndo(null)}
+          raised={status === "error"}
+        />
+      )}
       {/* Fixed "Not saved — retrying…" notice; visible even when the toolbar has scrolled away on phones. */}
       {conflict ? (
         <ConflictBanner conflict={conflict} busy={resolving} onReload={reloadTheirs} onKeepMine={keepMine} />
