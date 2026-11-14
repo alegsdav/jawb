@@ -250,3 +250,23 @@ export function coachQuestionsPrompt(c: CoachContext) {
 
 Return ONLY JSON: { "questions": [ { "question": "", "why": "", "tip": "" } ] }`;
 }
+
+/**
+ * Draft bullets for the guided builder. The page builds everything else (header, education, dates,
+ * skills) from the student's answers; the model only writes bullets, keyed by experience id.
+ */
+export function builderDraftPrompt(experiences: { id: string; type: string; org: string; role: string; what: string }[], major: string) {
+  return `A college student${major ? ` studying ${major}` : ""} is writing their first resume. For each experience below, write 2 to 4
+Harvard-style resume bullets from what they wrote.
+${RULES}
+- Use ONLY what the student wrote for THAT experience: never add tools, people, employers, numbers or results they didn't
+  state. If a strong bullet needs a metric they didn't give, write a [placeholder] such as [N students] or [X%] instead.
+- Every number you keep must appear in that experience's own answer, with the same unit; any other number becomes a
+  placeholder automatically.
+- Start each bullet with a strong past-tense verb (present tense if it's ongoing). One line each.
+
+EXPERIENCES (JSON):
+${JSON.stringify(experiences.map((x) => ({ id: x.id, type: x.type, organization: x.org, role: x.role, what_they_did: x.what })), null, 1).slice(0, 14000)}
+
+Return ONLY JSON: { "bullets": { "<experience id>": ["...", "..."] } }`;
+}

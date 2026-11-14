@@ -16,6 +16,8 @@ import { ResumeActions } from "@/components/ResumeActions";
 import { DocToolbar, PageCount, UndoRedo } from "@/components/DocToolbar";
 import { ResumeImport } from "@/components/ResumeImport";
 import { FactsPanel } from "@/components/FactsPanel";
+import { Builder } from "@/components/Builder";
+import { Onboarding } from "@/components/Onboarding";
 import { UndoToast } from "@/components/UndoToast";
 import { useFacts } from "@/lib/useFacts";
 import { importedBulletFacts, plural } from "@/lib/facts";
@@ -127,6 +129,11 @@ export default function MasterResumePage() {
   const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
   const [coachStart, setCoachStart] = useState<"questions" | undefined>(undefined);
   const [sideTab, setSideTab] = useState<"coach" | "facts">("coach");
+  /** Onboarding: "I don't have a resume yet" opens the builder. */
+  const [building, setBuilding] = useState(false);
+  /** Entry ids of a resume the builder just made (for "Go deeper"). */
+  const [built, setBuilt] = useState<string[] | null>(null);
+  const [email, setEmail] = useState("");
   const latestDoc = useRef<Resume | null>(null);
   latestDoc.current = resume;
   const onSelection = useCallback((sel: DocSelection | null) => {
@@ -154,6 +161,11 @@ export default function MasterResumePage() {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The account email prefills the builder's contact details.
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? ""), () => {});
+  }, [supabase]);
 
   useEffect(() => {
     if (!notice) return;
@@ -251,6 +263,20 @@ export default function MasterResumePage() {
     doc.set(next, true);
     return bulletId;
   };
+  /** The builder's draft becomes the master; its "what did you do" answers are already facts. */
+  const onBuilt = (r: Resume, saved: Fact[], entryIds: string[]) => {
+    doc.set(normalizeResume(r), true);
+    facts.absorb(saved);
+    setBuilding(false);
+    setBuilt(entryIds);
+  };
+  /** "Go deeper" on a built experience: the coaching questions for that entry. */
+  const goDeeper = (sectionId: string, entryId: string) => {
+    setCoachTarget({ sectionId, entryId, bulletId: null });
+    setCoachStart("questions");
+    setSideTab("coach");
+    document.getElementById("side-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const deleteFact = async (f: Fact) => {
     if (await facts.remove([f.id])) setUndo({ message: "Fact deleted", restore: [f] });
   };
@@ -263,19 +289,34 @@ export default function MasterResumePage() {
       </div>
 
       {empty && !importOpen ? (
-        <div className="card p-5 sm:p-8 space-y-4 max-w-2xl">
-          <div className="space-y-1">
-            <p className="label">Step 1 of 2</p>
-            <h2 className="text-lg font-semibold">Import your resume — then add jobs to tailor it for</h2>
-            <p className="text-sm text-muted">
-              Upload the PDF (or paste the text). It&apos;s rebuilt into a one-page Harvard-style document with your
-              exact wording and only the sections you already have. Every job you add later gets its own tailored copy.
-            </p>
-          </div>
-          <ResumeImport replaceWarning={false} onImported={onImported} />
-        </div>
+        building ? (
+          <Builder email={email} onBuilt={onBuilt} onCancel={() => setBuilding(false)} />
+        ) : (
+          <Onboarding onImported={onImported} onBuild={() => setBuilding(true)} />
+        )
       ) : (
         <>
+          {built && (
+            <section aria-labelledby="built-heading" className="card border-good/40 bg-good-bg p-4 space-y-2">
+              <h2 id="built-heading" className="font-medium">Your first draft is ready.</h2>
+              <p className="text-sm text-muted">
+                It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
+                a few quick questions help you find numbers worth adding.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {built
+                  .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
+                  .filter((x): x is NonNullable<typeof x> => !!x)
+                  .map(({ sec, it }) => (
+                    <button key={it.id} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => goDeeper(sec.id, it.id)}>
+                      Go deeper: {it.title || "this experience"}
+                    </button>
+                  ))}
+                <Link href="/" className="btn btn-sm btn-primary min-h-10 sm:min-h-0">Next: add a job →</Link>
+                <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setBuilt(null)}>Dismiss</button>
+              </div>
+            </section>
+          )}
           {justImported && (
             <div className="card border-good/40 bg-good-bg p-4 flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex-1 min-w-48">
