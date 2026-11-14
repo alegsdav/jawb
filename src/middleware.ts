@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { isAllowedEmail, NOT_ALLOWED_ERROR } from "@/lib/supabase/allowlist";
+import { isAllowedUser, NOT_ALLOWED_ERROR } from "@/lib/supabase/allowlist";
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -20,10 +20,10 @@ export async function middleware(request: NextRequest) {
   );
   const { data } = await supabase.auth.getUser();
   const path = request.nextUrl.pathname;
-  const isPublic = path.startsWith("/login") || path.startsWith("/auth");
+  const isPublic = path.startsWith("/login") || path.startsWith("/auth") || path.startsWith("/signup");
 
-  // Signed in, but not on ALLOWED_EMAILS (e.g. an account created while sign-ups were open): sign out.
-  if (data.user && !isAllowedEmail(data.user.email)) {
+  // Signed in, but neither invited nor on ALLOWED_EMAILS (e.g. an account created while sign-ups were open): sign out.
+  if (data.user && !isAllowedUser(data.user)) {
     await supabase.auth.signOut().catch(() => {});
     const out = path.startsWith("/api")
       ? NextResponse.json({ error: "This account isn't allowed to use this app." }, { status: 403 })

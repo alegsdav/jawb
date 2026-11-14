@@ -4,28 +4,26 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { authErrorMessage } from "@/lib/authErrors";
-import { isAllowedEmail } from "@/lib/supabase/allowlist";
+import { isAllowedUser, NOT_ALLOWED_MESSAGE } from "@/lib/supabase/allowlist";
 
 type State = { message: string; ok?: boolean };
-
-function checkAllowed(email: string): string | null {
-  if (!email) return "Enter your email.";
-  if (!isAllowedEmail(email)) return "That email isn't allowed to sign in.";
-  return null;
-}
 
 export async function signInWithPassword(_: State, form: FormData): Promise<State> {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   const password = String(form.get("password") ?? "");
-  const blocked = checkAllowed(email);
-  if (blocked) return { message: blocked };
+  if (!email) return { message: "Enter your email." };
   if (!password) return { message: "Enter your password." };
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     console.error("sign-in failed:", error.message);
     return { message: authErrorMessage(error, "sign-in") };
+  }
+  // Invited accounts and ALLOWED_EMAILS only (the same check middleware makes on every request).
+  if (!isAllowedUser(data.user)) {
+    await supabase.auth.signOut().catch(() => {});
+    return { message: NOT_ALLOWED_MESSAGE };
   }
   redirect("/");
 }
@@ -33,8 +31,8 @@ export async function signInWithPassword(_: State, form: FormData): Promise<Stat
 /** Fallback for a forgotten or never-set password: one-time sign-in link. */
 export async function sendMagicLink(_: State, form: FormData): Promise<State> {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
-  const blocked = checkAllowed(email);
-  if (blocked) return { message: blocked };
+  if (!email) return { message: "Enter your email." };
+  // Existing accounts only (shouldCreateUser: false); middleware signs out anyone not allowed.
   const h = await headers();
   const origin = h.get("origin") ?? `https://${h.get("host")}`;
   const supabase = await createClient();

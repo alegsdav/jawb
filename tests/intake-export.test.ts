@@ -10,6 +10,8 @@ const h = vi.hoisted(() => ({
 /** Fake Supabase: `jobs` rows for the duplicate check, inserts recorded; selects can be made to fail. */
 function fakeSupabase() {
   return {
+    // AI usage reservation (migration 0004): always under the limit here.
+    rpc: async (name: string) => ({ data: name === "reserve_ai_call" ? "reservation" : null, error: null }),
     from() {
       let insert: Record<string, unknown> | null = null;
       const b = {

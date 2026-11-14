@@ -6,6 +6,7 @@ import { bulletTextMap, normalizeResume, resumeToPlainText } from "@/lib/resume"
 import { formatAnswers } from "@/lib/answers";
 import { guardCoverLetter, normalizeAnalysis } from "@/lib/analysis";
 import { friendlyError } from "@/lib/api";
+import { budgetErrorResponse, withAiBudget } from "@/lib/aiBudget";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
@@ -36,9 +37,11 @@ export async function POST(req: Request) {
   const answers = formatAnswers(prev);
   const posting = `${job.title} at ${job.company} (${job.location})\n\n${job.description}`;
   try {
-    const raw = await geminiText(
-      coverLetterPrompt({ resume: resumeText, job: posting, facts: formatFacts(facts), answers }),
-      { temperature: 0.6 },
+    const raw = await withAiBudget(supabase, { action: "cover_letter" }, (meter) =>
+      geminiText(coverLetterPrompt({ resume: resumeText, job: posting, facts: formatFacts(facts), answers }), {
+        temperature: 0.6,
+        onUsage: meter.add,
+      }),
     );
     // Honesty: numbers about the candidate must come from the resume's bullets, the facts or the answers.
     // Posting numbers are kept only in sentences that restate the posting (no "I", "my", "we").
@@ -61,6 +64,8 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ cover_letter: letter, saved });
   } catch (e) {
+    const limited = budgetErrorResponse(e);
+    if (limited) return limited;
     console.error("cover-letter failed:", e);
     return NextResponse.json({ error: friendlyError(e, "The cover letter couldn't be drafted. Try again in a minute.") }, { status: 502 });
   }

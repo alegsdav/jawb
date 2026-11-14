@@ -7,6 +7,7 @@ import type { Analysis } from "@/lib/types";
 import { formatAnswers } from "@/lib/answers";
 import { attachOriginals, guardAnalysisNumbers, mergeAnalysis, normalizeAnalysis } from "@/lib/analysis";
 import { friendlyError } from "@/lib/api";
+import { budgetErrorResponse, withAiBudget } from "@/lib/aiBudget";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
@@ -39,14 +40,18 @@ export async function POST(req: Request) {
   const prev = job.analysis ? normalizeAnalysis(job.analysis as Analysis) : null;
   const answers = formatAnswers(prev);
   try {
+    // First analysis vs re-analysis are separate actions (both heavy today; see AI_WEIGHTS).
     const fresh = normalizeAnalysis(
-      await geminiJSON<unknown>(
-        analyzePrompt({
-          resume: resumeToPromptText(tailored),
-          job: `${job.title} at ${job.company} (${job.location})\n\n${job.description}`,
-          facts: formatFacts(facts),
-          answers,
-        }),
+      await withAiBudget(supabase, { action: prev ? "reanalyze" : "analyze" }, (meter) =>
+        geminiJSON<unknown>(
+          analyzePrompt({
+            resume: resumeToPromptText(tailored),
+            job: `${job.title} at ${job.company} (${job.location})\n\n${job.description}`,
+            facts: formatFacts(facts),
+            answers,
+          }),
+          { onUsage: meter.add },
+        ),
       ),
     );
     // Remember what each bullet said when it was rated, so the page can hide feedback once it's edited.
@@ -84,6 +89,8 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ analysis, saved });
   } catch (e) {
+    const limited = budgetErrorResponse(e);
+    if (limited) return limited;
     console.error("analyze failed:", e);
     return NextResponse.json({ error: friendlyError(e, "The analysis failed. Try again in a minute.") }, { status: 502 });
   }

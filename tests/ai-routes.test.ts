@@ -9,6 +9,9 @@ const h = vi.hoisted(() => ({
   job: {} as Record<string, unknown>,
   /** Runs before the next update lands (another device writing while the AI ran). */
   before: null as null | (() => void),
+  /** AI usage reservations (migration 0004): null = the student is at their limit. */
+  reservation: "res1" as string | null,
+  rpcs: [] as { name: string; args: Record<string, unknown> }[],
 }));
 let clock = 1;
 const freshJob = () => ({
@@ -30,6 +33,10 @@ const tailored: Resume = {
 /** Fake Supabase: one job, its tailored copy and a master with one fact; updates can be made to fail. */
 function fakeSupabase() {
   return {
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      h.rpcs.push({ name, args });
+      return { data: name === "reserve_ai_call" ? h.reservation : null, error: null };
+    },
     from(table: string) {
       const filters: Record<string, unknown> = {};
       let values: Record<string, unknown> | null = null;
@@ -39,6 +46,9 @@ function fakeSupabase() {
         eq: (k: string, v: unknown) => ((filters[k] = v), b),
         maybeSingle: () => b,
         single: () => b,
+        in: () => b,
+        gt: () => b,
+        order: () => b,
         then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => {
           let out: unknown;
           if (values) {
@@ -49,6 +59,8 @@ function fakeSupabase() {
             h.updates.push({ table, values, ifUpdatedAt: filters.updated_at, matched });
             if (matched) Object.assign(h.job, values, { updated_at: `t${++clock}` });
             out = { data: h.updateError ? null : matched ? [{ updated_at: h.job.updated_at }] : [], error: h.updateError };
+          } else if (table === "ai_usage") {
+            out = { data: [], error: null };
           } else if (table === "jobs") {
             out = { data: { ...h.job }, error: null };
           } else if (filters.is_master) {
@@ -82,6 +94,8 @@ beforeEach(() => {
   h.updates = [];
   h.job = freshJob();
   h.before = null;
+  h.reservation = "res1";
+  h.rpcs = [];
 });
 
 describe("POST /api/analyze", () => {
@@ -176,5 +190,30 @@ describe("POST /api/cover-letter", () => {
     expect(body.saved).toBe(false);
     expect(body.cover_letter).toBe("Dear [Hiring Manager],\n\nThanks.");
     expect(h.job.cover_letter).toBe("edited on the phone");
+  });
+});
+
+describe("AI usage limits on these routes", () => {
+  it("a first analysis is metered as 'analyze', a later one as 'reanalyze'; both are recorded ok", async () => {
+    h.gemini.json = { fit: "possible", verdict: "", bullets: [], questions: [] };
+    await analyze(req({ jobId: "j1" }));
+    await analyze(req({ jobId: "j1" }));
+    const reserves = h.rpcs.filter((r) => r.name === "reserve_ai_call").map((r) => [r.args.p_action, r.args.p_weight]);
+    expect(reserves).toEqual([["analyze", "heavy"], ["reanalyze", "heavy"]]);
+    expect(h.rpcs.filter((r) => r.name === "finish_ai_call").map((r) => r.args.p_status)).toEqual(["ok", "ok"]);
+  });
+
+  it("over the limit: 429 with a plain message, the AI isn't called and nothing is saved", async () => {
+    h.reservation = null;
+    h.gemini.json = { fit: "strong", verdict: "should not appear", bullets: [], questions: [] };
+    const res = await analyze(req({ jobId: "j1" }));
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toMatch(/^You've used all 10 of your analyses/);
+    expect(body.limit).toBe("heavy");
+    expect(h.updates).toHaveLength(0);
+    const letter = await coverLetter(req({ jobId: "j1" }));
+    expect(letter.status).toBe(429);
+    expect((await letter.json()).error).toMatch(/quick AI actions per hour/);
   });
 });

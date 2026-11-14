@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useState } from "react";
 import { sendMagicLink, signInWithPassword } from "./actions";
 
@@ -60,6 +61,10 @@ export function LoginForm({ notice }: { notice?: string }) {
         >
           {mode === "password" ? "Forgot or never set a password? Email me a sign-in link" : "Back to password sign-in"}
         </button>
+        <p className="text-sm text-muted border-t border-border pt-3">
+          Got an invite code?{" "}
+          <Link href="/signup" className="underline underline-offset-2 hover:text-fg">Create your account</Link>
+        </p>
       </div>
     </main>
   );

@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { isAllowedEmail } from "./allowlist";
+import { isAllowedUser } from "./allowlist";
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -23,12 +23,12 @@ export async function createClient() {
 }
 
 /**
- * Returns the signed-in user, or null when nobody is signed in or the account isn't on the
- * ALLOWED_EMAILS list. Use in API routes to gate access.
+ * Returns the signed-in user, or null when nobody is signed in or the account is neither invited nor
+ * on ALLOWED_EMAILS (see isAllowedUser). Use in API routes to gate access.
  */
 export async function requireUser() {
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
-  const user = data.user && isAllowedEmail(data.user.email) ? data.user : null;
+  const user = data.user && isAllowedUser(data.user) ? data.user : null;
   return { supabase, user };
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/supabase/server";
 import { PasswordForm } from "@/components/PasswordForm";
+import { UsageCard } from "@/components/UsageMeter";
 
 export const metadata: Metadata = { title: "Account · Job Pipeline" };
 
@@ -18,6 +19,8 @@ export default async function AccountPage() {
         <p className="text-sm text-muted">Set or change the password you sign in with.</p>
       </div>
       <PasswordForm />
+
+      <UsageCard />
 
       <section className="card p-4 space-y-2">
         <h2 className="font-semibold">Export your data</h2>

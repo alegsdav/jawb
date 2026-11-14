@@ -1,6 +1,6 @@
 # Job Pipeline
 
-A small, single-user web app for applying to internships and jobs: keep one master resume, tailor a copy for each posting with AI suggestions you accept or reject, and track every application through to an offer.
+A web app for college students applying to internships and jobs: keep one master resume, tailor a copy for each posting with AI suggestions you accept or reject, and track every application through to an offer. It's invite-only: you create invite codes and send them to the students you want to let in.
 
 ## Features
 
@@ -14,35 +14,63 @@ A small, single-user web app for applying to internships and jobs: keep one mast
 - **Submitted snapshot**: marking a job Applied (or jumping straight to Interview, Offer or Rejected) freezes an exact copy of the resume you sent (without your facts), sets today's date (your local day) and a 10-day follow-up, and records whether that tailored copy differed from the master resume. If the copy still has `[placeholders]` you're asked first. Moving the job back to To apply or Skipped offers to clear the submitted copy and Applied date. The job list and the job page share this logic (`applyStatusChange` in `src/lib/status.ts`). When a follow-up is due, the job list flags it and the row gets **Followed up**, which sets the next follow-up 7 days out (with **Undo**).
 - **Outcomes**: the job list compares the interview rate of tailored and untailored applications (percentages appear once each group has 5 applications). A job counts as an interview if it reached Interview or Offer at any point, even if it later ended in Rejected (migration 0003; without it, only jobs currently in Interview or Offer count).
 - **Saving on a bad connection**: every edit saves automatically. If a save fails (offline, a flaky phone connection), the change stays on screen, a "Not saved — retrying…" notice appears with **Retry now**, and the app retries after 3s, 10s, then every 30s and as soon as you're back online. On the job list, **Discard** next to a row puts back the saved value. Job list changes are also safe across devices: each write only lands if the job hasn't changed since this page last saw it; if it has (your phone and laptop both open), the job is re-read, the other device's changes show up, and only the fields you changed here are written again (`src/lib/jobWrites.ts`).
+- **Invite-only accounts**: public sign-ups stay off in Supabase. A student opens `/signup` (or the "Create your account" link on the login page), enters their email, a password (8+ characters) and the invite code you gave them. The server checks the code and redeems one use atomically, creates the account with the service-role key (email marked confirmed, `app_metadata.invited = true`) and signs them in. If creating the account fails after the code was redeemed, the use is given back. Five wrong codes from one connection within 10 minutes block further tries for 10 minutes (IP addresses are stored only as hashes). Codes are 16 random base32 characters (`ABCD-EFGH-IJKL-MNOP`); single-use codes work once, reusable codes up to their limit, and either can expire. **Known tradeoff:** email ownership isn't verified at sign-up (the account is created confirmed), so someone with a code could register an address that isn't theirs; they still need the code, and the real owner can't be locked out of anything but that one account.
+- **AI usage limits**: each student gets 10 "heavy" AI calls per rolling 24 hours (a job's first analysis, re-analyses, resume imports and builder drafts) and 120 "light" calls per rolling 60 minutes (reading a pasted posting's company and title, cover letters, coaching and fact extraction). Weights live in one table (`AI_WEIGHTS` in `src/lib/aiBudget.ts`); limits come from `AI_HEAVY_PER_DAY` and `AI_LIGHT_PER_HOUR`. A reservation is taken atomically in the database before each call (parallel requests can't slip past the cap), and a call that fails (the AI provider is down, say) isn't counted. Over the limit, the app says which limit and roughly when it frees up. The sidebar and the Account page show "7 of 10 analyses left today". Token counts are recorded for every call. Without migration 0004 the limits are off (the app warns in the server log).
 - **Export**: ATS-friendly one-page PDF, plain-text copy, an optional cover letter draft, and a JSON backup of all your data (`GET /api/export`, a download of your resumes and jobs). The backup is for safekeeping; there's no import, so restoring it is done by hand in Supabase.
 
-Stack: Next.js 15 (App Router) · Supabase (Postgres + RLS + magic-link auth) · Google Gemini · @react-pdf/renderer · Tailwind v4 · Vitest.
+Stack: Next.js 15 (App Router) · Supabase (Postgres + RLS + password/magic-link auth) · Google Gemini · @react-pdf/renderer · Tailwind v4 · Vitest.
 
 ## Setup
 
 1. **Supabase**: create a project. In the SQL editor, run the files in `supabase/migrations/` in order:
-   `0001_init.sql`, `0002_deadlines_snapshots.sql`, then `0003_reached_interview.sql`. If you set the app up before,
-   run only the ones you haven't run yet (each is safe to re-run except 0001). 0003 adds `jobs.reached_interview`, which
-   remembers that an application got to the interview stage even after a later Rejected, and backfills it for jobs
-   currently in Interview or Offer. The app keeps working without 0002/0003 and shows a "Database update needed" note.
+   `0001_init.sql`, `0002_deadlines_snapshots.sql`, `0003_reached_interview.sql`, `0004_invites_usage.sql`,
+   `0005_facts.sql`, then `0006_progress.sql`. If you set the app up before, run only the ones you haven't run yet
+   (each is safe to re-run except 0001). 0003 adds `jobs.reached_interview`, which remembers that an application got to
+   the interview stage even after a later Rejected. 0004 adds invite codes, sign-up throttling and AI usage limits
+   (`invite_codes`, `signup_attempts`, `ai_usage` and the `redeem_invite`, `release_invite`, `reserve_ai_call` and
+   `finish_ai_call` functions). The app keeps working without the later migrations and shows a "Database update
+   needed" note where something depends on them (without 0004, sign-up with a code is unavailable and AI limits are off).
 2. **Auth redirect URLs**: under Authentication → URL Configuration, set the Site URL to your deployed URL
    (e.g. `https://your-app.vercel.app`) and add `https://your-app.vercel.app/**` and `http://localhost:3000/**`
    to the Redirect URLs. The magic link returns to `/auth/callback`, which these patterns cover.
 3. **Gemini key**: https://aistudio.google.com/apikey
 4. **Env vars**: copy `.env.example` to `.env.local` for local dev, and add the same keys in Vercel → Project → Settings → Environment Variables.
 5. `npm install && npm run dev`
-6. **Turn off sign-ups (required)**: after your first sign-in, go to Supabase → Authentication → Sign In / Providers and
-   turn off "Allow new users to sign up". The anon key is public, so with sign-ups on anyone can create an account in
-   your project. `ALLOWED_EMAILS` is a second lock: the app signs out and refuses (pages, API routes) any account not on
-   the list, but it can't stop accounts from being created.
+6. **Keep sign-ups off (required)**: go to Supabase → Authentication → Sign In / Providers and turn off "Allow new
+   users to sign up". The anon key is public, so with sign-ups on anyone could create an account in your project.
+   Students get accounts through `/signup` with an invite code instead (the server creates them with the service-role
+   key, which isn't affected by that switch). Create your own account in Supabase → Authentication → Users → Add user
+   and put your email on `ALLOWED_EMAILS`.
+7. **Invite students**: create a code and send it (or the link `/signup?code=…`):
+
+   ```bash
+   node --env-file=.env.local scripts/create-invite.ts single - 14 "For Alex"
+   ```
+
+   ```bash
+   node --env-file=.env.local scripts/create-invite.ts reusable 30 7 "CS club, fall cohort"
+   ```
+
+   Arguments: `single` or `reusable`, max uses (`-` for the default: 1 for single, 25 for reusable), days until it
+   expires (`-` = never), and a note for yourself. It prints the code. Node 22.18+ runs the TypeScript file directly
+   (older Node: add `--experimental-strip-types`). To look at or revoke codes, use the `invite_codes` table in Supabase
+   (set `max_uses` to `uses` to stop a code).
+
+Who can use the app: accounts created with an invite code (`app_metadata.invited`, read from the session on every
+request with no database call) and emails on `ALLOWED_EMAILS`. Everyone else is signed out with "That account isn't
+allowed to use this app". Note the change from before invites: an empty `ALLOWED_EMAILS` no longer lets every account in,
+so put the owner's email there (or set `invited: true` in that user's app metadata).
 
 | Variable | Notes |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Publishable / anon key (safe in the browser; RLS protects data) |
-| `ALLOWED_EMAILS` | Comma-separated emails allowed to use the app (checked at sign-in, on every page and in every API route). Empty = any account in your Supabase project. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only (Supabase → Project Settings → API → service_role / secret key). Used only to redeem invite codes, throttle sign-ups and create invited accounts. Never commit it, never prefix it with `NEXT_PUBLIC_`; the app never logs it or sends it to the browser. |
+| `ALLOWED_EMAILS` | Comma-separated emails allowed in without an invite (e.g. the owner's account made before invites). Invited accounts don't need to be listed. |
 | `GEMINI_API_KEY` | Server-only. Never commit it. |
 | `GEMINI_MODEL` | Optional, defaults to `gemini-3.8-flash` |
+| `AI_HEAVY_PER_DAY` | Optional, default `10`: analyses, re-analyses, resume imports and builder drafts per student per rolling 24 hours. |
+| `AI_LIGHT_PER_HOUR` | Optional, default `120`: coaching, fact extraction, cover letters and posting details per student per rolling 60 minutes. |
 
 ## Tests
 
