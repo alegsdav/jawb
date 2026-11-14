@@ -30,6 +30,9 @@ import {
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
 import { ResumeDocument, type DocSelection } from "@/components/ResumeDocument";
+import { JobHeader } from "@/components/job/JobHeader";
+import { AppliedNotice } from "@/components/job/AppliedNotice";
+import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
 import { CoachPanel } from "@/components/CoachPanel";
 import { PriorityList } from "@/components/PriorityList";
 import { FactsPanel } from "@/components/FactsPanel";
@@ -38,15 +41,13 @@ import { UndoToast } from "@/components/UndoToast";
 import { insertCoachedBullet, priorityItems, type CoachTarget } from "@/lib/coaching";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, FitBadge } from "@/components/StatusSelect";
-import { DeadlineField } from "@/components/DeadlineField";
 import { DocToolbar, FeedbackLegend, PageCount, PlaceholderCount, Toggle, toggleLabel, UndoRedo } from "@/components/DocToolbar";
 import { Menu, MenuItem } from "@/components/Menu";
-import { SubmittedView, formatSubmitted } from "@/components/SubmittedView";
+import { SubmittedView } from "@/components/SubmittedView";
 import { PullBanner, SaveAsMasterDialog, TailoredConflictBanner } from "@/components/PullBanner";
 import { FlashToast } from "@/components/FlashToast";
-import { PlaceholderTextarea } from "@/components/PlaceholderTextarea";
 import { confirmPlaceholders, downloadResumePdf, resumeTexts } from "@/components/pdfDownload";
-import { SaveErrorToast, SaveStatus, useAutosaveWithRetry, worstStatus } from "@/lib/useAutosave";
+import { SaveErrorToast, useAutosaveWithRetry, worstStatus } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
 
 type Tab = "resume" | "analysis" | "job" | "cover";
@@ -64,27 +65,6 @@ const TABS: [Tab, string, string][] = [
 
 /** Don't re-read the rows again when `focus` and `visibilitychange` fire together. */
 const REFRESH_GAP_MS = 1500;
-
-/** Borderless input that's as wide as its text (company name next to the location on one line). */
-function FitInput({
-  value, placeholder, onChange, className = "",
-}: { value: string; placeholder: string; onChange: (v: string) => void; className?: string }) {
-  return (
-    <span className={`inline-grid min-w-0 ${className}`}>
-      <span aria-hidden className="invisible whitespace-pre col-start-1 row-start-1 px-1 py-0.5 border border-transparent overflow-hidden">
-        {value || placeholder}
-      </span>
-      <input
-        size={1}
-        className="ghost-input col-start-1 row-start-1 w-full min-w-0"
-        value={value}
-        placeholder={placeholder}
-        aria-label={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </span>
-  );
-}
 
 export default function JobPage() {
   const { id } = useParams<{ id: string }>();
@@ -892,7 +872,6 @@ export default function JobPage() {
     );
   }
   if (!job) return <p className="text-muted">Loading…</p>;
-  const coverPlaceholders = countPlaceholders([job.cover_letter]);
   const showHighlights = showFeedback && !quiet;
 
   const panel = (
@@ -992,97 +971,27 @@ export default function JobPage() {
 
   return (
     <div className="space-y-2 sm:space-y-3">
-      {/* Job header */}
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-        <div className="w-full lg:flex-1 lg:min-w-64">
-          <input
-            className="ghost-input w-full text-lg sm:text-xl font-semibold"
-            value={job.title}
-            placeholder="Job title"
-            aria-label="Job title"
-            onChange={(e) => patch({ title: e.target.value })}
-          />
-          <div className="flex items-center gap-0.5 text-base sm:text-sm text-muted min-w-0">
-            <FitInput className="max-w-[55%] shrink-0" value={job.company} placeholder="Company" onChange={(v) => patch({ company: v })} />
-            <span aria-hidden>·</span>
-            <FitInput className="flex-1 sm:flex-none" value={job.location} placeholder="Location" onChange={(v) => patch({ location: v })} />
-            {job.url && (
-              // Not "Posting": that's also the name of a tab.
-              <a href={job.url} target="_blank" rel="noreferrer" className="shrink-0 px-1 py-0.5 text-sm underline hover:text-fg">
-                Open posting ↗
-              </a>
-            )}
-          </div>
-        </div>
-        <div className="flex w-full lg:w-auto flex-wrap items-center gap-x-3 gap-y-2">
-          {!applied && statusSelect}
-          <button
-            type="button"
-            className="sm:hidden btn btn-sm min-h-10"
-            aria-expanded={detailsOpen}
-            aria-controls="job-details"
-            onClick={() => setDetailsOpen((o) => !o)}
-          >
-            Details {detailsOpen ? "▴" : "▾"}
-          </button>
-          <span className="ml-auto lg:ml-0">
-            <SaveStatus status={saveState} />
-          </span>
-          {/* Phones: inside the "Details" disclosure. Desktop: inline. */}
-          <div
-            id="job-details"
-            className={`${detailsOpen ? "flex" : "hidden"} sm:flex w-full sm:w-auto flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface p-2 sm:border-0 sm:bg-transparent sm:p-0`}
-          >
-            {!applied && followUp}
-            <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => patch({ deadline: v })} />
-            <button type="button" className="text-xs text-muted hover:text-bad py-1 min-h-10 sm:min-h-0 ml-auto sm:ml-0" onClick={deleteJob}>
-              Delete job
-            </button>
-          </div>
-        </div>
-      </div>
+      <JobHeader
+        job={job}
+        applied={applied}
+        statusSelect={statusSelect}
+        followUp={followUp}
+        saveState={saveState}
+        detailsOpen={detailsOpen}
+        onToggleDetails={() => setDetailsOpen((o) => !o)}
+        onPatch={patch}
+        onDelete={deleteJob}
+      />
 
-      {applied && job.submitted_at ? (
-        <section
-          aria-label="Application sent"
-          className="rounded-lg border border-good/40 bg-good-bg px-3 py-2.5 text-sm space-y-2"
-        >
-          <p>
-            <span className="text-good" aria-hidden>✓ </span>
-            <strong>You applied on {formatSubmitted(job.submitted_at)}.</strong> Edits here don&apos;t change what you sent.
-          </p>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            {job.submitted_resume && (
-              <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" onClick={() => setViewingSubmitted(true)}>
-                View what you sent
-              </button>
-            )}
-            {followUp}
-            <label className="text-xs text-muted flex items-center gap-1.5">
-              Status {statusSelect}
-            </label>
-            <span className="sm:ml-auto">
-              <Toggle on={reapply} onChange={setReapply} label="Keep editing (for a re-apply)" />
-            </span>
-          </div>
-        </section>
-      ) : (
-        job.submitted_at && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-sm sm:rounded-lg sm:border sm:border-border sm:bg-surface sm:px-3 sm:py-1.5">
-            <span>
-              <span className="text-good">✓</span> Applied {formatSubmitted(job.submitted_at)}
-            </span>
-            {job.submitted_resume && (
-              <>
-                <span className="text-muted" aria-hidden>·</span>
-                <button type="button" className="text-accent underline underline-offset-2 sm:py-1" onClick={() => setViewingSubmitted(true)}>
-                  View what you sent
-                </button>
-              </>
-            )}
-          </div>
-        )
-      )}
+      <AppliedNotice
+        job={job}
+        applied={applied}
+        followUp={followUp}
+        statusSelect={statusSelect}
+        reapply={reapply}
+        onReapply={setReapply}
+        onViewSubmitted={() => setViewingSubmitted(true)}
+      />
 
       {migrationHint && (
         <div role="status" className="flex items-start gap-2 rounded-lg border border-ok/40 bg-ok-bg px-3 py-2 text-sm">
@@ -1230,77 +1139,23 @@ export default function JobPage() {
             )}
           </div>
 
-          {tab === "job" && (
-            <div className="card p-4 space-y-3">
-              <input
-                className="input w-full text-sm"
-                value={job.url}
-                placeholder="Posting URL"
-                aria-label="Posting URL"
-                onChange={(e) => patch({ url: e.target.value })}
-              />
-              <textarea
-                className="input w-full min-h-[60vh] text-sm leading-relaxed"
-                value={job.description}
-                aria-label="Job description"
-                placeholder="Paste the job description here."
-                onChange={(e) => patch({ description: e.target.value })}
-              />
-              <textarea
-                className="input w-full h-24 text-sm"
-                value={job.notes}
-                placeholder="Notes: referral, recruiter name…"
-                aria-label="Notes"
-                onChange={(e) => patch({ notes: e.target.value })}
-              />
-            </div>
-          )}
+          {tab === "job" && <PostingTab job={job} onPatch={patch} />}
           {tab === "cover" && (
-            <div className="card p-4 space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm text-muted flex-1 min-w-48">
-                  {quiet ? "The letter as you last saved it here." : "Only send one if the application asks. Replace every [placeholder] first."}
-                </p>
-                {coverPlaceholders > 0 && !quiet && (
-                  <span className="chip border-[#e0b100] bg-[#fff6d6] text-[#5c4300]">
-                    {plural(coverPlaceholders, "placeholder")} left
-                  </span>
-                )}
-                {job.cover_letter && (
-                  <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={copyCoverLetter}>
-                    Copy as text
-                  </button>
-                )}
-                {!quiet && (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-primary min-h-10 sm:min-h-0"
-                    onClick={writeCoverLetter}
-                    disabled={writing || !resume}
-                  >
-                    {writing ? "Writing…" : job.cover_letter ? "Regenerate" : "Draft cover letter"}
-                  </button>
-                )}
-              </div>
-              {coverError && !writing && !quiet && (
-                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-bad/40 bg-bad-bg px-3 py-2 text-sm">
-                  <span className="flex-1 min-w-48 text-bad">{coverError}</span>
-                  <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={writeCoverLetter}>Retry</button>
-                </div>
-              )}
-              <PlaceholderTextarea
-                boxClassName="input w-full min-h-[50vh] text-sm leading-relaxed"
-                value={job.cover_letter}
-                placeholder="Draft a cover letter, or write your own here."
-                aria-label="Cover letter"
-                onChange={(e) => patch({ cover_letter: e.target.value })}
-              />
-            </div>
+            <CoverLetterTab
+              job={job}
+              quiet={quiet}
+              writing={writing}
+              error={coverError}
+              canWrite={!!resume}
+              onWrite={writeCoverLetter}
+              onCopy={copyCoverLetter}
+              onPatch={patch}
+            />
           )}
         </div>
 
         <aside
-          className={`${tab === "analysis" ? "" : "hidden"} lg:block lg:sticky lg:top-[4.5rem] lg:self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto`}
+          className={`${tab === "analysis" ? "" : "hidden"} lg:block lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto`}
         >
           {side}
         </aside>

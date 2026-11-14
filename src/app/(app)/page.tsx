@@ -89,7 +89,7 @@ function UndoToast({ message, onUndo, onClose, raised }: { message: string; onUn
       role="status"
       aria-live="polite"
       className={`fixed z-40 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:max-w-md flex items-center gap-3 rounded-xl border border-good/40 bg-surface px-4 py-2.5 text-sm shadow-lg ${
-        raised ? "bottom-[calc(9rem+env(safe-area-inset-bottom))] sm:bottom-20" : "bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:bottom-4"
+        raised ? "bottom-[calc(9rem+env(safe-area-inset-bottom))] lg:bottom-20" : "bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-4"
       }`}
     >
       <span className="flex-1 min-w-0 text-good">{message}</span>

@@ -57,7 +57,7 @@ function ConflictBanner({
   return (
     <div
       role="alert"
-      className="fixed z-40 inset-x-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:inset-x-auto sm:right-4 sm:bottom-4 sm:max-w-md rounded-xl border border-bad/50 bg-surface p-4 text-sm shadow-lg space-y-2 max-h-[70dvh] overflow-y-auto"
+      className="fixed z-40 inset-x-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:inset-x-auto sm:right-4 lg:bottom-4 sm:max-w-md rounded-xl border border-bad/50 bg-surface p-4 text-sm shadow-lg space-y-2 max-h-[70dvh] overflow-y-auto"
     >
       <p className="font-semibold text-bad">Your master resume was changed elsewhere</p>
       <p className="text-muted">
@@ -330,7 +330,7 @@ export default function MasterResumePage() {
               <ResumeDocument value={resume} onChange={doc.set} onMeasure={setMeasure} actionsSlot={slot} onSelectionChange={onSelection} />
             </div>
 
-            <div id="side-panel" className="lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto space-y-3 scroll-mt-16">
+            <div id="side-panel" className="lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto space-y-3 scroll-mt-16">
               <SideTabs
                 label="Panel"
                 value={sideTab}
