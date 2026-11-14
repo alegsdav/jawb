@@ -342,6 +342,7 @@ export function replaceBullet(r: Resume, bulletId: string, text: string): Resume
 export const JOB_FIELDS = [
   "company", "title", "location", "url", "description", "status", "date_applied", "follow_up_date", "notes",
   "cover_letter", "deadline", "submitted_resume", "submitted_at", "submitted_tailored", "reached_interview",
+  "suggestions_total", "suggestions_pending",
 ] as const;
 
 const eq = (a: unknown, b: unknown) =>

@@ -8,7 +8,7 @@ import { STATUSES, type Job, type JobStatus, type Resume } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { isEmptyResume, normalizeResume } from "@/lib/resume";
 import { shouldSnapshot, SUBMITTED_STATUSES } from "@/lib/outcomes";
-import { dbErrorMessage, isMissingColumn, MIGRATION_HINT, OPTIONAL_JOB_COLUMNS } from "@/lib/db";
+import { dbErrorMessage, isMissingColumn, MIGRATION_0006_COLUMNS, MIGRATION_HINT, OPTIONAL_JOB_COLUMNS } from "@/lib/db";
 import { addDays, localToday, shortDate } from "@/lib/dates";
 import { applyStatusChange } from "@/lib/status";
 import { useJobWrites, type RowSaveState } from "@/lib/jobWrites";
@@ -17,12 +17,18 @@ import { FitBadge, StatusSelect } from "@/components/StatusSelect";
 import { AddJobForm, stashCapture } from "@/components/AddJobForm";
 import { OutcomeStats } from "@/components/OutcomeStats";
 import { DeadlineField, deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
+import { InProgress } from "@/components/dashboard/InProgress";
+import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
+import { InboxCard, RecommendedCard } from "@/components/dashboard/ComingSoon";
+import { useIsDesktop } from "@/lib/useMedia";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
 const COLS_0002 = "deadline, submitted_at, submitted_tailored";
 /** Added by migration 0003. */
 const COLS_0003 = "reached_interview";
+/** Added by migration 0006 (tailoring progress). */
+const COLS_0006 = "suggestions_total, suggestions_pending";
 
 /** "Followed up" moves the next follow-up this many days out (with Undo). */
 const FOLLOW_UP_AGAIN_DAYS = 7;
@@ -106,6 +112,7 @@ function UndoToast({ message, onUndo, onClose, raised }: { message: string; onUn
 const RESUME_LOAD_ERROR =
   "Couldn't load your resume to save a copy of what you sent. Check your connection and try again.";
 
+/** The dashboard: needs attention, in progress, all applications, add a job, and what's coming. */
 export default function TrackerPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -126,6 +133,7 @@ export default function TrackerPage() {
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
   const slow = useSlow(!ready || loading);
+  const desktop = useIsDesktop();
 
   const markMissing = useCallback((cols: readonly string[]) => {
     let added = false;
@@ -142,7 +150,8 @@ export default function TrackerPage() {
   const columns = useCallback(() => {
     if (missing.current.has("deadline")) return BASE_COLS;
     if (missing.current.has("reached_interview")) return `${BASE_COLS}, ${COLS_0002}`;
-    return `${BASE_COLS}, ${COLS_0002}, ${COLS_0003}`;
+    if (missing.current.has("suggestions_total")) return `${BASE_COLS}, ${COLS_0002}, ${COLS_0003}`;
+    return `${BASE_COLS}, ${COLS_0002}, ${COLS_0003}, ${COLS_0006}`;
   }, []);
 
   // Row writes: retried, merged while in flight, conditional on updated_at (see src/lib/jobWrites.ts).
@@ -182,10 +191,14 @@ export default function TrackerPage() {
 
     (async () => {
       const select = (cols: string) => supabase.from("jobs").select(cols).order("created_at", { ascending: false });
-      let res = await select(`${BASE_COLS}, ${COLS_0002}, ${COLS_0003}`);
+      let res = await select(`${BASE_COLS}, ${COLS_0002}, ${COLS_0003}, ${COLS_0006}`);
       let gone: string[] = [];
       if (res.error && isMissingColumn(res.error)) {
-        gone = ["reached_interview"];
+        gone = [...MIGRATION_0006_COLUMNS];
+        res = await select(`${BASE_COLS}, ${COLS_0002}, ${COLS_0003}`);
+      }
+      if (res.error && isMissingColumn(res.error)) {
+        gone = ["reached_interview", ...MIGRATION_0006_COLUMNS];
         res = await select(`${BASE_COLS}, ${COLS_0002}`);
       }
       if (res.error && isMissingColumn(res.error)) {
@@ -207,6 +220,8 @@ export default function TrackerPage() {
           submitted_tailored: j.submitted_tailored ?? null,
           submitted_resume: null,
           reached_interview: j.reached_interview ?? false,
+          suggestions_total: j.suggestions_total ?? null,
+          suggestions_pending: j.suggestions_pending ?? null,
         })),
       );
       setLoading(false);
@@ -323,23 +338,17 @@ export default function TrackerPage() {
     ...STATUSES,
   ];
   const anyFailing = writes.states.size > 0;
+  const closing = needsMigration
+    ? []
+    : jobs.filter((j) => isClosingSoon(j.deadline, j.status, today)).sort((x, y) => (x.deadline ?? "").localeCompare(y.deadline ?? ""));
 
   const migrationBanner = missingCols.size > 0 && (
     <div role="status" className="card border-ok bg-ok-bg p-3 text-sm">
       {MIGRATION_HINT}
       {needsMigration && " Deadlines and application snapshots are off until then."}
+      {!needsMigration && missingCols.has("suggestions_total") && " Progress in In progress shows once it's run."}
     </div>
   );
-
-  if (noJobs) {
-    return (
-      <div className="space-y-3 sm:space-y-5">
-        {migrationBanner}
-        <AddJobForm />
-        <p className="text-sm text-muted px-1">Jobs you add show up here, with their status, deadline and follow-ups.</p>
-      </div>
-    );
-  }
 
   const appliedCell = (j: Job) =>
     SUBMITTED_STATUSES.has(j.status) ? (
@@ -357,185 +366,195 @@ export default function TrackerPage() {
     );
 
   return (
-    <div className="space-y-3 sm:space-y-5">
+    <div className="space-y-3 sm:space-y-4">
       {migrationBanner}
+      <h1 className="sr-only">Dashboard</h1>
+      <NeedsAttention followUps={due} closing={closing} today={today} onFollowedUp={followedUp} />
 
-      {/* Once there are jobs (or while they load), "Add job" is a one-line button so the list starts on the first screen. */}
-      <AddJobForm collapsible existing={jobs} />
-
-      {due.length > 0 && (
-        <div className="card px-3 py-2 border-ok bg-ok-bg/50 text-sm flex items-baseline gap-2 overflow-x-auto whitespace-nowrap">
-          <strong className="shrink-0">Follow-ups due ({due.length}):</strong>
-          {due.map((j, i) => (
-            <span key={j.id} className="shrink-0">
-              <Link href={`/jobs/${j.id}`} className="underline">{j.company || j.title}</Link>
-              {i < due.length - 1 && ","}
-            </span>
-          ))}
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-12 lg:items-start">
+        {/* Phones: Add a job comes first (a one-line button once there are jobs). Desktop: the right column. */}
+        <div id="add-job" className="scroll-mt-4 lg:col-span-4 lg:col-start-9 lg:row-start-1">
+          <AddJobForm collapsible={!desktop && !noJobs} existing={jobs} />
         </div>
-      )}
 
-      <OutcomeStats jobs={jobs} />
+        <div className="min-w-0 space-y-3 sm:space-y-4 lg:col-span-8 lg:col-start-1 lg:row-start-1 lg:row-span-3">
+          <InProgress jobs={jobs} today={today} loading={loading} />
 
-      {loadError && (
-        <div role="alert" className="card border-bad/40 p-3 text-sm flex flex-wrap items-center gap-3">
-          <span className="flex-1 min-w-48 text-bad">{loadError}</span>
-          <button className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => location.reload()}>Reload</button>
-        </div>
-      )}
-      {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+          <section aria-labelledby="all-apps-heading" className="space-y-3">
+            <h2 id="all-apps-heading" className="font-semibold px-1">All applications</h2>
+            <OutcomeStats jobs={jobs} />
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-        <div className="flex sm:flex-1 min-w-0 items-center gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap pb-1">
-          {chips.map((s) => (
-            <button
-              key={s.value}
-              onClick={() => setFilter(s.value)}
-              aria-pressed={filter === s.value}
-              className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-1 ${
-                filter === s.value
-                  ? "bg-fg text-bg border-fg"
-                  : s.value === "closing" && counts.closing
-                    ? "border-ok text-ok"
-                    : "hover:border-fg/40"
-              }`}
-            >
-              {s.label} {counts[s.value] ?? 0}
-            </button>
-          ))}
-        </div>
-        {!needsMigration && (
-          <label className="shrink-0 pb-1 flex items-center gap-2 self-end sm:self-auto">
-            <span className="text-xs text-muted">Sort</span>
-            <select className="input py-1 text-xs min-h-10 sm:min-h-0" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-              <option value="newest">Newest added</option>
-              <option value="deadline">Deadline soonest</option>
-            </select>
-          </label>
-        )}
-      </div>
-
-      {/* Phones: one card per job */}
-      <div className="sm:hidden space-y-2">
-        {loading ? (
-          <p role="status" className="text-sm text-muted">{loadingText}</p>
-        ) : shown.length === 0 ? (
-          <p className="text-sm text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
-        ) : (
-          shown.map((j) => {
-            const urgency = deadlineUrgency(j.deadline, j.status, today);
-            const fit = fitOf(j.analysis);
-            const isDue = followUpDue(j, today);
-            return (
-              <div
-                key={j.id}
-                className={`card p-3 space-y-2 ${urgency === "overdue" ? "border-l-4 border-l-bad" : urgency === "soon" ? "border-l-4 border-l-ok" : ""}`}
-              >
-                <div className="flex items-start gap-2">
-                  <Link href={`/jobs/${j.id}`} className="flex-1 min-w-0">
-                    <div className="font-medium truncate">{j.title || "Untitled role"}</div>
-                    <div className="text-sm text-muted truncate">
-                      {[j.company, j.location].filter(Boolean).join(" · ")}
-                    </div>
-                  </Link>
-                  {fit && <FitBadge fit={fit} />}
-                </div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
-                  {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
-                  {!needsMigration && (
-                    <DeadlineField
-                      compact
-                      value={j.deadline}
-                      status={j.status}
-                      today={today}
-                      onChange={(deadline) => setField(j, { deadline })}
-                    />
-                  )}
-                  {j.date_applied && <span className="text-xs text-muted">Applied {shortDate(j.date_applied)}</span>}
-                  {j.follow_up_date && j.status === "applied" && (
-                    <span className={`text-xs ${isDue ? "text-ok font-medium" : "text-muted"}`}>
-                      Follow up {shortDate(j.follow_up_date)}
-                    </span>
-                  )}
-                  {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
-                  <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
-                </div>
+            {loadError && (
+              <div role="alert" className="card border-bad/40 p-3 text-sm flex flex-wrap items-center gap-3">
+                <span className="flex-1 min-w-48 text-bad">{loadError}</span>
+                <button className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => location.reload()}>Reload</button>
               </div>
-            );
-          })
-        )}
-      </div>
+            )}
+            {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+            {noJobs && <p className="text-sm text-muted px-1">Jobs you add show up here, with their status, deadline and follow-ups.</p>}
 
-      <div className="card overflow-x-auto hidden sm:block">
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted">
-            <tr className="border-b border-border">
-              <th className="p-3 font-medium">Role</th>
-              <th className="p-3 font-medium hidden lg:table-cell">Location</th>
-              <th className="p-3 font-medium">Fit</th>
-              <th className="p-3 font-medium">Status</th>
-              {!needsMigration && <th className="p-3 font-medium">Deadline</th>}
-              <th className="p-3 font-medium">Applied</th>
-              <th className="p-3 font-medium hidden md:table-cell">Follow up</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td role="status" className="p-3 text-muted" colSpan={7}>{loadingText}</td></tr>
-            ) : shown.length === 0 ? (
-              <tr>
-                <td className="p-3 text-muted" colSpan={7}>{jobs.length ? "No jobs match this filter." : ""}</td>
-              </tr>
-            ) : (
-              shown.map((j) => {
-                const fit = fitOf(j.analysis);
-                const isDue = followUpDue(j, today);
-                return (
-                  <tr key={j.id} className="border-b border-border last:border-0 hover:bg-bg/60 align-top">
-                    <td className="p-3">
-                      <Link href={`/jobs/${j.id}`} className="font-medium hover:underline">
-                        {j.title || "Untitled role"}
-                      </Link>
-                      <div className="text-muted">{j.company}</div>
-                    </td>
-                    <td className="p-3 hidden lg:table-cell text-muted">{j.location}</td>
-                    <td className="p-3">{fit ? <FitBadge fit={fit} /> : <span className="text-muted">–</span>}</td>
-                    <td className="p-3">
-                      <div className="flex flex-col items-start gap-1">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex sm:flex-1 min-w-0 items-center gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap pb-1">
+                {chips.map((s) => (
+                  <button
+                    key={s.value}
+                    onClick={() => setFilter(s.value)}
+                    aria-pressed={filter === s.value}
+                    className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-1 ${
+                      filter === s.value
+                        ? "bg-fg text-bg border-fg"
+                        : s.value === "closing" && counts.closing
+                          ? "border-ok text-ok"
+                          : "hover:border-fg/40"
+                    }`}
+                  >
+                    {s.label} {counts[s.value] ?? 0}
+                  </button>
+                ))}
+              </div>
+              {!needsMigration && (
+                <label className="shrink-0 pb-1 flex items-center gap-2 self-end sm:self-auto">
+                  <span className="text-xs text-muted">Sort</span>
+                  <select className="input py-1 text-xs min-h-10 sm:min-h-0" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+                    <option value="newest">Newest added</option>
+                    <option value="deadline">Deadline soonest</option>
+                  </select>
+                </label>
+              )}
+            </div>
+
+            {/* Phones: one card per job */}
+            <div className="sm:hidden space-y-2">
+              {loading ? (
+                <p role="status" className="text-sm text-muted">{loadingText}</p>
+              ) : shown.length === 0 ? (
+                <p className="text-sm text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
+              ) : (
+                shown.map((j) => {
+                  const urgency = deadlineUrgency(j.deadline, j.status, today);
+                  const fit = fitOf(j.analysis);
+                  const isDue = followUpDue(j, today);
+                  return (
+                    <div
+                      key={j.id}
+                      className={`card p-3 space-y-2 ${urgency === "overdue" ? "border-l-4 border-l-bad" : urgency === "soon" ? "border-l-4 border-l-ok" : ""}`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <Link href={`/jobs/${j.id}`} className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{j.title || "Untitled role"}</div>
+                          <div className="text-sm text-muted truncate">
+                            {[j.company, j.location].filter(Boolean).join(" · ")}
+                          </div>
+                        </Link>
+                        {fit && <FitBadge fit={fit} />}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                         <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
                         {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
-                        {/* In the status column so it shows at every width (the follow-up column hides below md). */}
+                        {!needsMigration && (
+                          <DeadlineField
+                            compact
+                            value={j.deadline}
+                            status={j.status}
+                            today={today}
+                            onChange={(deadline) => setField(j, { deadline })}
+                          />
+                        )}
+                        {j.date_applied && <span className="text-xs text-muted">Applied {shortDate(j.date_applied)}</span>}
+                        {j.follow_up_date && j.status === "applied" && (
+                          <span className={`text-xs ${isDue ? "text-ok font-medium" : "text-muted"}`}>
+                            Follow up {shortDate(j.follow_up_date)}
+                          </span>
+                        )}
                         {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
                         <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
                       </div>
-                    </td>
-                    {!needsMigration && (
-                      <td className="p-3">
-                        <DeadlineField
-                          value={j.deadline}
-                          status={j.status}
-                          today={today}
-                          onChange={(deadline) => setField(j, { deadline })}
-                        />
-                      </td>
-                    )}
-                    <td className="p-3">{appliedCell(j)}</td>
-                    <td className="p-3 hidden md:table-cell">
-                      <input
-                        type="date"
-                        aria-label="Follow-up date"
-                        className={`ghost-input text-xs ${isDue ? "text-ok font-medium" : ""}`}
-                        value={j.follow_up_date ?? ""}
-                        onChange={(e) => setField(j, { follow_up_date: e.target.value || null })}
-                      />
-                    </td>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="card overflow-x-auto hidden sm:block">
+              <table className="w-full text-sm">
+                <thead className="text-left text-muted">
+                  <tr className="border-b border-border">
+                    <th className="p-3 font-medium">Role</th>
+                    <th className="p-3 font-medium hidden 2xl:table-cell">Location</th>
+                    <th className="p-3 font-medium">Fit</th>
+                    <th className="p-3 font-medium">Status</th>
+                    {!needsMigration && <th className="p-3 font-medium">Deadline</th>}
+                    <th className="p-3 font-medium">Applied</th>
+                    <th className="p-3 font-medium hidden md:table-cell">Follow up</th>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td role="status" className="p-3 text-muted" colSpan={7}>{loadingText}</td></tr>
+                  ) : shown.length === 0 ? (
+                    <tr>
+                      <td className="p-3 text-muted" colSpan={7}>{jobs.length ? "No jobs match this filter." : ""}</td>
+                    </tr>
+                  ) : (
+                    shown.map((j) => {
+                      const fit = fitOf(j.analysis);
+                      const isDue = followUpDue(j, today);
+                      return (
+                        <tr key={j.id} className="border-b border-border last:border-0 hover:bg-bg/60 align-top">
+                          <td className="p-3">
+                            <Link href={`/jobs/${j.id}`} className="font-medium hover:underline">
+                              {j.title || "Untitled role"}
+                            </Link>
+                            <div className="text-muted">{j.company}</div>
+                          </td>
+                          <td className="p-3 hidden 2xl:table-cell text-muted">{j.location}</td>
+                          <td className="p-3">{fit ? <FitBadge fit={fit} /> : <span className="text-muted">–</span>}</td>
+                          <td className="p-3">
+                            <div className="flex flex-col items-start gap-1">
+                              <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
+                              {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
+                              {/* In the status column so it shows at every width (the follow-up column hides below md). */}
+                              {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
+                              <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
+                            </div>
+                          </td>
+                          {!needsMigration && (
+                            <td className="p-3">
+                              <DeadlineField
+                                value={j.deadline}
+                                status={j.status}
+                                today={today}
+                                onChange={(deadline) => setField(j, { deadline })}
+                              />
+                            </td>
+                          )}
+                          <td className="p-3">{appliedCell(j)}</td>
+                          <td className="p-3 hidden md:table-cell">
+                            <input
+                              type="date"
+                              aria-label="Follow-up date"
+                              className={`ghost-input text-xs ${isDue ? "text-ok font-medium" : ""}`}
+                              value={j.follow_up_date ?? ""}
+                              onChange={(e) => setField(j, { follow_up_date: e.target.value || null })}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+          </section>
+        </div>
+
+        <div className="lg:col-span-4 lg:col-start-9 lg:row-start-2">
+          <RecommendedCard />
+        </div>
+        <div className="lg:col-span-4 lg:col-start-9 lg:row-start-3">
+          <InboxCard />
+        </div>
       </div>
 
       {undo && <UndoToast message={undo.message} onUndo={undoFollowUp} onClose={() => setUndo(null)} raised={anyFailing} />}

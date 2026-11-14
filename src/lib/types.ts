@@ -125,6 +125,10 @@ export type Job = {
   submitted_tailored: boolean | null;
   /** Set the first time the status enters Interview or Offer; stays true after a later Rejected (migration 0003). */
   reached_interview?: boolean | null;
+  /** Suggested rewrites in the latest analysis (migration 0006; null = not analyzed). */
+  suggestions_total?: number | null;
+  /** Of those, how many still wait for accept/reject (migration 0006). */
+  suggestions_pending?: number | null;
   created_at: string;
   updated_at: string;
 };

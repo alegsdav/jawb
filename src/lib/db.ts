@@ -30,8 +30,11 @@ export const MIGRATION_HINT =
 /** Columns added by migration 0002; strip them from writes when the migration is missing. */
 export const MIGRATION_0002_COLUMNS = ["deadline", "submitted_resume", "submitted_at", "submitted_tailored"] as const;
 
+/** Columns added by migration 0006 (tailoring progress for the dashboard). */
+export const MIGRATION_0006_COLUMNS = ["suggestions_total", "suggestions_pending"] as const;
+
 /** Every job column added after 0001; strip these from writes/selects when a migration is missing. */
-export const OPTIONAL_JOB_COLUMNS = [...MIGRATION_0002_COLUMNS, "reached_interview"] as const;
+export const OPTIONAL_JOB_COLUMNS = [...MIGRATION_0002_COLUMNS, "reached_interview", ...MIGRATION_0006_COLUMNS] as const;
 
 // ---------- plain-language errors ----------
 

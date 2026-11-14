@@ -39,6 +39,7 @@ import { FactsPanel } from "@/components/FactsPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { UndoToast } from "@/components/UndoToast";
 import { insertCoachedBullet, priorityItems, type CoachTarget } from "@/lib/coaching";
+import { progressFields } from "@/lib/progress";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, FitBadge } from "@/components/StatusSelect";
 import { DocToolbar, FeedbackLegend, PageCount, PlaceholderCount, Toggle, toggleLabel, UndoRedo } from "@/components/DocToolbar";
@@ -516,6 +517,15 @@ export default function JobPage() {
   const placeholderCount = useMemo(() => (resume ? countPlaceholders(resumeTexts(resume)) : 0), [resume]);
   const factTexts = useMemo(() => facts.facts.map((f) => f.text), [facts.facts]);
   const priority = useMemo(() => (resume && !quiet ? priorityItems(resume, feedback) : []), [resume, feedback, quiet]);
+
+  // Tailoring progress for the dashboard (migration 0006), saved with the job's other fields through
+  // the same conditional autosave. Not while applied (the suggestions are folded away then).
+  useEffect(() => {
+    if (!job || !resume || quiet) return;
+    const next = progressFields(analysis, pending.length);
+    if ((job.suggestions_total ?? null) === next.suggestions_total && (job.suggestions_pending ?? null) === next.suggestions_pending) return;
+    updateJob((j) => ({ ...j, ...next }));
+  }, [job, resume, quiet, analysis, pending.length, updateJob]);
   const missingFacts = useMemo(
     () =>
       analysis && facts.status === "ready" ? missingAnswerFacts(analysis.questions, analysis.answers, factTexts, analysis.bullets) : [],
@@ -996,7 +1006,8 @@ export default function JobPage() {
       {migrationHint && (
         <div role="status" className="flex items-start gap-2 rounded-lg border border-ok/40 bg-ok-bg px-3 py-2 text-sm">
           <span className="flex-1">
-            {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking) aren&apos;t saved.
+            {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking, progress on the
+            dashboard) aren&apos;t saved.
           </span>
           <button type="button" className="text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setMigrationHint(false)}>✕</button>
         </div>
