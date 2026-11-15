@@ -24,8 +24,8 @@ export function NeedsAttention({
   };
   return (
     <section aria-labelledby="attention-heading" className="space-y-3">
-      <h2 id="attention-heading" className="text-lg font-semibold">Needs attention</h2>
-      <ul className="grid gap-x-10 gap-y-3 text-sm md:grid-cols-2">
+      <h2 id="attention-heading" className="text-[15px] font-semibold">Needs attention</h2>
+      <ul className="grid gap-x-10 gap-y-2 text-[13px] md:grid-cols-2">
         {followUps.map((j) => (
           <li key={`f${j.id}`} className="flex flex-wrap items-center gap-2 min-w-0">
             <span className="inline-flex shrink-0 items-center gap-1.5 font-medium"><span aria-hidden className="h-2 w-2 rounded-full bg-[var(--dot-orange)]" />Follow up</span>

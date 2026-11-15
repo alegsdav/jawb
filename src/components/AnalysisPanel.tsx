@@ -57,18 +57,18 @@ function FillRow({ q, answer, onFill }: { q: Question; answer: string; onFill: (
   const [edited, setEdited] = useState<string | null>(null);
   const value = edited ?? suggestFill(q.placeholder ?? "", answer);
   return (
-    <div className="rounded-lg border border-[#e0b100]/60 bg-[#fff6d6] p-2 text-[#5c4300] space-y-1.5">
+    <div className="space-y-1.5">
       <p className="text-xs">
-        Fill <strong className="rounded bg-[#ffd84d] px-1 text-[#3d2c00]">{q.placeholder}</strong> in the bullet with:
+        Fill <strong className="rounded border border-border bg-surface-2 px-1 text-fg">{q.placeholder}</strong> in the bullet with:
       </p>
       <div className="flex gap-1.5">
         <input
-          className="input min-w-0 flex-1 py-1 text-sm text-fg"
+          className="input min-w-0 flex-1 py-1 text-[13px] text-fg"
           value={value}
           onChange={(e) => setEdited(e.target.value)}
           aria-label={`Text to put in place of ${q.placeholder}`}
         />
-        <button type="button" className="btn btn-sm btn-primary shrink-0 min-h-10 sm:min-h-0" disabled={!value.trim()} onClick={() => onFill(q, value)}>
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50 shrink-0" disabled={!value.trim()} onClick={() => onFill(q, value)}>
           Fill
         </button>
       </div>
@@ -118,10 +118,10 @@ export function AnalysisPanel(p: Props) {
     const answer = answers[q.id] ?? "";
     return (
       <div key={q.id} className="space-y-1.5">
-        <p className="text-sm font-medium">{q.question}</p>
+        <p className="text-[13px] font-medium">{q.question}</p>
         {q.why && <p className="text-xs text-muted">{q.why}</p>}
         <textarea
-          className="input w-full h-16 text-sm"
+          className="input w-full h-16 text-[13px]"
           value={answer}
           onChange={(e) => p.onDraftsChange({ ...answers, [q.id]: e.target.value })}
           placeholder="Your answer (rough is fine; numbers help)"
@@ -134,7 +134,7 @@ export function AnalysisPanel(p: Props) {
 
   const saveRow = (
     <div className="flex flex-wrap items-center gap-2">
-      <button className="btn btn-sm min-h-10 sm:min-h-0" disabled={!canSave} onClick={save}>
+      <button className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" disabled={!canSave} onClick={save}>
         {saving ? "Saving…" : "Save answers"}
       </button>
       {dirty && !saving && <span className="text-xs text-muted">Unsaved answers</span>}
@@ -142,24 +142,24 @@ export function AnalysisPanel(p: Props) {
   );
 
   const errorBox = saveError && !saving && (
-    <div role="alert" className="space-y-2 rounded-lg border border-bad/40 p-3 text-[13px]">
+    <div role="alert" className="space-y-2 text-[13px]">
       <p className="text-bad">
         <strong>Your answers aren&apos;t saved yet.</strong> {saveError}
       </p>
       <p className="text-xs text-muted">They&apos;re still in the boxes below. Nothing is lost while this page is open.</p>
-      <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={save}>
+      <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={save}>
         Retry
       </button>
     </div>
   );
 
   const missingBox = missing > 0 && !dirty && !saveError && !saving && (
-    <div role="status" className="space-y-2 rounded-lg border border-border p-3 text-[13px]">
+    <div role="status" className="space-y-2 text-[13px]">
       <p>
         {missing === 1 ? "1 answer isn't" : `${missing} answers aren't`} in your facts yet, so other jobs can&apos;t use{" "}
         {missing === 1 ? "it" : "them"}.
       </p>
-      <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={save}>
+      <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={save}>
         Save answers
       </button>
     </div>
@@ -172,7 +172,7 @@ export function AnalysisPanel(p: Props) {
           <h2 className="text-[13px] font-semibold">Analysis</h2>
           {fit && <FitBadge fit={fit} />}
           {!p.quiet && (
-            <button className="btn btn-primary btn-sm ml-auto min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
+            <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50 ml-auto" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
               {p.analyzing ? "Analyzing…" : a ? "Re-analyze" : "Analyze fit"}
             </button>
           )}
@@ -184,35 +184,35 @@ export function AnalysisPanel(p: Props) {
           </p>
         )}
         {p.error && !p.analyzing && !p.quiet && (
-          <div role="alert" className="space-y-2 rounded-lg border border-bad/40 p-3 text-[13px]">
+          <div role="alert" className="space-y-2 text-[13px]">
             <p className="text-bad">{p.error}</p>
-            <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={!!p.disabledReason}>
+            <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={p.onAnalyze} disabled={!!p.disabledReason}>
               Retry
             </button>
           </div>
         )}
         {p.quiet ? null : p.disabledReason ? (
-          <p className="text-sm text-muted">{p.disabledReason}</p>
+          <p className="text-[13px] text-muted">{p.disabledReason}</p>
         ) : (
           !a &&
           !p.analyzing &&
           !p.error && (
-            <p className="text-sm text-muted">
+            <p className="text-[13px] text-muted">
               Compares this tailored copy against the job: overall fit, missing keywords, a rating for every bullet with
               suggested rewrites, and questions for anything it needs from you. Usually takes 20–60 seconds.
             </p>
           )
         )}
-        {a && <p className="text-sm">{a.verdict}</p>}
+        {a && <p className="text-[13px]">{a.verdict}</p>}
         {a && !p.quiet && p.top}
         {a && !p.quiet && !p.top && p.pendingCount > 0 && (
           <div className="space-y-2 rounded-lg border border-border p-3">
-            <p className="text-sm">
+            <p className="text-[13px]">
               <strong>{p.pendingCount} suggested edit{p.pendingCount > 1 ? "s" : ""}</strong> to tailor your resume for this job.
             </p>
             <div className="flex flex-wrap gap-1.5">
-              <button className="btn btn-sm min-h-10 sm:min-h-0" onClick={p.onReview}>Review one by one</button>
-              <button className="btn btn-sm btn-primary min-h-10 sm:min-h-0" onClick={p.onAcceptAll}>Accept all</button>
+              <button className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={p.onReview}>Review one by one</button>
+              <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" onClick={p.onAcceptAll}>Accept all</button>
             </div>
           </div>
         )}
@@ -228,7 +228,7 @@ export function AnalysisPanel(p: Props) {
           {!p.quiet && errorBox}
           {!p.quiet && unanswered.length > 0 && (
             <div className="space-y-3 border-t border-border pt-4">
-              <h3 className="text-[13px] font-medium text-accent">Questions for you</h3>
+              <h3 className="text-[13px] font-semibold">Questions for you</h3>
               {unanswered.map(field)}
               <p className="text-xs text-muted">Answers are saved to your facts, so other jobs can use them too.</p>
               {saveRow}
@@ -254,13 +254,13 @@ export function AnalysisPanel(p: Props) {
           )}
 
           <div className="space-y-2 border-t border-border pt-4">
-            <h3 className="text-[13px] font-medium">Keywords</h3>
+            <h3 className="text-[13px] font-semibold">Keywords</h3>
             <div className="flex flex-wrap gap-1">
               {a.keywords.missing.map((k) => (
-                <span key={k} className="chip border-bad/40 text-bad" title="In the posting, missing from your resume">{k}</span>
+                <span key={k} className="chip border-border text-bad" title="In the posting, missing from your resume">{k}</span>
               ))}
               {a.keywords.matched.map((k) => (
-                <span key={k} className="chip border-good/40 text-good" title="Matched">{k}</span>
+                <span key={k} className="chip border-border text-good" title="Matched">{k}</span>
               ))}
             </div>
             <p className="text-xs text-muted">Red = in the posting but not on your resume. Only add ones that are true.</p>
@@ -268,8 +268,8 @@ export function AnalysisPanel(p: Props) {
 
           {a.gaps.length > 0 && (
             <div className="space-y-2 border-t border-border pt-4">
-              <h3 className="text-[13px] font-medium">Gaps to fix</h3>
-              <ul className="space-y-2 text-sm">
+              <h3 className="text-[13px] font-semibold">Gaps to fix</h3>
+              <ul className="space-y-2 text-[13px]">
                 {a.gaps.map((g, i) => (
                   <li key={i}>
                     <span className={`text-xs font-semibold uppercase ${SEVERITY[g.severity]}`}>{g.severity}</span>{" "}
@@ -283,8 +283,8 @@ export function AnalysisPanel(p: Props) {
 
           {a.strengths.length > 0 && (
             <div className="space-y-2 border-t border-border pt-4">
-              <h3 className="text-[13px] font-medium">Strengths for this job</h3>
-              <ul className="list-disc pl-5 text-sm space-y-1">
+              <h3 className="text-[13px] font-semibold">Strengths for this job</h3>
+              <ul className="list-disc pl-5 text-[13px] space-y-1">
                 {a.strengths.map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>

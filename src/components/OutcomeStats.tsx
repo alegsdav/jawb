@@ -29,7 +29,7 @@ export function OutcomeStats({ jobs }: { jobs: StatsJob[] }) {
   const s = tailoringStats(jobs);
   const tooFew = s.tailored.applied < MIN_TO_COMPARE || s.untailored.applied < MIN_TO_COMPARE;
   return (
-    <details className="text-sm group">
+    <details className="text-[13px] group">
       <summary className="flex flex-wrap items-baseline gap-x-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
         <span className="font-medium">Interviews</span>
         <span className="text-muted">·</span>

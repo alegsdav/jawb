@@ -96,7 +96,7 @@ function UndoToast({ message, onUndo, onClose, raised }: { message: string; onUn
     <div
       role="status"
       aria-live="polite"
-      className={`fixed z-40 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:max-w-md flex items-center gap-3 rounded-xl border border-good/40 bg-surface px-4 py-2.5 text-sm shadow-lg ${
+      className={`fixed z-40 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:max-w-md flex items-center gap-3 rounded-xl border border-good/40 bg-surface px-4 py-2.5 text-[13px] shadow-lg ${
         raised ? "bottom-[calc(9rem+env(safe-area-inset-bottom))] lg:bottom-20" : "bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-4"
       }`}
     >
@@ -345,7 +345,7 @@ export default function TrackerPage() {
     : jobs.filter((j) => isClosingSoon(j.deadline, j.status, today)).sort((x, y) => (x.deadline ?? "").localeCompare(y.deadline ?? ""));
 
   const migrationBanner = missingCols.size > 0 && (
-    <div role="status" className="card border-ok bg-ok-bg p-3 text-sm">
+    <div role="status" className="card border-ok bg-ok-bg p-3 text-[13px]">
       {MIGRATION_HINT}
       {needsMigration && " Deadlines and application snapshots are off until then."}
       {!needsMigration && missingCols.has("suggestions_total") && " Progress in In progress shows once it's run."}
@@ -368,7 +368,7 @@ export default function TrackerPage() {
     );
 
   return (
-    <div className="space-y-6 sm:space-y-8 px-4 sm:px-6 lg:px-10 py-5 sm:py-8">
+    <div className="space-y-6 px-4 sm:px-6 lg:px-10 py-5 sm:py-6">
       {migrationBanner}
       <Greeting jobs={jobs} due={due.length} closing={closing.length} />
       {!noJobs && <StatStrip jobs={jobs} attention={due.length + closing.length} />}
@@ -380,21 +380,21 @@ export default function TrackerPage() {
           <AddJobForm collapsible={!desktop && !noJobs} existing={jobs} />
         </div>
 
-        <div className="min-w-0 space-y-8 lg:col-span-8 lg:col-start-1 lg:row-start-1 lg:row-span-3">
+        <div className="min-w-0 space-y-6 lg:col-span-8 lg:col-start-1 lg:row-start-1 lg:row-span-3">
           <InProgress jobs={jobs} today={today} loading={loading} />
 
           <section aria-labelledby="all-apps-heading" className="space-y-3">
-            <h2 id="all-apps-heading" className="text-lg font-semibold">All applications</h2>
+            <h2 id="all-apps-heading" className="text-[15px] font-semibold">All applications</h2>
             <OutcomeStats jobs={jobs} />
 
             {loadError && (
-              <div role="alert" className="card border-bad/40 p-3 text-sm flex flex-wrap items-center gap-3">
+              <div role="alert" className="card border-bad/40 p-3 text-[13px] flex flex-wrap items-center gap-3">
                 <span className="flex-1 min-w-48 text-bad">{loadError}</span>
                 <button className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => location.reload()}>Reload</button>
               </div>
             )}
-            {error && <p role="alert" className="text-sm text-bad">{error}</p>}
-            {noJobs && <p className="text-sm text-muted px-1">Jobs you add show up here, with their status, deadline and follow-ups.</p>}
+            {error && <p role="alert" className="text-[13px] text-bad">{error}</p>}
+            {noJobs && <p className="text-[13px] text-muted px-1">Jobs you add show up here, with their status, deadline and follow-ups.</p>}
 
             <div className="flex flex-col sm:flex-row sm:items-center gap-2">
               <div className="flex sm:flex-1 min-w-0 items-center gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap pb-1">
@@ -403,7 +403,7 @@ export default function TrackerPage() {
                     key={s.value}
                     onClick={() => setFilter(s.value)}
                     aria-pressed={filter === s.value}
-                    className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-1 ${
+                    className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-0.5 ${
                       filter === s.value
                         ? "bg-surface-2 border-transparent text-fg font-medium"
                         : "text-muted hover:text-fg"
@@ -427,9 +427,9 @@ export default function TrackerPage() {
             {/* Phones: one card per job */}
             <div className="sm:hidden space-y-2">
               {loading ? (
-                <p role="status" className="text-sm text-muted">{loadingText}</p>
+                <p role="status" className="text-[13px] text-muted">{loadingText}</p>
               ) : shown.length === 0 ? (
-                <p className="text-sm text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
+                <p className="text-[13px] text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
               ) : (
                 shown.map((j) => {
                   const urgency = deadlineUrgency(j.deadline, j.status, today);
@@ -441,10 +441,10 @@ export default function TrackerPage() {
                       className={`card p-3 space-y-2 ${urgency === "overdue" ? "border-l-4 border-l-bad" : urgency === "soon" ? "border-l-4 border-l-ok" : ""}`}
                     >
                       <div className="flex items-start gap-3">
-                        <CompanyMark name={j.company} />
+                        <CompanyMark name={j.company} className="h-8 w-8 text-xs" />
                         <Link href={`/jobs/${j.id}`} className="flex-1 min-w-0">
                           <div className="font-medium truncate">{j.title || "Untitled role"}</div>
-                          <div className="text-sm text-muted truncate">
+                          <div className="text-[13px] text-muted truncate">
                             {[j.company, j.location].filter(Boolean).join(" · ")}
                           </div>
                         </Link>
@@ -478,34 +478,34 @@ export default function TrackerPage() {
             </div>
 
             <div className="overflow-x-auto hidden sm:block">
-              <table className="w-full text-sm">
+              <table className="w-full text-[13px]">
                 <thead className="text-left text-xs text-muted">
                   <tr className="border-b border-border">
-                    <th className="py-3 pr-4 font-medium">Role</th>
-                    <th className="py-3 pr-4 font-medium hidden 2xl:table-cell">Location</th>
-                    <th className="py-3 pr-4 font-medium">Fit</th>
-                    <th className="py-3 pr-4 font-medium">Status</th>
-                    {!needsMigration && <th className="py-3 pr-4 font-medium">Deadline</th>}
-                    <th className="py-3 pr-4 font-medium">Applied</th>
-                    <th className="py-3 pr-4 font-medium hidden md:table-cell">Follow up</th>
+                    <th className="py-2 pr-4 font-medium">Role</th>
+                    <th className="py-2 pr-4 font-medium hidden 2xl:table-cell">Location</th>
+                    <th className="py-2 pr-4 font-medium">Fit</th>
+                    <th className="py-2 pr-4 font-medium">Status</th>
+                    {!needsMigration && <th className="py-2 pr-4 font-medium">Deadline</th>}
+                    <th className="py-2 pr-4 font-medium">Applied</th>
+                    <th className="py-2 pr-4 font-medium hidden md:table-cell">Follow up</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-border">
                   {loading ? (
                     <tr><td role="status" className="p-3 text-muted" colSpan={7}>{loadingText}</td></tr>
                   ) : shown.length === 0 ? (
                     <tr>
-                      <td className="py-3 pr-4 text-muted" colSpan={7}>{jobs.length ? "No jobs match this filter." : ""}</td>
+                      <td className="py-2.5 pr-4 text-muted" colSpan={7}>{jobs.length ? "No jobs match this filter." : ""}</td>
                     </tr>
                   ) : (
                     shown.map((j) => {
                       const fit = fitOf(j.analysis);
                       const isDue = followUpDue(j, today);
                       return (
-                        <tr key={j.id} className="border-b border-border last:border-0 align-top">
-                          <td className="py-3 pr-4">
+                        <tr key={j.id} className="align-middle">
+                          <td className="py-2.5 pr-4">
                             <div className="flex min-w-60 items-center gap-3">
-                              <CompanyMark name={j.company} />
+                              <CompanyMark name={j.company} className="h-8 w-8 text-xs" />
                               <div className="min-w-0">
                                 <Link href={`/jobs/${j.id}`} className="font-medium hover:underline">
                                   {j.title || "Untitled role"}
@@ -514,9 +514,9 @@ export default function TrackerPage() {
                               </div>
                             </div>
                           </td>
-                          <td className="py-3 pr-4 hidden 2xl:table-cell text-muted">{j.location}</td>
-                          <td className="py-3 pr-4">{fit ? <FitBadge fit={fit} /> : <span className="text-muted">–</span>}</td>
-                          <td className="py-3 pr-4">
+                          <td className="py-2.5 pr-4 hidden 2xl:table-cell text-muted">{j.location}</td>
+                          <td className="py-2.5 pr-4">{fit ? <FitBadge fit={fit} /> : <span className="text-muted">–</span>}</td>
+                          <td className="py-2.5 pr-4">
                             <div className="flex flex-col items-start gap-1">
                               <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
                               {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
@@ -526,7 +526,7 @@ export default function TrackerPage() {
                             </div>
                           </td>
                           {!needsMigration && (
-                            <td className="py-3 pr-4">
+                            <td className="py-2.5 pr-4">
                               <DeadlineField
                                 value={j.deadline}
                                 status={j.status}
@@ -535,8 +535,8 @@ export default function TrackerPage() {
                               />
                             </td>
                           )}
-                          <td className="py-3 pr-4">{appliedCell(j)}</td>
-                          <td className="py-3 pr-4 hidden md:table-cell">
+                          <td className="py-2.5 pr-4">{appliedCell(j)}</td>
+                          <td className="py-2.5 pr-4 hidden md:table-cell">
                             <input
                               type="date"
                               aria-label="Follow-up date"

@@ -6,6 +6,7 @@ import { emptyItem, isInlineItem, uid } from "@/lib/resume";
 import { PLACEHOLDER_RE } from "@/lib/facts";
 import type { BulletFeedback, Rating } from "@/lib/analysis";
 import { markPlaceholders } from "./PlaceholderTextarea";
+import { ArrowDownIcon, ArrowUpIcon, TrashIcon } from "./icons";
 
 type Props = {
   value: Resume;
@@ -124,7 +125,8 @@ function AutoTextarea({ highlight, ...props }: React.TextareaHTMLAttributes<HTML
   );
 }
 
-function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+/** `icon` renders an icon-only button; `label` then stays its aria-label and tooltip, so accessible names don't change. */
+function ToolBtn({ label, onClick, danger, icon }: { label: string; onClick: () => void; danger?: boolean; icon?: React.ReactNode }) {
   return (
     <button
       type="button"
@@ -132,10 +134,12 @@ function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => voi
       // it's only cleared by taps outside the document, not by blur.)
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
+      aria-label={icon ? label : undefined}
+      title={icon ? label : undefined}
       className="float-item min-h-9 whitespace-nowrap sm:min-h-0"
       style={danger ? { color: "#ff8a8a" } : undefined}
     >
-      {label}
+      {icon ?? label}
     </button>
   );
 }
@@ -147,8 +151,8 @@ function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => voi
  */
 function ContextBar({ label, children }: { slot?: HTMLElement | null; label: string; children: React.ReactNode }) {
   return (
-    <div className="doc-ui float-dark absolute bottom-full left-0 z-20 mb-1.5 flex w-max max-w-[calc(100vw-3rem)] flex-row flex-wrap items-center gap-0.5 p-1 text-xs">
-      <span className="float-muted px-1.5 text-[11px] uppercase tracking-wide">{label}</span>
+    <div className="doc-ui float-dark pointer-events-auto absolute bottom-full right-0 left-auto z-20 mb-1.5 flex w-max max-w-[calc(100vw-3rem)] flex-row flex-wrap items-center gap-0.5 p-1 text-xs">
+      <span className="float-muted px-1.5 text-[11px]">{label}</span>
       {children}
     </div>
   );
@@ -331,12 +335,13 @@ export function ResumeDocument({
                   />
                   {sectionActive && (
                     <ContextBar slot={actionsSlot} label="Section">
-                      <ToolBtn label="↑ Move" onClick={() => setSections(move(value.sections, si, -1), true)} />
-                      <ToolBtn label="↓ Move" onClick={() => setSections(move(value.sections, si, 1), true)} />
+                      <ToolBtn label="↑ Move" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => setSections(move(value.sections, si, -1), true)} />
+                      <ToolBtn label="↓ Move" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => setSections(move(value.sections, si, 1), true)} />
                       <ToolBtn label="+ Entry" onClick={() => updSection(section.id, (s) => ({ ...s, items: [...s.items, emptyItem()] }), true)} />
                       <ToolBtn
                         label="Delete section"
                         danger
+                        icon={<TrashIcon className="h-3.5 w-3.5" />}
                         onClick={() => {
                           if (confirm(`Delete the "${section.title}" section?`)) {
                             setSections(value.sections.filter((s) => s.id !== section.id), true);
@@ -413,18 +418,19 @@ export function ResumeDocument({
           <ContextBar slot={actionsSlot} label={activeBid ? "Bullet" : "Entry"}>
             {activeBid ? (
               <>
-                <ToolBtn label="↑" onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, -1), true); focusNext.current = activeBid; }} />
-                <ToolBtn label="↓" onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, 1), true); focusNext.current = activeBid; }} />
-                <ToolBtn label="Delete bullet" danger onClick={() => removeBullet(sid, item, activeBid)} />
+                <ToolBtn label="↑" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, -1), true); focusNext.current = activeBid; }} />
+                <ToolBtn label="↓" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, 1), true); focusNext.current = activeBid; }} />
+                <ToolBtn label="Delete bullet" danger icon={<TrashIcon className="h-3.5 w-3.5" />} onClick={() => removeBullet(sid, item, activeBid)} />
                 <span className="mx-1 h-4 w-px bg-[#e2e2de]" />
               </>
             ) : null}
             <ToolBtn label="+ Bullet" onClick={() => addBullet(sid, item, activeBi >= 0 ? activeBi : item.bullets.length - 1)} />
-            <ToolBtn label="Entry ↑" onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, -1) }), true)} />
-            <ToolBtn label="Entry ↓" onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, 1) }), true)} />
+            <ToolBtn label="Entry ↑" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, -1) }), true)} />
+            <ToolBtn label="Entry ↓" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, 1) }), true)} />
             <ToolBtn
               label="Delete entry"
               danger
+              icon={<TrashIcon className="h-3.5 w-3.5" />}
               onClick={() => {
                 const name = [item.title, item.subtitle].map((x) => x.trim()).filter(Boolean).join(" — ");
                 if (!confirm(name ? `Delete the "${name}" entry?` : "Delete this entry?")) return;

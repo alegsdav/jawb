@@ -48,17 +48,17 @@ export function FactsPanel({
     <section id="facts" className="space-y-3 scroll-mt-16" aria-labelledby="facts-heading">
       <div>
         <h2 id="facts-heading" className="text-[13px] font-semibold">
-          Facts <span className="text-sm font-normal text-muted">· {facts.length}</span>
+          Facts <span className="text-[13px] font-normal text-muted">· {facts.length}</span>
         </h2>
-        <p className="text-sm text-muted">
+        <p className="text-[13px] text-muted">
           True things about you the AI uses when tailoring and coaching, so it doesn&apos;t ask again. They&apos;re never
           printed.
         </p>
       </div>
 
-      {status === "missing" && <p role="status" className="rounded-lg border border-ok/40 bg-ok-bg px-3 py-2 text-sm">{FACTS_MIGRATION_HINT}</p>}
-      {status === "loading" && <p className="text-sm text-muted">Loading…</p>}
-      {error && status !== "missing" && <p role="alert" className="text-sm text-bad">{error}</p>}
+      {status === "missing" && <p role="status" className="text-[13px]">{FACTS_MIGRATION_HINT}</p>}
+      {status === "loading" && <p className="text-[13px] text-muted">Loading…</p>}
+      {error && status !== "missing" && <p role="alert" className="text-[13px] text-bad">{error}</p>}
 
       {shown.length > 0 && (
         <ul className="divide-y divide-border border-y border-border">
@@ -81,28 +81,28 @@ export function FactsPanel({
                 />
                 {f.bullet_id && <p className="text-xs text-muted">This fact follows a bullet. Editing it here unlinks it from the bullet.</p>}
                 <div className="flex gap-2">
-                  <button type="button" className="btn btn-sm btn-primary" onClick={() => void saveEdit()}>Save</button>
-                  <button type="button" className="btn btn-sm" onClick={() => setEditing(null)}>Cancel</button>
+                  <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" onClick={() => void saveEdit()}>Save</button>
+                  <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={() => setEditing(null)}>Cancel</button>
                 </div>
               </li>
             ) : (
               <li key={f.id} className="py-2 flex items-start gap-2">
                 <div className="flex-1 min-w-0 space-y-1">
-                  <p className="text-sm break-words">{f.text}</p>
+                  <p className="text-[13px] break-words">{f.text}</p>
                   <p className="flex flex-wrap gap-1">
                     <span className="chip text-[11px] text-muted">{FACT_SOURCE_LABEL[f.source]}</span>
                     {f.bullet_id && <span className="chip text-[11px] text-muted" title="Updates when you edit that bullet">Follows a bullet</span>}
                     {!f.active && (
-                      <span className="chip text-[11px] border-[#e0b100] bg-[#fff6d6] text-[#5c4300]" title="Fill the [placeholder] so the AI can use it">
+                      <span className="chip text-[11px] border-border text-fg" title="Fill the [placeholder] so the AI can use it">
                         Draft: fill the [placeholder]
                       </span>
                     )}
                   </p>
                 </div>
-                <button type="button" className="btn btn-sm shrink-0" onClick={() => setEditing({ id: f.id, text: f.text })} aria-label={`Edit fact: ${f.text}`}>
+                <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50 shrink-0" onClick={() => setEditing({ id: f.id, text: f.text })} aria-label={`Edit fact: ${f.text}`}>
                   Edit
                 </button>
-                <button type="button" className="btn btn-sm shrink-0 text-bad" onClick={() => onDelete(f)} aria-label={`Delete fact: ${f.text}`}>
+                <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50 shrink-0 text-bad" onClick={() => onDelete(f)} aria-label={`Delete fact: ${f.text}`}>
                   Delete
                 </button>
               </li>
@@ -113,7 +113,7 @@ export function FactsPanel({
 
       {status !== "missing" && (
         <div className="space-y-2">
-          <label htmlFor="fact-new" className="text-sm font-medium">Add facts</label>
+          <label htmlFor="fact-new" className="text-[13px] font-medium">Add facts</label>
           <textarea
             id="fact-new"
             className="input w-full min-h-20"
@@ -124,7 +124,7 @@ export function FactsPanel({
             }}
             placeholder={"e.g. Automated a weekly Excel report with Python, saving ~4 hrs/week\nOne fact per line"}
           />
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => void add()} disabled={!draft.trim() || busy}>
+          <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" onClick={() => void add()} disabled={!draft.trim() || busy}>
             {busy ? "Adding…" : `Add fact${draft.trim().includes("\n") ? "s" : ""}`}
           </button>
         </div>

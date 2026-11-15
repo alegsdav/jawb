@@ -213,9 +213,9 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
   if (collapsible && !open) {
     return (
       <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">Jobs</h2>
-        <p className="hidden md:block text-sm text-muted truncate">Paste a link or a description, or use the bookmarklet.</p>
-        <button className="btn btn-primary ml-auto min-h-10 px-4" aria-expanded={false} onClick={() => setOpen(true)}>
+        <h2 className="text-[15px] font-semibold">Jobs</h2>
+        <p className="hidden md:block text-[13px] text-muted truncate">Paste a link or a description, or use the bookmarklet.</p>
+        <button className="btn btn-primary btn-sm ml-auto min-h-10 sm:min-h-0 px-3" aria-expanded={false} onClick={() => setOpen(true)}>
           ＋ Add job
         </button>
       </div>
@@ -230,11 +230,11 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
-      className={`rounded-2xl bg-surface-2 p-5 space-y-3 border ${dragging ? "border-fg/40" : "border-transparent"}`}
+      className={`rounded-xl bg-surface p-4 space-y-3 border text-[13px] ${dragging ? "border-fg/40" : "border-border"}`}
     >
       <div>
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Add a job</h2>
+          <h2 className="text-[15px] font-semibold">Add a job</h2>
           {collapsible && (
             <button
               className="btn btn-sm ml-auto min-h-9"
@@ -251,23 +251,23 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
           )}
         </div>
         {mode === "one" ? (
-          <p className="text-sm text-muted">
+          <p className="text-[13px] text-muted">
             Paste a job link (Greenhouse, Lever, Ashby and most company pages work) or the full description.
           </p>
         ) : reason?.captured ? (
-          <p className="text-sm text-good">
+          <p className="text-[13px] text-good">
             Captured from <strong className="break-words">{reason.captured}</strong> — review and click Add job.
           </p>
         ) : reason?.site ? (
-          <p className="text-sm text-muted">
+          <p className="text-[13px] text-muted">
             <strong className="text-fg">{reason.site} needs a login</strong>, so the app can&apos;t read that link. Open the
             posting, copy the job description, and paste it below. The link is kept so you can find it again.
           </p>
         ) : reason?.failed ? (
           // The fetch failed: its message is the instruction, shown once (not repeated by the buttons).
-          <p role="alert" className="text-sm text-bad">{reason.failed}</p>
+          <p role="alert" className="text-[13px] text-bad">{reason.failed}</p>
         ) : (
-          <p className="text-sm text-muted">Paste the job description below. The link is kept so you can find it again.</p>
+          <p className="text-[13px] text-muted">Paste the job description below. The link is kept so you can find it again.</p>
         )}
       </div>
 
@@ -320,14 +320,14 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
 
       {/* Messages sit above the buttons, so on a phone they're seen before the full-width button. */}
       {error && (
-        <p role="alert" className="text-sm text-bad">
+        <p role="alert" className="text-[13px] text-bad">
           {error}
         </p>
       )}
 
       {dup ? (
         <div role="alert" className="rounded-lg border border-ok/50 bg-ok-bg p-3 space-y-2">
-          <p className="text-sm">
+          <p className="text-[13px]">
             You already added this job{addedOn(dup.created_at) ? ` (added ${addedOn(dup.created_at)})` : ""}. Open it instead?
           </p>
           <div className="flex flex-wrap gap-2">
@@ -342,14 +342,14 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
       ) : (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button
-            className="btn btn-primary py-2 w-full sm:w-auto"
+            className="btn btn-primary btn-sm min-h-10 sm:min-h-0 w-full sm:w-auto"
             disabled={busy || (mode === "one" ? !input.trim() : !desc.trim())}
             onClick={submit}
           >
             {busy ? (isUrl && mode === "one" ? "Reading job…" : "Adding…") : "Add job"}
           </button>
           {mode === "paste" && (
-            <button className="btn py-2 w-full sm:w-auto" onClick={reset} disabled={busy}>
+            <button className="btn btn-sm min-h-10 sm:min-h-0 w-full sm:w-auto" onClick={reset} disabled={busy}>
               Cancel
             </button>
           )}

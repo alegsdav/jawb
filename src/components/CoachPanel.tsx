@@ -39,10 +39,10 @@ function describe(resume: Resume, target: CoachTarget) {
 function ExampleText({ example }: { example: CoachExample }) {
   const labels = new Map(example.blanks.map((b) => [b.key, b.label]));
   return (
-    <p className="text-sm leading-relaxed">
+    <p className="text-[13px] leading-relaxed">
       {exampleSegments(example.text).map((seg, i) =>
         "blank" in seg ? (
-          <mark key={i} className="rounded bg-accent/10 px-1 text-accent font-medium" title="A number only you can fill in">
+          <mark key={i} className="rounded bg-surface-2 px-1 font-medium text-fg" title="A number only you can fill in">
             {labels.get(seg.blank) ?? seg.blank}
           </mark>
         ) : (
@@ -76,8 +76,8 @@ function BlankResolver({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="font-semibold">Fill in the blanks</h3>
-        <p className="text-sm text-muted">
+        <h3 className="text-[13px] font-semibold">Fill in the blanks</h3>
+        <p className="text-[13px] text-muted">
           Pick what goes in each blank. Only use a number you can stand behind in an interview; a rough honest estimate is fine.
         </p>
       </div>
@@ -86,26 +86,26 @@ function BlankResolver({
         const name = `${base}-${b.key}`;
         return (
           <fieldset key={b.key} ref={i === 0 ? firstRef : undefined} className="rounded-lg border border-border p-3 space-y-2">
-            <legend className="px-1 text-sm font-medium">{b.label}</legend>
+            <legend className="px-1 text-[13px] font-medium">{b.label}</legend>
             {b.question && <p className="text-xs text-muted">{b.question}</p>}
             {b.hint && <p className="text-xs text-muted">Hint: {b.hint}</p>}
             {b.prefill && (
-              <label className="flex items-start gap-2 text-sm">
+              <label className="flex items-start gap-2 text-[13px]">
                 <input type="radio" name={name} checked={c?.kind === "fact"} onChange={() => set(b.key, { kind: "fact" })} className="mt-1" />
                 <span>
-                  <strong>{b.prefill.value}</strong> <span className="chip text-[11px] text-good border-good/40">from your facts</span>
+                  <strong>{b.prefill.value}</strong> <span className="chip text-[11px] text-good border-border">from your facts</span>
                   <span className="block text-xs text-muted">“{b.prefill.fact}”</span>
                 </span>
               </label>
             )}
-            <label className="flex items-start gap-2 text-sm">
+            <label className="flex items-start gap-2 text-[13px]">
               <input type="radio" name={name} checked={c?.kind === "example"} onChange={() => set(b.key, { kind: "example" })} className="mt-1" />
               <span>
                 Use the example value <strong>{b.example_value || "(none)"}</strong>
                 <span className="block text-xs text-muted">Only if it&apos;s true for you.</span>
               </span>
             </label>
-            <div className="flex items-start gap-2 text-sm">
+            <div className="flex items-start gap-2 text-[13px]">
               <input
                 id={`${name}-own`}
                 type="radio"
@@ -128,10 +128,10 @@ function BlankResolver({
                 )}
               </div>
             </div>
-            <label className="flex items-start gap-2 text-sm">
+            <label className="flex items-start gap-2 text-[13px]">
               <input type="radio" name={name} checked={c?.kind === "placeholder"} onChange={() => set(b.key, { kind: "placeholder" })} className="mt-1" />
               <span>
-                Leave a placeholder <span className="rounded bg-[#ffd84d] px-1 text-[#3d2c00]">[{b.label}]</span>
+                Leave a placeholder <span className="rounded border border-border bg-surface-2 px-1 text-fg">[{b.label}]</span>
                 <span className="block text-xs text-muted">Fill it in on the resume later.</span>
               </span>
             </label>
@@ -139,21 +139,21 @@ function BlankResolver({
         );
       })}
 
-      <div className="rounded-lg border border-accent/30 bg-accent/5 p-3 space-y-1">
+      <div className="rounded-lg border border-border p-3 space-y-1">
         <p className="label">Your bullet</p>
-        <p className="text-sm" aria-live="polite">{markPlaceholders(res.text)}</p>
+        <p className="text-[13px]" aria-live="polite">{markPlaceholders(res.text)}</p>
       </div>
       {!res.complete && <p className="text-xs text-muted">Choose an option for each blank to add it.</p>}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" disabled={!res.complete} onClick={() => onInsert(res.text, "add", res.hasPlaceholders)}>
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" disabled={!res.complete} onClick={() => onInsert(res.text, "add", res.hasPlaceholders)}>
           Add to entry
         </button>
         {canReplace && (
-          <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" disabled={!res.complete} onClick={() => onInsert(res.text, "replace", res.hasPlaceholders)}>
+          <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" disabled={!res.complete} onClick={() => onInsert(res.text, "replace", res.hasPlaceholders)}>
             Replace this bullet
           </button>
         )}
-        <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={onBack}>
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={onBack}>
           Back to examples
         </button>
       </div>
@@ -276,7 +276,7 @@ export function CoachPanel({
     return (
       <div className="space-y-2">
         <p className="text-[13px] text-muted">That entry is gone.</p>
-        <button type="button" className="btn btn-sm" onClick={onBack}>Back</button>
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={onBack}>Back</button>
       </div>
     );
   }
@@ -287,40 +287,40 @@ export function CoachPanel({
         <div className="flex-1 min-w-0">
           <p className="label">{jobId ? "Coaching for this job" : "Coaching"}</p>
           <h2 id="coach-heading" className="text-[13px] font-semibold break-words">{name}</h2>
-          {bullet && <p className="mt-1 text-sm text-muted break-words">“{bullet.text}”</p>}
+          {bullet && <p className="mt-1 text-[13px] text-muted break-words">“{bullet.text}”</p>}
         </div>
-        <button type="button" className="btn btn-sm shrink-0" onClick={onBack} aria-label="Back to the overview">
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50 shrink-0" onClick={onBack} aria-label="Back to the overview">
           ← Back
         </button>
       </div>
 
       {disabledReason ? (
-        <p className="text-sm text-muted">{disabledReason}</p>
+        <p className="text-[13px] text-muted">{disabledReason}</p>
       ) : (
         <>
           {done && (
-            <p role="status" className="rounded-lg border border-good/40 bg-good-bg px-3 py-2 text-sm text-good">
+            <p role="status" className="text-[13px] text-good">
               {done}
             </p>
           )}
           {error && (
-            <div role="alert" className="rounded-lg border border-bad/40 bg-bad-bg px-3 py-2 text-sm text-bad">
+            <div role="alert" className="text-[13px] text-bad">
               {error}
             </div>
           )}
 
           {stage.kind === "choose" && (
             <div className="space-y-2">
-              <p className="text-sm">
+              <p className="text-[13px]">
                 {jobId
                   ? "Make this stronger for this posting. Pick how you'd like to start:"
                   : "Make this stronger for any recruiter. Pick how you'd like to start:"}
               </p>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                <button type="button" className="btn btn-primary py-2.5 min-h-10" disabled={!!busy} onClick={() => loadExamples(1, true)}>
+              <div className="flex flex-col gap-2">
+                <button type="button" className="w-full rounded-lg border border-border px-3 py-2 text-left text-[13px] font-medium hover:bg-surface-2 disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(1, true)}>
                   {busy === "examples" ? "Writing examples…" : "Show me examples"}
                 </button>
-                <button type="button" className="btn py-2.5 min-h-10" disabled={!!busy} onClick={loadQuestions}>
+                <button type="button" className="w-full rounded-lg border border-border px-3 py-2 text-left text-[13px] hover:bg-surface-2 disabled:opacity-50" disabled={!!busy} onClick={loadQuestions}>
                   {busy === "questions" ? "Thinking of questions…" : "Ask me questions first"}
                 </button>
               </div>
@@ -346,16 +346,16 @@ export function CoachPanel({
                     </ul>
                   )}
                   {ex.why && <p className="text-xs text-muted">Why it works: {ex.why}</p>}
-                  <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setStage({ kind: "resolve", example: ex })}>
+                  <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={() => setStage({ kind: "resolve", example: ex })}>
                     Use this bullet
                   </button>
                 </article>
               ))}
               <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" disabled={!!busy} onClick={() => loadExamples(round + 1, false)}>
+                <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(round + 1, false)}>
                   {busy === "examples" ? "Writing…" : "More examples"}
                 </button>
-                <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" disabled={!!busy} onClick={loadQuestions}>
+                <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" disabled={!!busy} onClick={loadQuestions}>
                   Ask me questions instead
                 </button>
               </div>
@@ -374,15 +374,15 @@ export function CoachPanel({
 
           {stage.kind === "questions" && (
             <div className="space-y-3">
-              <p className="text-sm text-muted">Rough answers are fine. Skip any you can&apos;t answer.</p>
+              <p className="text-[13px] text-muted">Rough answers are fine. Skip any you can&apos;t answer.</p>
               {questions.map((q) => (
                 <div key={q.id} className="space-y-1">
-                  <label htmlFor={`coach-${q.id}`} className="text-sm font-medium block">{q.question}</label>
+                  <label htmlFor={`coach-${q.id}`} className="text-[13px] font-medium block">{q.question}</label>
                   {q.why && <p className="text-xs text-muted">Why it matters: {q.why}</p>}
                   {q.tip && <p className="text-xs text-muted">Tip: {q.tip}</p>}
                   <textarea
                     id={`coach-${q.id}`}
-                    className="input w-full h-16 text-sm"
+                    className="input w-full h-16 text-[13px]"
                     value={answers[q.id] ?? ""}
                     disabled={answered}
                     onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
@@ -391,13 +391,13 @@ export function CoachPanel({
                 </div>
               ))}
               {!answered ? (
-                <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" disabled={busy === "saving"} onClick={saveAnswers}>
+                <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" disabled={busy === "saving"} onClick={saveAnswers}>
                   {busy === "saving" ? "Saving…" : Object.values(answers).some((a) => a.trim()) ? "Save answers" : "Skip"}
                 </button>
               ) : (
-                <div className="rounded-lg border border-good/40 bg-good-bg p-3 space-y-2">
-                  <p className="text-sm">Saved to your facts. Now write the bullet with your real numbers.</p>
-                  <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" disabled={!!busy} onClick={() => loadExamples(1, true)}>
+                <div className="space-y-2">
+                  <p className="text-[13px]">Saved to your facts. Now write the bullet with your real numbers.</p>
+                  <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(1, true)}>
                     {busy === "examples" ? "Writing…" : "Write my bullet"}
                   </button>
                 </div>

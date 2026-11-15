@@ -47,8 +47,8 @@ export function InProgress({ jobs, today, loading }: { jobs: Job[]; today: strin
   return (
     <section className="space-y-2" aria-labelledby="in-progress-heading">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="in-progress-heading" className="text-lg font-semibold">In progress</h2>
-        <span className="text-sm font-medium text-muted">{list.length}</span>
+        <h2 id="in-progress-heading" className="text-[15px] font-semibold">In progress</h2>
+        <span className="text-xs font-medium text-muted">{list.length}</span>
         <label className="ml-auto flex items-center gap-2 text-xs text-muted">
           Sort
           <select className="input rounded-full py-1 text-xs min-h-10 sm:min-h-0" value={sort} onChange={(e) => setSort(e.target.value as ProgressSort)}>
@@ -59,24 +59,24 @@ export function InProgress({ jobs, today, loading }: { jobs: Job[]; today: strin
         </label>
       </div>
       {loading ? (
-        <p role="status" className="text-sm text-muted">Loading…</p>
+        <p role="status" className="text-[13px] text-muted">Loading…</p>
       ) : !list.length ? (
-        <p className="text-sm text-muted">Nothing in progress. Add a job to start tailoring your resume for it.</p>
+        <p className="text-[13px] text-muted">Nothing in progress. Add a job to start tailoring your resume for it.</p>
       ) : (
-        <ul>
+        <ul className="divide-y divide-border">
           {list.map((j) => {
             const fit = fitOf(j.analysis);
             const urgency = deadlineUrgency(j.deadline, j.status, today);
             return (
-              <li key={j.id} className="py-3.5 grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-center">
+              <li key={j.id} className="py-2.5 grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-center">
                 <div className="min-w-0 flex items-center gap-3">
-                  <CompanyMark name={j.company} />
+                  <CompanyMark name={j.company} className="h-8 w-8 text-xs" />
                   <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 min-w-0">
                     <Link href={`/jobs/${j.id}`} className="font-medium truncate hover:underline">{j.title || "Untitled role"}</Link>
                     {fit && <FitBadge fit={fit} />}
                   </div>
-                  <p className="text-sm text-muted truncate">
+                  <p className="text-[13px] text-muted truncate">
                     {j.company || "—"}
                     {j.deadline && (
                       <span className={urgency ? (urgency === "overdue" ? "text-bad" : "text-ok font-medium") : ""}>

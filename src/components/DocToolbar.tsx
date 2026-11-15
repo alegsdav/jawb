@@ -84,7 +84,7 @@ const Dot = ({ color }: { color: string }) => <span className="inline-block h-2 
 /** "?" next to the document: what the dots, bars and highlights mean (kept off the page itself to save room). */
 export function FeedbackLegend({ analyzed, changedCount }: { analyzed: boolean; changedCount: number }) {
   return (
-    <Popover label="?" title="What the colors mean" buttonClassName="btn btn-sm w-9 sm:w-auto" panelClassName="w-72">
+    <Popover label="?" title="What the colors mean" buttonClassName="btn btn-sm w-9 border-transparent bg-transparent sm:w-auto" panelClassName="w-72">
       <ul className="space-y-1.5 text-xs">
         {analyzed && (
           <>

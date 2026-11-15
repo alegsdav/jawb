@@ -295,8 +295,10 @@ export default function MasterResumePage() {
         </h1>
         <span className="ml-2 hidden truncate text-xs text-muted md:inline">Everything true about you</span>
         <div className="ml-auto flex items-center gap-1">
-          <SaveStatus status={conflict ? "error" : status} />
-          <span className="hidden md:inline"><PageCount {...measure} /></span>
+          <span className="flex items-center gap-2 text-xs text-muted">
+            <SaveStatus status={conflict ? "error" : status} />
+            <span className="hidden md:inline"><PageCount {...measure} /></span>
+          </span>
           <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
           <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
           <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
@@ -329,7 +331,7 @@ export default function MasterResumePage() {
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         {/* Document column: plain white, centred. Scrolls on its own on lg+. */}
         <div className="min-w-0 flex-1 lg:overflow-y-auto">
-          <div className="mx-auto max-w-[860px] space-y-3 px-4 py-6 sm:px-8">
+          <div className="mx-auto max-w-[860px] space-y-3 px-4 pb-6 pt-10 sm:px-8">
             {empty && !importOpen ? (
               building ? (
                 <Builder email={email} onBuilt={onBuilt} onCancel={() => setBuilding(false)} />

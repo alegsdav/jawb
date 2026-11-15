@@ -28,10 +28,10 @@ export function Greeting({ jobs, due, closing }: { jobs: Job[]; due: number; clo
   return (
     <header className="flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-2xl sm:text-[28px] font-semibold tracking-tight">{greeting(now)}</h1>
-        <p className="mt-1.5 text-sm text-muted">{summary(jobs.length, inProgress(jobs).length, due, closing)}</p>
+        <h1 className="text-xl font-semibold tracking-tight">{greeting(now)}</h1>
+        <p className="mt-1 text-[13px] text-muted">{summary(jobs.length, inProgress(jobs).length, due, closing)}</p>
       </div>
-      <p className="hidden shrink-0 pt-2 text-sm text-muted sm:block">
+      <p className="hidden shrink-0 pt-1 text-[13px] text-muted sm:block">
         {now.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}
       </p>
     </header>
@@ -52,16 +52,16 @@ export function StatStrip({ jobs, attention }: { jobs: Job[]; attention: number 
   return (
     <section
       aria-label="Overview"
-      className="grid grid-cols-2 gap-y-5 border-y border-border py-6 lg:grid-cols-4 lg:divide-x lg:divide-border"
+      className="grid grid-cols-2 gap-y-4 border-y border-border py-4 lg:grid-cols-4 lg:divide-x lg:divide-border"
     >
       {stats.map((s) => (
-        <div key={s.label} className="flex items-center gap-3.5 lg:px-6 lg:first:pl-0">
-          <span className="icon-chip">
-            <s.Icon />
+        <div key={s.label} className="flex items-center gap-3 lg:px-6 lg:first:pl-0">
+          <span className="icon-chip h-8 w-8">
+            <s.Icon className="h-4 w-4" />
           </span>
           <div>
-            <p className="text-sm font-medium">{s.label}</p>
-            <p className="text-lg font-semibold tabular-nums">{s.value}</p>
+            <p className="text-xs text-muted">{s.label}</p>
+            <p className="text-base font-semibold tabular-nums">{s.value}</p>
           </div>
         </div>
       ))}
