@@ -25,7 +25,7 @@ export function AppliedNotice({
       {applied && job.submitted_at ? (
         <section
           aria-label="Application sent"
-          className="rounded-lg border border-good/40 bg-good-bg px-3 py-2.5 text-sm space-y-2"
+          className="space-y-2 rounded-lg border border-border px-3 py-2.5 text-[13px]"
         >
           <p>
             <span className="text-good" aria-hidden>✓ </span>
@@ -38,7 +38,7 @@ export function AppliedNotice({
               </button>
             )}
             {followUp}
-            <label className="text-xs text-muted flex items-center gap-1.5">
+            <label className="text-[13px] text-muted flex items-center gap-1.5">
               Status {statusSelect}
             </label>
             <span className="sm:ml-auto">
@@ -48,7 +48,7 @@ export function AppliedNotice({
         </section>
       ) : (
         job.submitted_at && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-sm sm:rounded-lg sm:border sm:border-border sm:bg-surface sm:px-3 sm:py-1.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border px-3 py-2 text-[13px]">
             <span>
               <span className="text-good">✓</span> Applied {formatSubmitted(job.submitted_at)}
             </span>

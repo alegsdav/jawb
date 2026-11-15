@@ -26,8 +26,9 @@ function FitInput({
 }
 
 /**
- * The job page's header: title, company and location (edited in place), the posting link, status,
- * save state, and (in a "Details" disclosure on phones) follow-up, deadline and Delete job.
+ * The job's details block at the top of the side panel: title, company and location (edited in place),
+ * the posting link, then a small list of status, save state, follow-up and deadline. On phones the
+ * follow-up, deadline and Delete job sit inside a "Details" disclosure.
  */
 export function JobHeader({
   job, applied, statusSelect, followUp, saveState, detailsOpen, onToggleDetails, onPatch, onDelete,
@@ -43,53 +44,61 @@ export function JobHeader({
   onDelete: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-      <div className="w-full lg:flex-1 lg:min-w-64">
+    <div className="space-y-3">
+      <div className="min-w-0 space-y-1">
         <input
-          className="ghost-input w-full text-xl sm:text-2xl font-semibold tracking-tight"
+          className="ghost-input w-full text-lg font-semibold tracking-tight"
           value={job.title}
           placeholder="Job title"
           aria-label="Job title"
           onChange={(e) => onPatch({ title: e.target.value })}
         />
-        <div className="flex items-center gap-0.5 text-base sm:text-sm text-muted min-w-0">
-          <FitInput className="max-w-[55%] shrink-0" value={job.company} placeholder="Company" onChange={(v) => onPatch({ company: v })} />
+        <div className="flex min-w-0 flex-wrap items-center gap-x-0.5 text-[13px] text-muted">
+          <FitInput className="max-w-full" value={job.company} placeholder="Company" onChange={(v) => onPatch({ company: v })} />
           <span aria-hidden>·</span>
-          <FitInput className="flex-1 sm:flex-none" value={job.location} placeholder="Location" onChange={(v) => onPatch({ location: v })} />
-          {job.url && (
-            // Not "Posting": that's also the name of a tab.
-            <a href={job.url} target="_blank" rel="noreferrer" className="shrink-0 px-1 py-0.5 text-sm underline hover:text-fg">
-              Open posting ↗
-            </a>
-          )}
+          <FitInput className="max-w-full" value={job.location} placeholder="Location" onChange={(v) => onPatch({ location: v })} />
         </div>
+        {job.url && (
+          // Not "Posting": that's also the name of a tab.
+          <a href={job.url} target="_blank" rel="noreferrer" className="inline-block px-1 py-0.5 text-[13px] text-muted underline underline-offset-2 hover:text-fg">
+            Open posting ↗
+          </a>
+        )}
       </div>
-      <div className="flex w-full lg:w-auto flex-wrap items-center gap-x-3 gap-y-2">
-        {!applied && statusSelect}
+
+      <div className="space-y-2 text-[13px]">
+        {!applied && (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-muted">Status</span>
+            {statusSelect}
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted">Saved</span>
+          <SaveStatus status={saveState} />
+        </div>
+
         <button
           type="button"
-          className="sm:hidden btn btn-sm min-h-10"
+          className="sm:hidden btn btn-sm min-h-10 w-full"
           aria-expanded={detailsOpen}
           aria-controls="job-details"
           onClick={onToggleDetails}
         >
           Details {detailsOpen ? "▴" : "▾"}
         </button>
-        <span className="ml-auto lg:ml-0">
-          <SaveStatus status={saveState} />
-        </span>
-        {/* Phones: inside the "Details" disclosure. Desktop: inline. */}
-        <div
-          id="job-details"
-          className={`${detailsOpen ? "flex" : "hidden"} sm:flex w-full sm:w-auto flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-surface p-2 sm:border-0 sm:bg-transparent sm:p-0`}
-        >
-          {!applied && followUp}
-          <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => onPatch({ deadline: v })} />
-          <button type="button" className="text-xs text-muted hover:text-bad py-1 min-h-10 sm:min-h-0 ml-auto sm:ml-0" onClick={onDelete}>
-            Delete job
-          </button>
+        {/* Phones: inside the "Details" disclosure. Desktop: always shown. */}
+        <div id="job-details" className={`${detailsOpen ? "block" : "hidden"} space-y-2 sm:block`}>
+          {!applied && <div>{followUp}</div>}
+          <div>
+            <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => onPatch({ deadline: v })} />
+          </div>
         </div>
       </div>
+
+      <button type="button" className="py-1 text-[13px] text-muted hover:text-bad" onClick={onDelete}>
+        Delete job
+      </button>
     </div>
   );
 }

@@ -43,7 +43,7 @@ export function PullBanner({
   const kept = [plan.skipped ? plural(plan.skipped, "bullet") : "", plan.headerKept ? "your name/contact line" : ""].filter(Boolean);
 
   return (
-    <div className="rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-sm space-y-2">
+    <div className="space-y-2 rounded-lg border border-border px-3 py-2 text-[13px]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <span className="flex-1 min-w-48">
           Your master resume changed: {summary.join(", ")}.
@@ -70,7 +70,7 @@ export function PullBanner({
       </div>
 
       {open && listed > 0 && (
-        <div id="pull-review" className="space-y-3 border-t border-accent/20 pt-2">
+        <div id="pull-review" className="space-y-3 border-t border-border pt-2">
           {additions.length > 0 && (
             <div className="space-y-1.5">
               <p className="label">New in your master resume</p>

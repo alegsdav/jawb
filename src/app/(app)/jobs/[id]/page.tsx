@@ -42,7 +42,8 @@ import { insertCoachedBullet, priorityItems, type CoachTarget } from "@/lib/coac
 import { progressFields } from "@/lib/progress";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, FitBadge } from "@/components/StatusSelect";
-import { DocToolbar, FeedbackLegend, PageCount, PlaceholderCount, Toggle, toggleLabel, UndoRedo } from "@/components/DocToolbar";
+import { DocToolbar, FeedbackLegend, IconButton, PageCount, PlaceholderCount, Toggle, toggleLabel, UndoRedo } from "@/components/DocToolbar";
+import { BriefcaseIcon, ChevronRightIcon, DownloadIcon, MoreIcon } from "@/components/icons";
 import { Menu, MenuItem } from "@/components/Menu";
 import { SubmittedView } from "@/components/SubmittedView";
 import { PullBanner, SaveAsMasterDialog, TailoredConflictBanner } from "@/components/PullBanner";
@@ -872,7 +873,7 @@ export default function JobPage() {
 
   if (loadFailed && !job) {
     return (
-      <div role="alert" className="card p-6 space-y-3 max-w-lg">
+      <div role="alert" className="rounded-lg border border-border p-6 space-y-3 max-w-lg">
         <p className="text-bad">{error || "Couldn't load this job."}</p>
         <div className="flex gap-2">
           <button type="button" className="btn btn-primary min-h-10 sm:min-h-0" onClick={() => window.location.reload()}>Try again</button>
@@ -967,60 +968,40 @@ export default function JobPage() {
   );
 
   const followUp = (
-    <label className="text-xs text-muted flex items-center gap-1.5">
+    <label className="flex items-center gap-1.5 text-[13px] text-muted">
       Follow up
       <input
         type="date"
-        className="ghost-input text-xs border-border sm:border-transparent"
+        className="ghost-input text-[13px] border-border sm:border-transparent"
         value={job.follow_up_date ?? ""}
         onChange={(e) => patch({ follow_up_date: e.target.value || null })}
       />
     </label>
   );
   const statusSelect = <StatusSelect value={job.status} onChange={changeStatus} />;
+  /** Resume-only controls: on the Tailored resume tab (and on the Analysis tab beside it on lg+). */
+  const resumeBar = (tab === "resume" || tab === "analysis") && !!resume && !needsMaster;
+  const quietText = "whitespace-nowrap rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg";
 
-  return (
-    <div className="space-y-2 sm:space-y-3">
-      <JobHeader
-        job={job}
-        applied={applied}
-        statusSelect={statusSelect}
-        followUp={followUp}
-        saveState={saveState}
-        detailsOpen={detailsOpen}
-        onToggleDetails={() => setDetailsOpen((o) => !o)}
-        onPatch={patch}
-        onDelete={deleteJob}
-      />
+  const topBar = (
+    <DocToolbar onSlot={setSlot}>
+      <Link
+        href="/"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-normal text-muted hover:text-fg"
+      >
+        <BriefcaseIcon className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">Jobs</span>
+        <span className="sr-only sm:hidden">Jobs</span>
+      </Link>
+      <span className="hidden shrink-0 items-center gap-1 sm:flex">
+        <ChevronRightIcon className="h-3.5 w-3.5 text-muted" aria-hidden="true" />
+        <span className="max-w-[220px] truncate text-xs text-muted" title={job.title}>
+          {job.title || "Untitled job"}
+        </span>
+      </span>
+      <span className="mx-2 hidden h-4 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
 
-      <AppliedNotice
-        job={job}
-        applied={applied}
-        followUp={followUp}
-        statusSelect={statusSelect}
-        reapply={reapply}
-        onReapply={setReapply}
-        onViewSubmitted={() => setViewingSubmitted(true)}
-      />
-
-      {migrationHint && (
-        <div role="status" className="flex items-start gap-2 rounded-lg border border-ok/40 bg-ok-bg px-3 py-2 text-sm">
-          <span className="flex-1">
-            {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking, progress on the
-            dashboard) aren&apos;t saved.
-          </span>
-          <button type="button" className="text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setMigrationHint(false)}>✕</button>
-        </div>
-      )}
-      {error && (
-        <div role="alert" className="flex items-start gap-2 rounded-lg border border-bad/40 bg-bad-bg px-3 py-2 text-sm">
-          <span className="flex-1 text-bad">{error}</span>
-          <button type="button" className="text-muted hover:text-fg px-1" aria-label="Dismiss" onClick={() => setError("")}>✕</button>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div role="tablist" className="flex overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 gap-1">
+      <div role="tablist" aria-label="Job sections" className="flex h-full min-w-0 items-stretch gap-3 overflow-x-auto">
         {TABS.map(([key, short, full]) => (
           <button
             key={key}
@@ -1028,147 +1009,199 @@ export default function JobPage() {
             role="tab"
             aria-selected={tab === key}
             onClick={() => selectTab(key)}
-            className={`shrink-0 px-3 sm:px-3.5 py-2 text-sm rounded-full flex items-center gap-1.5 ${key === "analysis" ? "lg:hidden" : ""} ${
-              tab === key ? "bg-surface-2 text-fg font-medium" : "text-muted hover:text-fg"
-            }`}
+            className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-[1.5px] px-0.5 text-[13px] transition-colors ${
+              key === "analysis" ? "lg:hidden" : ""
+            } ${tab === key ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}
           >
             <span className="sm:hidden">{short}</span>
             <span className="hidden sm:inline">{full}</span>
             {/* No room for the chip at phone width; the Analysis tab itself shows it. */}
             {key === "analysis" && fit && <span className="hidden sm:inline-flex"><FitBadge fit={fit} /></span>}
             {key === "analysis" && analyzeError && !quiet && <span className="text-bad" aria-label="Analysis failed">!</span>}
-            {key === "resume" && pending.length > 0 && (
-              <span className="chip border-0 bg-accent text-[var(--accent-fg)] px-1.5">{pending.length}</span>
-            )}
+            {key === "resume" && pending.length > 0 && <span className="text-xs text-muted">({pending.length})</span>}
           </button>
         ))}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className={`min-w-0 space-y-3 ${tab === "analysis" ? "hidden lg:block" : ""}`}>
-          {/* Kept mounted across tabs so selection and "Review" requests survive tab switches. */}
-          <div className={`space-y-2 sm:space-y-3 ${tab === "resume" || tab === "analysis" ? "" : "hidden"}`}>
-            {needsMaster ? (
-              <div className="card p-6 sm:p-10 text-center space-y-3">
-                <h2 className="text-lg font-semibold">Import your resume first</h2>
-                <p className="text-sm text-muted max-w-md mx-auto">
-                  Each job gets its own tailored copy of your master resume. Your master resume is empty, so there&apos;s
-                  nothing to tailor yet. Upload your resume PDF (or paste it), then come back to this job.
-                </p>
-                <Link href="/resume" className="btn btn-primary">Import your resume</Link>
-              </div>
-            ) : !resume ? (
-              <p className="text-sm text-muted">Loading your tailored copy…</p>
-            ) : (
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {resumeBar && (
+          <div className={`flex items-center gap-1 ${tab === "analysis" ? "hidden lg:flex" : "flex"}`}>
+            {quiet ? null : pending.length > 0 ? (
               <>
-                <DocToolbar onSlot={setSlot}>
-                  <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
-                  {quiet ? null : pending.length > 0 ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="hidden sm:inline text-xs font-medium text-accent">
-                        {plural(pending.length, "suggestion")}
-                      </span>
-                      <button type="button" className="btn btn-sm" onClick={reviewNext}>
-                        <span>Review<span className="sm:hidden"> {pending.length}</span></span>
-                      </button>
-                      <button type="button" className="hidden sm:inline-flex btn btn-sm btn-primary" onClick={acceptAll}>Accept all</button>
-                    </div>
-                  ) : analyzing ? (
-                    <span className="text-xs text-muted">
-                      Analyzing<span className="hidden sm:inline"> against the job</span>…
-                    </span>
-                  ) : analyzeError ? (
-                    <button type="button" className="btn btn-sm text-bad lg:hidden" onClick={() => selectTab("analysis")}>
-                      Analysis failed
-                    </button>
-                  ) : null}
-                  {!quiet && <PlaceholderCount count={placeholderCount} onClick={goToPlaceholder} />}
-                  {!quiet && (
-                    <span className="hidden sm:inline-flex"><Toggle on={showFeedback} onChange={setShowFeedback} label="Feedback" /></span>
-                  )}
-                  {showHighlights && (analysis || changedCount > 0) && (
-                    <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
-                  )}
-                  <span className="hidden md:inline"><PageCount {...measure} /></span>
-                  <div className="ml-auto flex items-center gap-1.5">
-                    <button type="button" className="btn btn-sm btn-primary" onClick={downloadPdf} disabled={pdfBusy}>
-                      {pdfBusy ? "Building…" : <span>Download<span className="hidden sm:inline"> PDF</span></span>}
-                    </button>
-                    <Menu label="More ▾">
-                      {pending.length > 0 && (
-                        <MenuItem className="sm:hidden" onSelect={acceptAll} hint="Apply every suggested edit (Undo to go back)">
-                          Accept all {plural(pending.length, "suggestion")}
-                        </MenuItem>
-                      )}
-                      <MenuItem onSelect={copyText}>Copy as text</MenuItem>
-                      {!quiet && (
-                        <MenuItem
-                          className="sm:hidden"
-                          onSelect={() => setShowFeedback((v) => !v)}
-                          hint="Ratings, suggested edits and changes from your master resume"
-                        >
-                          {toggleLabel("Feedback", showFeedback)}
-                        </MenuItem>
-                      )}
-                      <MenuItem
-                        onSelect={makeMaster}
-                        hint="Adds this copy's edits to your master resume. Nothing is removed unless you choose."
-                      >
-                        Save this tailored copy as my master resume…
-                      </MenuItem>
-                      <MenuItem onSelect={resetFromMaster} hint="Discards this job's tailored edits" danger>
-                        Start over from master resume…
-                      </MenuItem>
-                    </Menu>
-                  </div>
-                </DocToolbar>
-                {!quiet && (
-                  <PullBanner
-                    plan={pull}
-                    onPull={pullFromMaster}
-                    onAdd={addOne}
-                    onAddAll={addAll}
-                    onDismissAdditions={leaveOut}
-                    onRemoval={onRemoval}
-                  />
-                )}
-                <ResumeDocument
-                  value={resume}
-                  onChange={doc.set}
-                  feedback={quiet ? undefined : feedback}
-                  showHighlights={showHighlights}
-                  baseline={compareTo}
-                  showChanges={showHighlights}
-                  onReject={rejectSuggestion}
-                  onMeasure={setMeasure}
-                  actionsSlot={slot}
-                  reveal={reveal}
-                  quiet={quiet}
-                  onSelectionChange={onSelection}
-                />
+                <span className="hidden whitespace-nowrap text-xs text-muted sm:inline">{plural(pending.length, "suggestion")}</span>
+                <button type="button" className={quietText} onClick={reviewNext}>
+                  <span>Review<span className="sm:hidden"> {pending.length}</span></span>
+                </button>
+                <button type="button" className={`${quietText} hidden font-medium text-fg sm:inline-flex`} onClick={acceptAll}>
+                  Accept all
+                </button>
               </>
+            ) : analyzing ? (
+              <span className="px-1 text-xs whitespace-nowrap text-muted">
+                Analyzing<span className="hidden sm:inline"> against the job</span>…
+              </span>
+            ) : analyzeError ? (
+              <button type="button" className={`${quietText} text-bad lg:hidden`} onClick={() => selectTab("analysis")}>
+                Analysis failed
+              </button>
+            ) : null}
+            {!quiet && <PlaceholderCount count={placeholderCount} onClick={goToPlaceholder} />}
+            {!quiet && (
+              <span className="hidden sm:inline-flex"><Toggle on={showFeedback} onChange={setShowFeedback} label="Feedback" /></span>
+            )}
+            <span className="hidden md:inline"><PageCount {...measure} /></span>
+            <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
+            <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
+            <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
+            <IconButton label={pdfBusy ? "Building…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy}>
+              <DownloadIcon />
+            </IconButton>
+            <Menu label={<MoreIcon className="h-4 w-4" />} title="More" buttonClassName="icon-btn">
+              {pending.length > 0 && (
+                <MenuItem className="sm:hidden" onSelect={acceptAll} hint="Apply every suggested edit (Undo to go back)">
+                  Accept all {plural(pending.length, "suggestion")}
+                </MenuItem>
+              )}
+              <MenuItem onSelect={copyText}>Copy as text</MenuItem>
+              {!quiet && (
+                <MenuItem
+                  className="sm:hidden"
+                  onSelect={() => setShowFeedback((v) => !v)}
+                  hint="Ratings, suggested edits and changes from your master resume"
+                >
+                  {toggleLabel("Feedback", showFeedback)}
+                </MenuItem>
+              )}
+              <MenuItem
+                onSelect={makeMaster}
+                hint="Adds this copy's edits to your master resume. Nothing is removed unless you choose."
+              >
+                Save this tailored copy as my master resume…
+              </MenuItem>
+              <MenuItem onSelect={resetFromMaster} hint="Discards this job's tailored edits" danger>
+                Start over from master resume…
+              </MenuItem>
+            </Menu>
+          </div>
+        )}
+      </div>
+    </DocToolbar>
+  );
+
+  return (
+    <div className="flex flex-col lg:h-full lg:min-h-0">
+      {topBar}
+
+      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
+        {/* Document column: plain white, centred. Scrolls on its own on lg+. */}
+        <div className={`min-w-0 flex-1 lg:overflow-y-auto ${tab === "analysis" ? "hidden lg:block" : ""}`}>
+          <div className="mx-auto max-w-[860px] space-y-4 px-4 py-6 sm:px-8">
+            {migrationHint && (
+              <div role="status" className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-[13px]">
+                <span className="flex-1 text-muted">
+                  {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking, progress on the
+                  dashboard) aren&apos;t saved.
+                </span>
+                <button type="button" className="px-1 text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setMigrationHint(false)}>✕</button>
+              </div>
+            )}
+            {error && (
+              <div role="alert" className="flex items-start gap-2 rounded-lg border border-bad/40 px-3 py-2 text-[13px]">
+                <span className="flex-1 text-bad">{error}</span>
+                <button type="button" className="px-1 text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setError("")}>✕</button>
+              </div>
+            )}
+
+            <AppliedNotice
+              job={job}
+              applied={applied}
+              followUp={followUp}
+              statusSelect={statusSelect}
+              reapply={reapply}
+              onReapply={setReapply}
+              onViewSubmitted={() => setViewingSubmitted(true)}
+            />
+
+            {/* Kept mounted across tabs so selection and "Review" requests survive tab switches. */}
+            <div className={`space-y-4 ${tab === "resume" || tab === "analysis" ? "" : "hidden"}`}>
+              {needsMaster ? (
+                <div className="rounded-lg border border-border p-6 sm:p-10 text-center space-y-3">
+                  <h2 className="text-lg font-semibold">Import your resume first</h2>
+                  <p className="text-sm text-muted max-w-md mx-auto">
+                    Each job gets its own tailored copy of your master resume. Your master resume is empty, so there&apos;s
+                    nothing to tailor yet. Upload your resume PDF (or paste it), then come back to this job.
+                  </p>
+                  <Link href="/resume" className="btn btn-primary">Import your resume</Link>
+                </div>
+              ) : !resume ? (
+                <p className="text-sm text-muted">Loading your tailored copy…</p>
+              ) : (
+                <>
+                  {!quiet && (
+                    <PullBanner
+                      plan={pull}
+                      onPull={pullFromMaster}
+                      onAdd={addOne}
+                      onAddAll={addAll}
+                      onDismissAdditions={leaveOut}
+                      onRemoval={onRemoval}
+                    />
+                  )}
+                  <ResumeDocument
+                    value={resume}
+                    onChange={doc.set}
+                    feedback={quiet ? undefined : feedback}
+                    showHighlights={showHighlights}
+                    baseline={compareTo}
+                    showChanges={showHighlights}
+                    onReject={rejectSuggestion}
+                    onMeasure={setMeasure}
+                    actionsSlot={slot}
+                    reveal={reveal}
+                    quiet={quiet}
+                    onSelectionChange={onSelection}
+                  />
+                </>
+              )}
+            </div>
+
+            {tab === "job" && <PostingTab job={job} onPatch={patch} />}
+            {tab === "cover" && (
+              <CoverLetterTab
+                job={job}
+                quiet={quiet}
+                writing={writing}
+                error={coverError}
+                canWrite={!!resume}
+                onWrite={writeCoverLetter}
+                onCopy={copyCoverLetter}
+                onPatch={patch}
+              />
             )}
           </div>
-
-          {tab === "job" && <PostingTab job={job} onPatch={patch} />}
-          {tab === "cover" && (
-            <CoverLetterTab
-              job={job}
-              quiet={quiet}
-              writing={writing}
-              error={coverError}
-              canWrite={!!resume}
-              onWrite={writeCoverLetter}
-              onCopy={copyCoverLetter}
-              onPatch={patch}
-            />
-          )}
         </div>
 
-        <aside
-          className={`${tab === "analysis" ? "" : "hidden"} lg:block lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto`}
-        >
-          {side}
+        {/* Side panel: job details on top, then the coach/facts/analysis panels. Its own scroll on lg+.
+            Phones: the details come first; the panels show on the Analysis tab. */}
+        <aside className="order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l">
+          <JobHeader
+            job={job}
+            applied={applied}
+            statusSelect={statusSelect}
+            followUp={followUp}
+            saveState={saveState}
+            detailsOpen={detailsOpen}
+            onToggleDetails={() => setDetailsOpen((o) => !o)}
+            onPatch={patch}
+            onDelete={deleteJob}
+          />
+          {resumeBar && showHighlights && (analysis || changedCount > 0) && (
+            <div className="flex items-center justify-between gap-3 text-[13px]">
+              <span className="text-muted">Colours in the document</span>
+              <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+            </div>
+          )}
+          <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>{side}</div>
         </aside>
       </div>
 

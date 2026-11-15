@@ -45,9 +45,9 @@ export function FactsPanel({
   };
 
   return (
-    <section id="facts" className="card p-4 sm:p-5 space-y-3 scroll-mt-16" aria-labelledby="facts-heading">
+    <section id="facts" className="space-y-3 scroll-mt-16" aria-labelledby="facts-heading">
       <div>
-        <h2 id="facts-heading" className="font-semibold">
+        <h2 id="facts-heading" className="text-[13px] font-semibold">
           Facts <span className="text-sm font-normal text-muted">· {facts.length}</span>
         </h2>
         <p className="text-sm text-muted">

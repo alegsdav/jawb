@@ -7,23 +7,23 @@ import { PlaceholderTextarea } from "../PlaceholderTextarea";
 /** The Posting tab: link, description and notes, edited in place. */
 export function PostingTab({ job, onPatch }: { job: Job; onPatch: (p: Partial<Job>) => void }) {
   return (
-    <div className="card p-4 space-y-3">
+    <div className="space-y-3">
       <input
-        className="input w-full text-sm"
+        className="input w-full text-[13px]"
         value={job.url}
         placeholder="Posting URL"
         aria-label="Posting URL"
         onChange={(e) => onPatch({ url: e.target.value })}
       />
       <textarea
-        className="input w-full min-h-[60vh] text-sm leading-relaxed"
+        className="input w-full min-h-[60vh] text-[13px] leading-relaxed"
         value={job.description}
         aria-label="Job description"
         placeholder="Paste the job description here."
         onChange={(e) => onPatch({ description: e.target.value })}
       />
       <textarea
-        className="input w-full h-24 text-sm"
+        className="input w-full h-24 text-[13px]"
         value={job.notes}
         placeholder="Notes: referral, recruiter name…"
         aria-label="Notes"
@@ -49,9 +49,9 @@ export function CoverLetterTab({
 }) {
   const coverPlaceholders = countPlaceholders([job.cover_letter]);
   return (
-    <div className="card p-4 space-y-3">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm text-muted flex-1 min-w-48">
+        <p className="text-[13px] text-muted flex-1 min-w-48">
           {quiet ? "The letter as you last saved it here." : "Only send one if the application asks. Replace every [placeholder] first."}
         </p>
         {coverPlaceholders > 0 && !quiet && (
@@ -76,13 +76,13 @@ export function CoverLetterTab({
         )}
       </div>
       {error && !writing && !quiet && (
-        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-bad/40 bg-bad-bg px-3 py-2 text-sm">
+        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-bad/40 px-3 py-2 text-[13px]">
           <span className="flex-1 min-w-48 text-bad">{error}</span>
           <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={onWrite}>Retry</button>
         </div>
       )}
       <PlaceholderTextarea
-        boxClassName="input w-full min-h-[50vh] text-sm leading-relaxed"
+        boxClassName="input w-full min-h-[50vh] text-[13px] leading-relaxed"
         value={job.cover_letter}
         placeholder="Draft a cover letter, or write your own here."
         aria-label="Cover letter"

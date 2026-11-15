@@ -274,19 +274,19 @@ export function CoachPanel({
 
   if (!item) {
     return (
-      <div className="card p-4 space-y-2">
-        <p className="text-sm text-muted">That entry is gone.</p>
+      <div className="space-y-2">
+        <p className="text-[13px] text-muted">That entry is gone.</p>
         <button type="button" className="btn btn-sm" onClick={onBack}>Back</button>
       </div>
     );
   }
 
   return (
-    <section className="card p-4 space-y-4" aria-labelledby="coach-heading">
+    <section className="space-y-4" aria-labelledby="coach-heading">
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <p className="label">{jobId ? "Coaching for this job" : "Coaching"}</p>
-          <h2 id="coach-heading" className="font-semibold break-words">{name}</h2>
+          <h2 id="coach-heading" className="text-[13px] font-semibold break-words">{name}</h2>
           {bullet && <p className="mt-1 text-sm text-muted break-words">“{bullet.text}”</p>}
         </div>
         <button type="button" className="btn btn-sm shrink-0" onClick={onBack} aria-label="Back to the overview">

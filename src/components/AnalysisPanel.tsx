@@ -142,7 +142,7 @@ export function AnalysisPanel(p: Props) {
   );
 
   const errorBox = saveError && !saving && (
-    <div role="alert" className="card border-bad/40 bg-bad-bg p-3 text-sm space-y-2">
+    <div role="alert" className="space-y-2 rounded-lg border border-bad/40 p-3 text-[13px]">
       <p className="text-bad">
         <strong>Your answers aren&apos;t saved yet.</strong> {saveError}
       </p>
@@ -154,7 +154,7 @@ export function AnalysisPanel(p: Props) {
   );
 
   const missingBox = missing > 0 && !dirty && !saveError && !saving && (
-    <div role="status" className="card border-ok/40 bg-ok-bg p-3 text-sm space-y-2">
+    <div role="status" className="space-y-2 rounded-lg border border-border p-3 text-[13px]">
       <p>
         {missing === 1 ? "1 answer isn't" : `${missing} answers aren't`} in your facts yet, so other jobs can&apos;t use{" "}
         {missing === 1 ? "it" : "them"}.
@@ -167,9 +167,9 @@ export function AnalysisPanel(p: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="card p-4 space-y-3">
+      <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h2 className="font-semibold">Analysis</h2>
+          <h2 className="text-[13px] font-semibold">Analysis</h2>
           {fit && <FitBadge fit={fit} />}
           {!p.quiet && (
             <button className="btn btn-primary btn-sm ml-auto min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
@@ -184,7 +184,7 @@ export function AnalysisPanel(p: Props) {
           </p>
         )}
         {p.error && !p.analyzing && !p.quiet && (
-          <div role="alert" className="rounded-lg border border-bad/40 bg-bad-bg p-3 text-sm space-y-2">
+          <div role="alert" className="space-y-2 rounded-lg border border-bad/40 p-3 text-[13px]">
             <p className="text-bad">{p.error}</p>
             <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={p.onAnalyze} disabled={!!p.disabledReason}>
               Retry
@@ -206,7 +206,7 @@ export function AnalysisPanel(p: Props) {
         {a && <p className="text-sm">{a.verdict}</p>}
         {a && !p.quiet && p.top}
         {a && !p.quiet && !p.top && p.pendingCount > 0 && (
-          <div className="rounded-lg bg-accent/5 border border-accent/30 p-3 space-y-2">
+          <div className="space-y-2 rounded-lg border border-border p-3">
             <p className="text-sm">
               <strong>{p.pendingCount} suggested edit{p.pendingCount > 1 ? "s" : ""}</strong> to tailor your resume for this job.
             </p>
@@ -227,8 +227,8 @@ export function AnalysisPanel(p: Props) {
         <>
           {!p.quiet && errorBox}
           {!p.quiet && unanswered.length > 0 && (
-            <div className="card p-4 space-y-3 border-accent">
-              <h3 className="label text-accent">Questions for you</h3>
+            <div className="space-y-3 border-t border-border pt-4">
+              <h3 className="text-[13px] font-medium text-accent">Questions for you</h3>
               {unanswered.map(field)}
               <p className="text-xs text-muted">Answers are saved to your facts, so other jobs can use them too.</p>
               {saveRow}
@@ -236,15 +236,15 @@ export function AnalysisPanel(p: Props) {
           )}
           {/* Outside the questions card: once everything is answered that card goes away. */}
           {savedNote && (
-            <p role="status" className="card px-4 py-3 text-sm text-good">
+            <p role="status" className="text-[13px] text-good">
               {savedNote}
             </p>
           )}
           {!p.quiet && missingBox}
 
           {!p.quiet && answered.length > 0 && (
-            <details className="card p-4 text-sm">
-              <summary className="label cursor-pointer">Your answers ({answered.length}) · edit</summary>
+            <details className="border-t border-border pt-4 text-[13px]">
+              <summary className="label cursor-pointer text-[13px]">Your answers ({answered.length}) · edit</summary>
               <div className="mt-3 space-y-3">
                 {answered.map(field)}
                 <p className="text-xs text-muted">Editing an answer replaces its fact.</p>
@@ -253,8 +253,8 @@ export function AnalysisPanel(p: Props) {
             </details>
           )}
 
-          <div className="card p-4 space-y-2">
-            <h3 className="label">Keywords</h3>
+          <div className="space-y-2 border-t border-border pt-4">
+            <h3 className="text-[13px] font-medium">Keywords</h3>
             <div className="flex flex-wrap gap-1">
               {a.keywords.missing.map((k) => (
                 <span key={k} className="chip border-bad/40 text-bad" title="In the posting, missing from your resume">{k}</span>
@@ -267,8 +267,8 @@ export function AnalysisPanel(p: Props) {
           </div>
 
           {a.gaps.length > 0 && (
-            <div className="card p-4 space-y-2">
-              <h3 className="label">Gaps to fix</h3>
+            <div className="space-y-2 border-t border-border pt-4">
+              <h3 className="text-[13px] font-medium">Gaps to fix</h3>
               <ul className="space-y-2 text-sm">
                 {a.gaps.map((g, i) => (
                   <li key={i}>
@@ -282,8 +282,8 @@ export function AnalysisPanel(p: Props) {
           )}
 
           {a.strengths.length > 0 && (
-            <div className="card p-4 space-y-2">
-              <h3 className="label">Strengths for this job</h3>
+            <div className="space-y-2 border-t border-border pt-4">
+              <h3 className="text-[13px] font-medium">Strengths for this job</h3>
               <ul className="list-disc pl-5 text-sm space-y-1">
                 {a.strengths.map((s, i) => <li key={i}>{s}</li>)}
               </ul>
