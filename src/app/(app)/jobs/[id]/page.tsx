@@ -978,6 +978,18 @@ export default function JobPage() {
       />
     </label>
   );
+  /** The same follow-up date as two grid cells (label, input) for the details list in JobHeader. */
+  const followUpRow = (
+    <>
+      <span className="text-muted">Follow up</span>
+      <input
+        type="date"
+        className="ghost-input justify-self-start text-[13px] border-border sm:border-transparent"
+        value={job.follow_up_date ?? ""}
+        onChange={(e) => patch({ follow_up_date: e.target.value || null })}
+      />
+    </>
+  );
   const statusSelect = <StatusSelect value={job.status} onChange={changeStatus} />;
   /** Resume-only controls: on the Tailored resume tab (and on the Analysis tab beside it on lg+). */
   const resumeBar = (tab === "resume" || tab === "analysis") && !!resume && !needsMaster;
@@ -1001,7 +1013,11 @@ export default function JobPage() {
       </span>
       <span className="mx-2 hidden h-4 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
 
-      <div role="tablist" aria-label="Job sections" className="flex h-full min-w-0 items-stretch gap-3 overflow-x-auto">
+      <div
+        role="tablist"
+        aria-label="Job sections"
+        className="flex h-full min-w-0 flex-1 items-stretch gap-2.5 overflow-x-auto sm:gap-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {TABS.map(([key, short, full]) => (
           <button
             key={key}
@@ -1051,12 +1067,24 @@ export default function JobPage() {
             )}
             <span className="hidden md:inline"><PageCount {...measure} /></span>
             <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
-            <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
+            <span className="hidden sm:inline-flex">
+              <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
+            </span>
             <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
-            <IconButton label={pdfBusy ? "Building…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy}>
-              <DownloadIcon />
-            </IconButton>
+            <span className="shrink-0">
+              <IconButton label={pdfBusy ? "Building…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy}>
+                <DownloadIcon />
+              </IconButton>
+            </span>
+            <span className="shrink-0">
             <Menu label={<MoreIcon className="h-4 w-4" />} title="More" buttonClassName="icon-btn">
+              {/* Phones: undo/redo live in More (the buttons sit in the bar from sm up). */}
+              <MenuItem className="sm:hidden" onSelect={doc.undo} disabled={!doc.canUndo}>
+                Undo
+              </MenuItem>
+              <MenuItem className="sm:hidden" onSelect={doc.redo} disabled={!doc.canRedo}>
+                Redo
+              </MenuItem>
               {pending.length > 0 && (
                 <MenuItem className="sm:hidden" onSelect={acceptAll} hint="Apply every suggested edit (Undo to go back)">
                   Accept all {plural(pending.length, "suggestion")}
@@ -1082,6 +1110,7 @@ export default function JobPage() {
                 Start over from master resume…
               </MenuItem>
             </Menu>
+            </span>
           </div>
         )}
       </div>
@@ -1095,7 +1124,7 @@ export default function JobPage() {
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         {/* Document column: plain white, centred. Scrolls on its own on lg+. */}
         <div className={`min-w-0 flex-1 lg:overflow-y-auto ${tab === "analysis" ? "hidden lg:block" : ""}`}>
-          <div className="mx-auto max-w-[860px] space-y-4 px-4 py-6 sm:px-8">
+          <div className="mx-auto max-w-[860px] space-y-4 px-4 pt-10 pb-6 sm:px-8">
             {migrationHint && (
               <div role="status" className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-[13px]">
                 <span className="flex-1 text-muted">
@@ -1188,7 +1217,7 @@ export default function JobPage() {
             job={job}
             applied={applied}
             statusSelect={statusSelect}
-            followUp={followUp}
+            followUp={followUpRow}
             saveState={saveState}
             detailsOpen={detailsOpen}
             onToggleDetails={() => setDetailsOpen((o) => !o)}
@@ -1196,9 +1225,12 @@ export default function JobPage() {
             onDelete={deleteJob}
           />
           {resumeBar && showHighlights && (analysis || changedCount > 0) && (
-            <div className="flex items-center justify-between gap-3 text-[13px]">
-              <span className="text-muted">Colours in the document</span>
-              <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+            // Phones: behind the "Details" toggle. The legend's bordered "?" button is flattened to a plain glyph.
+            <div className={`${detailsOpen ? "flex" : "hidden"} items-center justify-between gap-3 text-xs text-muted sm:flex`}>
+              <span>Colours in the document</span>
+              <div className="[&_button]:border-0 [&_button]:bg-transparent [&_button]:px-1 [&_button]:text-muted">
+                <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+              </div>
             </div>
           )}
           <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>{side}</div>
