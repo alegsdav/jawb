@@ -4,9 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/", label: "Jobs", short: "Jobs", desktop: true },
+  { href: "/", label: "Dashboard", short: "Dashboard", desktop: true },
   { href: "/resume", label: "Master resume", short: "Master", desktop: true },
-  // On desktop, Account lives in the header's top-right corner instead.
+  // On desktop (lg and up) the sidebar has all three; this is the tab bar below lg.
   { href: "/account", label: "Account", short: "Account", desktop: false },
 ];
 

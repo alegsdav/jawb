@@ -6,6 +6,7 @@ import { extractJobMetaPrompt } from "@/lib/prompts";
 import { pasteOnlySite } from "@/lib/jobsites";
 import { dbErrorMessage } from "@/lib/db";
 import { findDuplicateJob } from "@/lib/status";
+import { withAiBudget } from "@/lib/aiBudget";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
@@ -82,7 +83,10 @@ export async function POST(req: Request) {
     }
     if (!description) return bad("Paste a job description or a job link.");
     if (!meta.company || !meta.title) {
-      const m = await geminiJSON<typeof meta>(extractJobMetaPrompt(description)).catch(() => null);
+      // Light AI call. Over the limit (or any failure), the job is still added; the user fills in the details.
+      const m = await withAiBudget(supabase, { action: "intake_meta" }, (meter) =>
+        geminiJSON<typeof meta>(extractJobMetaPrompt(description), { onUsage: meter.add }),
+      ).catch(() => null);
       if (m) {
         meta = {
           company: meta.company || m.company || "",

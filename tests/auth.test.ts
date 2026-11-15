@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { isAllowedEmail } from "@/lib/supabase/allowlist";
+import { isAllowedEmail, isAllowedUser } from "@/lib/supabase/allowlist";
 
 const auth = vi.hoisted(() => ({
   getUser: vi.fn(),
@@ -12,8 +12,8 @@ vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: 
 import { middleware } from "@/middleware";
 import { requireUser } from "@/lib/supabase/server";
 
-const signedInAs = (email: string | null) =>
-  auth.getUser.mockResolvedValue({ data: { user: email ? { id: "u1", email } : null }, error: null });
+const signedInAs = (email: string | null, app_metadata: Record<string, unknown> = {}) =>
+  auth.getUser.mockResolvedValue({ data: { user: email ? { id: "u1", email, app_metadata } : null }, error: null });
 
 const req = (path: string) =>
   new NextRequest(`http://localhost:3000${path}`, { headers: { cookie: "sb-proj-auth-token=base64-abc; theme=dark" } });
@@ -39,14 +39,29 @@ describe("isAllowedEmail", () => {
   });
 });
 
+describe("isAllowedUser", () => {
+  it("lets in invited accounts and listed emails only (an empty list no longer means everyone)", () => {
+    expect(isAllowedUser({ email: "me@school.edu" })).toBe(true);
+    expect(isAllowedUser({ email: "new@student.edu", app_metadata: { invited: true } })).toBe(true);
+    expect(isAllowedUser({ email: "new@student.edu", app_metadata: { invited: "true" } })).toBe(false);
+    expect(isAllowedUser({ email: "stranger@example.com", app_metadata: {} })).toBe(false);
+    expect(isAllowedUser({ email: "anyone@example.com" }, "")).toBe(false);
+    expect(isAllowedUser({ email: "anyone@example.com", app_metadata: { invited: true } }, "")).toBe(true);
+    expect(isAllowedUser(null)).toBe(false);
+  });
+});
+
 describe("requireUser", () => {
-  it("returns the user only when the email is allowed", async () => {
+  it("returns the user only when invited or on the list", async () => {
     signedInAs("me@school.edu");
     expect((await requireUser()).user?.email).toBe("me@school.edu");
     signedInAs("stranger@example.com");
     expect((await requireUser()).user).toBeNull();
+    signedInAs("student@college.edu", { invited: true });
+    expect((await requireUser()).user?.email).toBe("student@college.edu");
     process.env.ALLOWED_EMAILS = "";
-    expect((await requireUser()).user?.email).toBe("stranger@example.com");
+    signedInAs("stranger@example.com");
+    expect((await requireUser()).user).toBeNull();
   });
 });
 
@@ -92,11 +107,27 @@ describe("middleware allow-list", () => {
     expect((await middleware(req("/api/intake"))).status).toBe(401);
   });
 
-  it("allows everyone when ALLOWED_EMAILS is empty", async () => {
+  it("lets an invited account through (from the session, even when it isn't on ALLOWED_EMAILS)", async () => {
+    signedInAs("student@college.edu", { invited: true });
+    const res = await middleware(req("/jobs/1"));
+    expect(res.status).toBe(200);
+    expect(auth.signOut).not.toHaveBeenCalled();
+    process.env.ALLOWED_EMAILS = "";
+    expect((await middleware(req("/api/analyze"))).status).toBe(200);
+  });
+
+  it("with an empty ALLOWED_EMAILS, an account that wasn't invited is signed out", async () => {
     process.env.ALLOWED_EMAILS = "";
     signedInAs("stranger@example.com");
     const res = await middleware(req("/"));
+    expect(res.headers.get("location")).toBe("http://localhost:3000/login?error=not-allowed");
+    expect(auth.signOut).toHaveBeenCalled();
+  });
+
+  it("/signup is public for signed-out visitors", async () => {
+    signedInAs(null);
+    const res = await middleware(req("/signup?code=ABCD"));
     expect(res.status).toBe(200);
-    expect(auth.signOut).not.toHaveBeenCalled();
+    expect(res.headers.get("location")).toBeNull();
   });
 });

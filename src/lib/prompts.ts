@@ -136,3 +136,137 @@ RESUME TEXT:
 ${text.slice(0, 15000)}
 """`}`;
 }
+
+/**
+ * Split one of the student's answers into atomic facts. The model may only restate what the student
+ * wrote; the server also drops any fact with a number the answer doesn't contain (guardNumbers).
+ */
+export function extractFactsPrompt(args: { answer: string; question: string; context: string }) {
+  return `A college student answered a question about their own experience. Turn their answer into short, atomic facts
+that can be reused on a resume later.
+
+QUESTION THEY WERE ASKED (for context only; it is NOT a source of facts):
+"""
+${args.question.slice(0, 600) || "(none)"}
+"""
+
+THE RESUME LINE OR ENTRY IT'S ABOUT (for context only; it is NOT a source of facts):
+"""
+${args.context.slice(0, 1500) || "(none)"}
+"""
+
+THE STUDENT'S ANSWER (the ONLY source of facts):
+"""
+${args.answer.slice(0, 4000)}
+"""
+
+Rules:
+- Restate ONLY what the student literally wrote in their answer. Never add, infer, round, combine or improve anything.
+- NEVER invent numbers, tools, employers, titles or results. Every number in a fact must appear in the answer exactly
+  (same value and unit); any fact with another number is thrown away automatically.
+- Each fact is one self-contained statement that makes sense without the question, in resume style without "I"
+  (e.g. "Tutored about 20 students a week in calculus"). Name what it's about (the club, class, job or project) when the
+  answer or the context makes that clear.
+- Skip anything vague, joking, or not about the student (e.g. "not sure", "n/a"). Zero facts is a fine answer.
+- At most 6 facts.
+
+Return ONLY JSON: {"facts": ["...", "..."]}`;
+}
+
+/** What the coaching prompts know about the entry being coached (the student's own resume text). */
+export type CoachContext = {
+  /** "Acme Corp | Data Analyst Intern | Boston, MA | Jun 2025 – Aug 2025". */
+  entry: string;
+  /** The entry's bullets, as written. */
+  bullets: string[];
+  /** The selected bullet, when a bullet (not the whole entry) is selected. */
+  bullet: string;
+  /** Output of formatFacts(...) for the relevant active facts. */
+  facts: string;
+  /** The job posting on a job tab; "" on the master resume. */
+  job: string;
+};
+
+function coachHeader(c: CoachContext, task: string) {
+  const target = c.job
+    ? `They are tailoring it to the job posting below: use the posting's language and priorities (what this employer will look for).`
+    : `This is their master resume (no specific job): aim for what makes a bullet strong to any recruiter for this kind of role.`;
+  return `You are a warm, honest resume coach for college students who don't yet know what recruiters value. ${task}
+${target}
+
+RESUME ENTRY:
+"""
+${c.entry || "(untitled entry)"}
+${c.bullets.map((b) => `- ${b}`).join("\n") || "(no bullets yet)"}
+"""
+
+${c.bullet ? `SELECTED BULLET:\n"""\n${c.bullet}\n"""\n` : ""}
+STUDENT'S FACTS (true, things they told us; may be empty):
+"""
+${c.facts || "(none)"}
+"""
+${c.job ? `\nJOB POSTING:\n"""\n${c.job.slice(0, 8000)}\n"""\n` : ""}${RULES}
+- Never fabricate employers, tools, technologies, titles or results the student did not state in the entry or facts.
+- In coaching, a metric you don't know is a blank token like {{b1}} (described below), not a [placeholder].`;
+}
+
+/**
+ * Example bullets with a blank for every metric. `round` > 1 ("More examples") asks for different
+ * angles; earlier examples are never sent back (they're ephemeral and must not reach any prompt).
+ */
+export function coachExamplesPrompt(c: CoachContext & { round: number }) {
+  return `${coachHeader(c, `Show the student up to 3 example bullets for ${c.bullet ? "the selected bullet" : "this entry"}, so they can see what a strong version looks like.`)}
+
+How to write the examples:
+- Build each example only from what the entry, the selected bullet and the facts say the student did. Same employer,
+  same tools, same kind of work. You may suggest a stronger verb, clearer scope, and WHERE a result or metric would go.
+- EVERY metric (any count, %, $, time, frequency, size, rank, or number word like "five" or "twice") must be a blank token
+  {{b1}}, {{b2}}... in the text. Never write a number outside a blank, and never use [brackets]. Examples with a stray
+  number are thrown away automatically.
+- If one of the STUDENT'S FACTS states the value for a blank, set "from_fact" to that fact copied exactly and "fact_value"
+  to the value exactly as the fact writes it. Otherwise leave both "".
+- "why": one line on why a recruiter for this kind of role cares about this bullet. No statistics or numbers.
+- "anatomy": label the parts, each with a span copied exactly from the text: "verb" (the opening action), "scope" (who/what/
+  how big), "tool" (method or technology, if any), "result" (the outcome or impact).
+- For each blank: "label" (what to measure, 2-5 words, e.g. "students tutored per week"), "hint" (a typical honest range
+  for a student, phrased as a hint, e.g. "Most student tutors see somewhere between a handful and a few dozen a week"),
+  "example_value" (an illustrative value with its unit, e.g. "15"), and "question" (plain language: how to find the real
+  number, with an estimation tip, e.g. "Count a typical week and multiply by the weeks in the semester").
+${c.round > 1 ? `- This is set #${c.round}: take different angles than the most obvious ones (for example lead with the outcome, the process, collaboration, or who benefited), with different verbs.\n` : ""}
+Return ONLY JSON:
+{ "examples": [ { "text": "Led {{b1}} weekly calculus review sessions...", "why": "", "anatomy": [{ "part": "verb", "span": "Led" }],
+  "blanks": [{ "key": "b1", "label": "", "hint": "", "example_value": "", "question": "", "from_fact": "", "fact_value": "" }] } ] }`;
+}
+
+/** 3 to 5 questions that help the student find the real details and numbers for an entry. */
+export function coachQuestionsPrompt(c: CoachContext) {
+  return `${coachHeader(c, `Ask the student 3 to 5 short questions that would let them write a strong bullet for ${c.bullet ? "the selected bullet" : "this entry"}: real numbers, scope, tools, and results they may not realize count.`)}
+
+- Ask about what they actually did; never assume results.
+- Don't ask anything the STUDENT'S FACTS already answer.
+- Each question must be answerable in rough form ("about 20", "maybe 3 hours a week") or skipped.
+- "why": one line on why it matters to a recruiter. "tip": how to estimate if they don't know exactly
+  (e.g. "Think of a typical week and multiply").
+
+Return ONLY JSON: { "questions": [ { "question": "", "why": "", "tip": "" } ] }`;
+}
+
+/**
+ * Draft bullets for the guided builder. The page builds everything else (header, education, dates,
+ * skills) from the student's answers; the model only writes bullets, keyed by experience id.
+ */
+export function builderDraftPrompt(experiences: { id: string; type: string; org: string; role: string; what: string }[], major: string) {
+  return `A college student${major ? ` studying ${major}` : ""} is writing their first resume. For each experience below, write 2 to 4
+Harvard-style resume bullets from what they wrote.
+${RULES}
+- Use ONLY what the student wrote for THAT experience: never add tools, people, employers, numbers or results they didn't
+  state. If a strong bullet needs a metric they didn't give, write a [placeholder] such as [N students] or [X%] instead.
+- Every number you keep must appear in that experience's own answer, with the same unit; any other number becomes a
+  placeholder automatically.
+- Start each bullet with a strong past-tense verb (present tense if it's ongoing). One line each.
+
+EXPERIENCES (JSON):
+${JSON.stringify(experiences.map((x) => ({ id: x.id, type: x.type, organization: x.org, role: x.role, what_they_did: x.what })), null, 1).slice(0, 14000)}
+
+Return ONLY JSON: { "bullets": { "<experience id>": ["...", "..."] } }`;
+}

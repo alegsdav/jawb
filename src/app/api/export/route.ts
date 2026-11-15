@@ -6,15 +6,17 @@ export const dynamic = "force-dynamic";
 
 /**
  * Download everything the signed-in user has as one JSON file:
- * { exported_at, resumes, jobs, legacy_bullets }. RLS scopes every query to the user.
+ * { exported_at, resumes, jobs, facts, legacy_bullets }. RLS scopes every query to the user.
  */
 export async function GET() {
   const { supabase, user } = await requireUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
-  const [resumes, jobs, bullets] = await Promise.all([
+  const [resumes, jobs, facts, bullets] = await Promise.all([
     supabase.from("resumes").select("*").order("created_at"),
     supabase.from("jobs").select("*").order("created_at"),
+    // The facts table (migration 0005) may not exist yet; then there are none to export.
+    Promise.resolve(supabase.from("facts").select("*").order("created_at")).catch(() => ({ data: null, error: null })),
     // The old bullet bank table may be gone or unreadable; it's optional.
     Promise.resolve(supabase.from("bullets").select("*").order("created_at")).catch(() => ({ data: null, error: null })),
   ]);
@@ -30,6 +32,7 @@ export async function GET() {
     exported_at: now.toISOString(),
     resumes: resumes.data ?? [],
     jobs: jobs.data ?? [],
+    facts: facts.error ? [] : (facts.data ?? []),
     legacy_bullets: bullets.error ? [] : (bullets.data ?? []),
   };
   const filename = `job-pipeline-export-${now.toISOString().slice(0, 10)}.json`;

@@ -2,6 +2,24 @@ import "server-only";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
+/** Token counts from a response's `usageMetadata` (0 when the API leaves a field out), and the model that answered. */
+export type TokenUsage = { promptTokens: number; outputTokens: number; totalTokens: number; model?: string };
+
+/** Read `usageMetadata` (promptTokenCount, candidatesTokenCount, totalTokenCount) from a Gemini response body. */
+export function readUsage(data: unknown, model = MODEL): TokenUsage {
+  const d = (data ?? {}) as { usageMetadata?: Record<string, unknown>; modelVersion?: unknown };
+  const u = d.usageMetadata ?? {};
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
+  const promptTokens = n(u.promptTokenCount);
+  const outputTokens = n(u.candidatesTokenCount);
+  return {
+    promptTokens,
+    outputTokens,
+    totalTokens: n(u.totalTokenCount) || promptTokens + outputTokens,
+    model: typeof d.modelVersion === "string" && d.modelVersion ? d.modelVersion : model,
+  };
+}
+
 export const AI_LIMIT_MESSAGE = "The AI's daily limit was reached. Try again later.";
 export const AI_DOWN_MESSAGE = "The AI service is having trouble. Try again in a minute.";
 export const AI_KEY_MESSAGE = "The Gemini API key isn't valid. Check GEMINI_API_KEY in Vercel.";
@@ -25,13 +43,17 @@ export function friendlyGeminiError(status: number, body = "", model = MODEL): s
   return `The AI request failed (error ${status}). Try again in a minute.`;
 }
 
-/** Call Gemini and parse a JSON response. Throws with a readable message on failure. */
 export type GeminiFile = { mimeType: string; data: string /* base64 */ };
 
-export async function geminiJSON<T>(
-  prompt: string,
-  opts: { temperature?: number; files?: GeminiFile[] } = {},
-): Promise<T> {
+export type GeminiOptions = {
+  temperature?: number;
+  files?: GeminiFile[];
+  /** Called with the response's token counts once it arrives (for AI usage metering, see aiBudget.ts). */
+  onUsage?: (usage: TokenUsage) => void;
+};
+
+/** Call Gemini and parse a JSON response. Throws with a readable message on failure. */
+export async function geminiJSON<T>(prompt: string, opts: GeminiOptions = {}): Promise<T> {
   const text = await geminiText(prompt, { ...opts, json: true });
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   try {
@@ -52,10 +74,7 @@ export async function geminiJSON<T>(
   }
 }
 
-export async function geminiText(
-  prompt: string,
-  opts: { temperature?: number; json?: boolean; files?: GeminiFile[] } = {},
-): Promise<string> {
+export async function geminiText(prompt: string, opts: GeminiOptions & { json?: boolean } = {}): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY is not set on the server. Add it in Vercel and redeploy.");
   const res = await fetch(
@@ -87,6 +106,7 @@ export async function geminiText(
     throw new Error(friendlyGeminiError(res.status, body));
   }
   const data = await res.json();
+  opts.onUsage?.(readUsage(data));
   const out = data?.candidates?.[0]?.content?.parts
     ?.filter((p: { thought?: boolean }) => !p.thought) // skip thinking-model thought summaries
     .map((p: { text?: string }) => p.text ?? "")

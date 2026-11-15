@@ -5,9 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  bulletTextMap, countChangedBullets, emptyResume, isEmptyResume, normalizeResume, resumeToPlainText,
+  bulletTextMap, countChangedBullets, emptyResume, isEmptyResume, normalizeResume, resumeToPlainText, uid,
 } from "@/lib/resume";
-import type { Analysis, Job, JobStatus, Resume } from "@/lib/types";
+import type { Analysis, Fact, Job, JobStatus, Resume } from "@/lib/types";
 import { friendlyError, postApi } from "@/lib/api";
 import { countPlaceholders, hasPlaceholder, plural } from "@/lib/facts";
 import { fitOf } from "@/lib/fit";
@@ -18,6 +18,8 @@ import { snapshotPatch } from "@/lib/outcomes";
 import { applyStatusChange } from "@/lib/status";
 import { isUniqueViolation, MIGRATION_HINT, OPTIONAL_JOB_COLUMNS } from "@/lib/db";
 import { sameJson, updateMaster, type MergeConflict } from "@/lib/master";
+import { factListWriter, unlinkResumeFacts } from "@/lib/factStore";
+import { useFacts } from "@/lib/useFacts";
 import {
   addAllFromMaster, addFromMaster, applyPull, cloneForJob, compareMap, dismissAdditions, ensureBaseline, planPull,
   replaceBullet, resolveRemoval, stripBaseline, type PullAddition, type PullRemoval,
@@ -27,18 +29,26 @@ import {
   planSaveAsMaster, planTailoredRefresh, readJob, rebaseJob, saveTailoredDocument, statusConflictOutcome, tailoredFromRow,
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
-import { ResumeDocument } from "@/components/ResumeDocument";
+import { ResumeDocument, type DocSelection } from "@/components/ResumeDocument";
+import { JobHeader } from "@/components/job/JobHeader";
+import { AppliedNotice } from "@/components/job/AppliedNotice";
+import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
+import { CoachPanel } from "@/components/CoachPanel";
+import { PriorityList } from "@/components/PriorityList";
+import { FactsPanel } from "@/components/FactsPanel";
+import { SideTabs } from "@/components/SideTabs";
+import { UndoToast } from "@/components/UndoToast";
+import { insertCoachedBullet, priorityItems, type CoachTarget } from "@/lib/coaching";
+import { progressFields } from "@/lib/progress";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, FitBadge } from "@/components/StatusSelect";
-import { DeadlineField } from "@/components/DeadlineField";
 import { DocToolbar, FeedbackLegend, PageCount, PlaceholderCount, Toggle, toggleLabel, UndoRedo } from "@/components/DocToolbar";
 import { Menu, MenuItem } from "@/components/Menu";
-import { SubmittedView, formatSubmitted } from "@/components/SubmittedView";
+import { SubmittedView } from "@/components/SubmittedView";
 import { PullBanner, SaveAsMasterDialog, TailoredConflictBanner } from "@/components/PullBanner";
 import { FlashToast } from "@/components/FlashToast";
-import { PlaceholderTextarea } from "@/components/PlaceholderTextarea";
 import { confirmPlaceholders, downloadResumePdf, resumeTexts } from "@/components/pdfDownload";
-import { SaveErrorToast, SaveStatus, useAutosaveWithRetry, worstStatus } from "@/lib/useAutosave";
+import { SaveErrorToast, useAutosaveWithRetry, worstStatus } from "@/lib/useAutosave";
 import { useHistory } from "@/lib/useHistory";
 
 type Tab = "resume" | "analysis" | "job" | "cover";
@@ -56,27 +66,6 @@ const TABS: [Tab, string, string][] = [
 
 /** Don't re-read the rows again when `focus` and `visibilitychange` fire together. */
 const REFRESH_GAP_MS = 1500;
-
-/** Borderless input that's as wide as its text (company name next to the location on one line). */
-function FitInput({
-  value, placeholder, onChange, className = "",
-}: { value: string; placeholder: string; onChange: (v: string) => void; className?: string }) {
-  return (
-    <span className={`inline-grid min-w-0 ${className}`}>
-      <span aria-hidden className="invisible whitespace-pre col-start-1 row-start-1 px-1 py-0.5 border border-transparent overflow-hidden">
-        {value || placeholder}
-      </span>
-      <input
-        size={1}
-        className="ghost-input col-start-1 row-start-1 w-full min-w-0"
-        value={value}
-        placeholder={placeholder}
-        aria-label={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </span>
-  );
-}
 
 export default function JobPage() {
   const { id } = useParams<{ id: string }>();
@@ -120,6 +109,16 @@ export default function JobPage() {
   const [saveMasterBusy, setSaveMasterBusy] = useState(false);
   /** After applying: the tailoring tools are folded away unless this is on ("Keep editing (for a re-apply)"). */
   const [reapply, setReapply] = useState(false);
+  /** The student's facts (migration 0005): answers are saved here; facts coached on this page follow its bullets. */
+  const facts = useFacts(supabase);
+  const mirrorRef = useRef(facts.mirror);
+  mirrorRef.current = facts.mirror;
+  /** The entry or bullet the coaching panel is about (follows the document's selection; "Back" clears it). */
+  const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
+  const [sideTab, setSideTab] = useState<"coach" | "facts">("coach");
+  /** This job's tailored copy's row id (facts coached here link to it). */
+  const [tailoredId, setTailoredId] = useState<string | null>(null);
+  const [factUndo, setFactUndo] = useState<Fact | null>(null);
 
   const autoRan = useRef(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -227,6 +226,7 @@ export default function JobPage() {
 
       const open = async (row: { id: string; content: unknown; updated_at: string }) => {
         resumeIdRef.current = row.id;
+        setTailoredId(row.id);
         const stored = tailoredFromRow(row.content);
         resumeBase.current = { content: stored, updatedAt: row.updated_at };
         let start: Resume;
@@ -343,19 +343,23 @@ export default function JobPage() {
         const base = resumeBase.current;
         const local = docLatest.current;
         if (!rid || !base || !local || conflictRef.current) return;
-        if (sameJson(local, base.content)) return;
-        const out = await saveTailoredDocument(supabase, rid, local, base);
-        if (out.kind === "conflict") {
-          setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts });
-          return;
+        if (!sameJson(local, base.content)) {
+          const out = await saveTailoredDocument(supabase, rid, local, base);
+          if (out.kind === "conflict") {
+            setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts });
+            return;
+          }
+          resumeBase.current = { content: out.content, updatedAt: out.updatedAt };
+          if (out.merged) {
+            // Edits typed while the save was in flight are merged on top (base = what was sent).
+            const cur = docLatest.current ?? local;
+            showDoc(cur === local ? out.content : mergeTailored(local, cur, out.content).merged, "set");
+            showFlash("Merged changes from another device.", 5000);
+          }
         }
-        resumeBase.current = { content: out.content, updatedAt: out.updatedAt };
-        if (out.merged) {
-          // Edits typed while the save was in flight are merged on top (base = what was sent).
-          const cur = docLatest.current ?? local;
-          showDoc(cur === local ? out.content : mergeTailored(local, cur, out.content).merged, "set");
-          showFlash("Merged changes from another device.", 5000);
-        }
+        // Same save: facts coached on this copy's bullets follow their text (standalone once a bullet is
+        // emptied or deleted). Throws on failure, so the autosave retries this step too.
+        await mirrorRef.current(rid, (resumeBase.current ?? base).content);
       }),
     [serial, supabase, setConflict, showDoc, showFlash],
   );
@@ -511,9 +515,21 @@ export default function JobPage() {
   const changedCount = useMemo(() => (resume && compareTo ? countChangedBullets(resume, compareTo) : 0), [resume, compareTo]);
   const pull = useMemo(() => planPull(resume, master), [resume, master]);
   const placeholderCount = useMemo(() => (resume ? countPlaceholders(resumeTexts(resume)) : 0), [resume]);
+  const factTexts = useMemo(() => facts.facts.map((f) => f.text), [facts.facts]);
+  const priority = useMemo(() => (resume && !quiet ? priorityItems(resume, feedback) : []), [resume, feedback, quiet]);
+
+  // Tailoring progress for the dashboard (migration 0006), saved with the job's other fields through
+  // the same conditional autosave. Not while applied (the suggestions are folded away then).
+  useEffect(() => {
+    if (!job || !resume || quiet) return;
+    const next = progressFields(analysis, pending.length);
+    if ((job.suggestions_total ?? null) === next.suggestions_total && (job.suggestions_pending ?? null) === next.suggestions_pending) return;
+    updateJob((j) => ({ ...j, ...next }));
+  }, [job, resume, quiet, analysis, pending.length, updateJob]);
   const missingFacts = useMemo(
-    () => (analysis && master ? missingAnswerFacts(analysis.questions, analysis.answers, master.facts, analysis.bullets) : []),
-    [analysis, master],
+    () =>
+      analysis && facts.status === "ready" ? missingAnswerFacts(analysis.questions, analysis.answers, factTexts, analysis.bullets) : [],
+    [analysis, factTexts, facts.status],
   );
 
   // The latest values, for async work that finishes later (an analysis takes 20-60s; drafts typed meanwhile count).
@@ -634,14 +650,14 @@ export default function JobPage() {
     setError("");
   }
 
-  /** Facts first (on the master), then the answers on this job; see saveAnswersInOrder. */
+  /** Facts first (the facts table), then the answers on this job; see saveAnswersInOrder. */
   async function saveAnswers(answers: Record<string, string>): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
     const current = latest.current.analysis;
     if (!current) return { ok: false, error: "Run the analysis first." };
     const res = await saveAnswersInOrder({
       analysis: current,
       answers,
-      writeMaster: (mutate) => updateMaster(supabase, mutate),
+      writeMaster: factListWriter(supabase, "answer", facts.replace),
       // Queued on the job autosave (retries by itself, merges with other devices); only answers change.
       persist: (next) => setAnalysis((a) => ({ ...a, answers: next.answers })),
     });
@@ -649,12 +665,31 @@ export default function JobPage() {
       console.warn("Saving answers failed at", res.stage, res.error);
       return {
         ok: false,
-        error: friendlyError(res.error, "Couldn't add them to your master resume's facts. Check your connection, then tap Retry."),
+        error: friendlyError(res.error, "Couldn't save them to your facts. Check your connection, then tap Retry."),
       };
     }
-    setMaster(res.master);
     setError("");
     return { ok: true, added: res.added };
+  }
+
+  /** The document's selection drives the coaching panel (a section alone doesn't). */
+  const onSelection = useCallback((sel: DocSelection | null) => {
+    if (!sel || sel.kind === "section") return;
+    setCoachTarget((cur) => {
+      const next = { sectionId: sel.sectionId, entryId: sel.entryId, bulletId: sel.kind === "bullet" ? sel.bulletId : null };
+      return cur && cur.entryId === next.entryId && cur.bulletId === next.bulletId ? cur : next;
+    });
+    setSideTab("coach");
+  }, []);
+
+  /** Put a coached bullet on this tailored copy (an undo step); returns its id. */
+  function insertBullet(target: CoachTarget, text: string, mode: "add" | "replace"): string | null {
+    const cur = docLatest.current;
+    if (!cur || !cur.sections.some((sec) => sec.items.some((it) => it.id === target.entryId))) return null;
+    const { resume: next, bulletId } = insertCoachedBullet(cur, target, text, mode, uid());
+    doc.set(next, true);
+    setReveal({ id: bulletId, n: Date.now() });
+    return bulletId;
   }
 
   async function downloadPdf() {
@@ -828,6 +863,8 @@ export default function JobPage() {
 
   async function deleteJob() {
     if (!confirm("Delete this job and its tailored copy?")) return;
+    // Facts coached on this job's bullets stay, as standalone facts (the database does this too).
+    if (resumeIdRef.current) await unlinkResumeFacts(supabase, resumeIdRef.current);
     const { error } = await supabase.from("jobs").delete().eq("id", id);
     if (error) return fail(error, "Couldn't delete this job. Try again.");
     router.push("/");
@@ -845,7 +882,6 @@ export default function JobPage() {
     );
   }
   if (!job) return <p className="text-muted">Loading…</p>;
-  const coverPlaceholders = countPlaceholders([job.cover_letter]);
   const showHighlights = showFeedback && !quiet;
 
   const panel = (
@@ -865,7 +901,69 @@ export default function JobPage() {
       canFill={(q) => fillTarget(q) !== null}
       onFill={fillAnswer}
       quiet={quiet}
+      top={
+        priority.length || analysis?.keywords.missing.length ? (
+          <PriorityList
+            items={priority}
+            missingKeywords={analysis?.keywords.missing ?? []}
+            onAccept={(bid, rewrite) => {
+              if (!resume) return;
+              doc.set(replaceBullet(resume, bid, rewrite), true);
+              showFlash("Accepted the suggested edit (Undo to go back)");
+            }}
+            onReject={rejectSuggestion}
+            onShow={(bid) => {
+              selectTab("resume");
+              setReveal({ id: bid, n: Date.now() });
+            }}
+            onAcceptAll={acceptAll}
+          />
+        ) : null
+      }
     />
+  );
+
+  const coach =
+    coachTarget && resume ? (
+      <CoachPanel
+        key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}`}
+        resume={resume}
+        resumeId={tailoredId}
+        jobId={id}
+        target={coachTarget}
+        facts={facts}
+        onBack={() => setCoachTarget(null)}
+        onInsert={insertBullet}
+        disabledReason={quiet ? "You've applied with this copy. Turn on “Keep editing (for a re-apply)” to coach it again." : undefined}
+      />
+    ) : null;
+
+  const side = (
+    <div className="space-y-3">
+      <SideTabs
+        label="Panel"
+        value={sideTab}
+        onChange={setSideTab}
+        tabs={[
+          { key: "coach", label: "Coach" },
+          { key: "facts", label: `Facts (${facts.facts.length})` },
+        ]}
+      />
+      {sideTab === "facts" ? (
+        <FactsPanel
+          facts={facts.facts}
+          status={facts.status}
+          error={facts.error}
+          onAdd={(lines) => facts.add(lines.map((text) => ({ text, source: "manual" })))}
+          onEdit={facts.edit}
+          onDelete={async (f) => {
+            if (await facts.remove([f.id])) setFactUndo(f);
+          }}
+        />
+      ) : (
+        (coach ?? panel)
+      )}
+    </div>
   );
 
   const followUp = (
@@ -883,102 +981,33 @@ export default function JobPage() {
 
   return (
     <div className="space-y-2 sm:space-y-3">
-      {/* Job header */}
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-        <div className="w-full lg:flex-1 lg:min-w-64">
-          <input
-            className="ghost-input w-full text-lg sm:text-xl font-semibold"
-            value={job.title}
-            placeholder="Job title"
-            aria-label="Job title"
-            onChange={(e) => patch({ title: e.target.value })}
-          />
-          <div className="flex items-center gap-0.5 text-base sm:text-sm text-muted min-w-0">
-            <FitInput className="max-w-[55%] shrink-0" value={job.company} placeholder="Company" onChange={(v) => patch({ company: v })} />
-            <span aria-hidden>·</span>
-            <FitInput className="flex-1 sm:flex-none" value={job.location} placeholder="Location" onChange={(v) => patch({ location: v })} />
-            {job.url && (
-              // Not "Posting": that's also the name of a tab.
-              <a href={job.url} target="_blank" rel="noreferrer" className="shrink-0 px-1 py-0.5 text-sm underline hover:text-fg">
-                Open posting ↗
-              </a>
-            )}
-          </div>
-        </div>
-        <div className="flex w-full lg:w-auto flex-wrap items-center gap-x-3 gap-y-2">
-          {!applied && statusSelect}
-          <button
-            type="button"
-            className="sm:hidden btn btn-sm min-h-10"
-            aria-expanded={detailsOpen}
-            aria-controls="job-details"
-            onClick={() => setDetailsOpen((o) => !o)}
-          >
-            Details {detailsOpen ? "▴" : "▾"}
-          </button>
-          <span className="ml-auto lg:ml-0">
-            <SaveStatus status={saveState} />
-          </span>
-          {/* Phones: inside the "Details" disclosure. Desktop: inline. */}
-          <div
-            id="job-details"
-            className={`${detailsOpen ? "flex" : "hidden"} sm:flex w-full sm:w-auto flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface p-2 sm:border-0 sm:bg-transparent sm:p-0`}
-          >
-            {!applied && followUp}
-            <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => patch({ deadline: v })} />
-            <button type="button" className="text-xs text-muted hover:text-bad py-1 min-h-10 sm:min-h-0 ml-auto sm:ml-0" onClick={deleteJob}>
-              Delete job
-            </button>
-          </div>
-        </div>
-      </div>
+      <JobHeader
+        job={job}
+        applied={applied}
+        statusSelect={statusSelect}
+        followUp={followUp}
+        saveState={saveState}
+        detailsOpen={detailsOpen}
+        onToggleDetails={() => setDetailsOpen((o) => !o)}
+        onPatch={patch}
+        onDelete={deleteJob}
+      />
 
-      {applied && job.submitted_at ? (
-        <section
-          aria-label="Application sent"
-          className="rounded-lg border border-good/40 bg-good-bg px-3 py-2.5 text-sm space-y-2"
-        >
-          <p>
-            <span className="text-good" aria-hidden>✓ </span>
-            <strong>You applied on {formatSubmitted(job.submitted_at)}.</strong> Edits here don&apos;t change what you sent.
-          </p>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            {job.submitted_resume && (
-              <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" onClick={() => setViewingSubmitted(true)}>
-                View what you sent
-              </button>
-            )}
-            {followUp}
-            <label className="text-xs text-muted flex items-center gap-1.5">
-              Status {statusSelect}
-            </label>
-            <span className="sm:ml-auto">
-              <Toggle on={reapply} onChange={setReapply} label="Keep editing (for a re-apply)" />
-            </span>
-          </div>
-        </section>
-      ) : (
-        job.submitted_at && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-sm sm:rounded-lg sm:border sm:border-border sm:bg-surface sm:px-3 sm:py-1.5">
-            <span>
-              <span className="text-good">✓</span> Applied {formatSubmitted(job.submitted_at)}
-            </span>
-            {job.submitted_resume && (
-              <>
-                <span className="text-muted" aria-hidden>·</span>
-                <button type="button" className="text-accent underline underline-offset-2 sm:py-1" onClick={() => setViewingSubmitted(true)}>
-                  View what you sent
-                </button>
-              </>
-            )}
-          </div>
-        )
-      )}
+      <AppliedNotice
+        job={job}
+        applied={applied}
+        followUp={followUp}
+        statusSelect={statusSelect}
+        reapply={reapply}
+        onReapply={setReapply}
+        onViewSubmitted={() => setViewingSubmitted(true)}
+      />
 
       {migrationHint && (
         <div role="status" className="flex items-start gap-2 rounded-lg border border-ok/40 bg-ok-bg px-3 py-2 text-sm">
           <span className="flex-1">
-            {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking) aren&apos;t saved.
+            {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking, progress on the
+            dashboard) aren&apos;t saved.
           </span>
           <button type="button" className="text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setMigrationHint(false)}>✕</button>
         </div>
@@ -1115,84 +1144,31 @@ export default function JobPage() {
                   actionsSlot={slot}
                   reveal={reveal}
                   quiet={quiet}
+                  onSelectionChange={onSelection}
                 />
               </>
             )}
           </div>
 
-          {tab === "job" && (
-            <div className="card p-4 space-y-3">
-              <input
-                className="input w-full text-sm"
-                value={job.url}
-                placeholder="Posting URL"
-                aria-label="Posting URL"
-                onChange={(e) => patch({ url: e.target.value })}
-              />
-              <textarea
-                className="input w-full min-h-[60vh] text-sm leading-relaxed"
-                value={job.description}
-                aria-label="Job description"
-                placeholder="Paste the job description here."
-                onChange={(e) => patch({ description: e.target.value })}
-              />
-              <textarea
-                className="input w-full h-24 text-sm"
-                value={job.notes}
-                placeholder="Notes: referral, recruiter name…"
-                aria-label="Notes"
-                onChange={(e) => patch({ notes: e.target.value })}
-              />
-            </div>
-          )}
+          {tab === "job" && <PostingTab job={job} onPatch={patch} />}
           {tab === "cover" && (
-            <div className="card p-4 space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm text-muted flex-1 min-w-48">
-                  {quiet ? "The letter as you last saved it here." : "Only send one if the application asks. Replace every [placeholder] first."}
-                </p>
-                {coverPlaceholders > 0 && !quiet && (
-                  <span className="chip border-[#e0b100] bg-[#fff6d6] text-[#5c4300]">
-                    {plural(coverPlaceholders, "placeholder")} left
-                  </span>
-                )}
-                {job.cover_letter && (
-                  <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={copyCoverLetter}>
-                    Copy as text
-                  </button>
-                )}
-                {!quiet && (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-primary min-h-10 sm:min-h-0"
-                    onClick={writeCoverLetter}
-                    disabled={writing || !resume}
-                  >
-                    {writing ? "Writing…" : job.cover_letter ? "Regenerate" : "Draft cover letter"}
-                  </button>
-                )}
-              </div>
-              {coverError && !writing && !quiet && (
-                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-bad/40 bg-bad-bg px-3 py-2 text-sm">
-                  <span className="flex-1 min-w-48 text-bad">{coverError}</span>
-                  <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={writeCoverLetter}>Retry</button>
-                </div>
-              )}
-              <PlaceholderTextarea
-                boxClassName="input w-full min-h-[50vh] text-sm leading-relaxed"
-                value={job.cover_letter}
-                placeholder="Draft a cover letter, or write your own here."
-                aria-label="Cover letter"
-                onChange={(e) => patch({ cover_letter: e.target.value })}
-              />
-            </div>
+            <CoverLetterTab
+              job={job}
+              quiet={quiet}
+              writing={writing}
+              error={coverError}
+              canWrite={!!resume}
+              onWrite={writeCoverLetter}
+              onCopy={copyCoverLetter}
+              onPatch={patch}
+            />
           )}
         </div>
 
         <aside
-          className={`${tab === "analysis" ? "" : "hidden"} lg:block lg:sticky lg:top-[4.5rem] lg:self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto`}
+          className={`${tab === "analysis" ? "" : "hidden"} lg:block lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto`}
         >
-          {panel}
+          {side}
         </aside>
       </div>
 
@@ -1219,6 +1195,16 @@ export default function JobPage() {
         <TailoredConflictBanner conflicts={conflict.conflicts} busy={resolving} onReload={reloadTheirs} onKeepMine={keepMine} />
       )}
 
+      {factUndo && (
+        <UndoToast
+          message="Fact deleted"
+          onUndo={() => {
+            void facts.restore([factUndo]);
+            setFactUndo(null);
+          }}
+          onClose={() => setFactUndo(null)}
+        />
+      )}
       <FlashToast
         message={flash.message}
         action={flash.action}

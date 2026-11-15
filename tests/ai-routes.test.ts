@@ -4,11 +4,16 @@ import type { Resume } from "@/lib/types";
 const h = vi.hoisted(() => ({
   updateError: null as null | { message: string },
   updates: [] as { table: string; values: Record<string, unknown>; ifUpdatedAt: unknown; matched: boolean }[],
-  gemini: { json: null as unknown, text: "" },
+  gemini: { json: null as unknown, text: "", prompt: "" },
+  /** Rows of the facts table (migration 0005). */
+  facts: [] as Record<string, unknown>[],
   /** The job row; updates only land when `updated_at` still matches (like the real conditional write). */
   job: {} as Record<string, unknown>,
   /** Runs before the next update lands (another device writing while the AI ran). */
   before: null as null | (() => void),
+  /** AI usage reservations (migration 0004): null = the student is at their limit. */
+  reservation: "res1" as string | null,
+  rpcs: [] as { name: string; args: Record<string, unknown> }[],
 }));
 let clock = 1;
 const freshJob = () => ({
@@ -30,6 +35,10 @@ const tailored: Resume = {
 /** Fake Supabase: one job, its tailored copy and a master with one fact; updates can be made to fail. */
 function fakeSupabase() {
   return {
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      h.rpcs.push({ name, args });
+      return { data: name === "reserve_ai_call" ? h.reservation : null, error: null };
+    },
     from(table: string) {
       const filters: Record<string, unknown> = {};
       let values: Record<string, unknown> | null = null;
@@ -39,6 +48,9 @@ function fakeSupabase() {
         eq: (k: string, v: unknown) => ((filters[k] = v), b),
         maybeSingle: () => b,
         single: () => b,
+        in: () => b,
+        gt: () => b,
+        order: () => b,
         then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => {
           let out: unknown;
           if (values) {
@@ -49,6 +61,10 @@ function fakeSupabase() {
             h.updates.push({ table, values, ifUpdatedAt: filters.updated_at, matched });
             if (matched) Object.assign(h.job, values, { updated_at: `t${++clock}` });
             out = { data: h.updateError ? null : matched ? [{ updated_at: h.job.updated_at }] : [], error: h.updateError };
+          } else if (table === "ai_usage") {
+            out = { data: [], error: null };
+          } else if (table === "facts") {
+            out = { data: h.facts, error: null };
           } else if (table === "jobs") {
             out = { data: { ...h.job }, error: null };
           } else if (filters.is_master) {
@@ -68,9 +84,14 @@ vi.mock("@/lib/supabase/server", () => ({
   requireUser: async () => ({ supabase: fakeSupabase(), user: { id: "u", email: "a@b.c" } }),
 }));
 vi.mock("@/lib/gemini", () => ({
-  geminiJSON: async () => h.gemini.json,
-  geminiText: async () => h.gemini.text,
+  geminiJSON: async (prompt: string) => ((h.gemini.prompt = prompt), h.gemini.json),
+  geminiText: async (prompt: string) => ((h.gemini.prompt = prompt), h.gemini.text),
 }));
+
+const fact = (text: string, over: Record<string, unknown> = {}) => ({
+  id: `f-${text}`, text, source: "legacy", active: true, resume_id: null, bullet_id: null, entry_id: null,
+  created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", ...over,
+});
 
 import { POST as analyze } from "@/app/api/analyze/route";
 import { POST as coverLetter } from "@/app/api/cover-letter/route";
@@ -82,6 +103,9 @@ beforeEach(() => {
   h.updates = [];
   h.job = freshJob();
   h.before = null;
+  h.reservation = "res1";
+  h.rpcs = [];
+  h.facts = [fact("Saved $1,200 a month (re: savings?)")];
 });
 
 describe("POST /api/analyze", () => {
@@ -176,5 +200,68 @@ describe("POST /api/cover-letter", () => {
     expect(body.saved).toBe(false);
     expect(body.cover_letter).toBe("Dear [Hiring Manager],\n\nThanks.");
     expect(h.job.cover_letter).toBe("edited on the phone");
+  });
+});
+
+describe("AI usage limits on these routes", () => {
+  it("a first analysis is metered as 'analyze', a later one as 'reanalyze'; both are recorded ok", async () => {
+    h.gemini.json = { fit: "possible", verdict: "", bullets: [], questions: [] };
+    await analyze(req({ jobId: "j1" }));
+    await analyze(req({ jobId: "j1" }));
+    const reserves = h.rpcs.filter((r) => r.name === "reserve_ai_call").map((r) => [r.args.p_action, r.args.p_weight]);
+    expect(reserves).toEqual([["analyze", "heavy"], ["reanalyze", "heavy"]]);
+    expect(h.rpcs.filter((r) => r.name === "finish_ai_call").map((r) => r.args.p_status)).toEqual(["ok", "ok"]);
+  });
+
+  it("over the limit: 429 with a plain message, the AI isn't called and nothing is saved", async () => {
+    h.reservation = null;
+    h.gemini.json = { fit: "strong", verdict: "should not appear", bullets: [], questions: [] };
+    const res = await analyze(req({ jobId: "j1" }));
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toMatch(/^You've used all 10 of your analyses/);
+    expect(body.limit).toBe("heavy");
+    expect(h.updates).toHaveLength(0);
+    const letter = await coverLetter(req({ jobId: "j1" }));
+    expect(letter.status).toBe(429);
+    expect((await letter.json()).error).toMatch(/quick AI actions per hour/);
+  });
+});
+
+describe("facts from the facts table", () => {
+  it("only active facts reach the prompt, minus any that read exactly like a bullet on this resume", async () => {
+    h.facts = [
+      fact("Saved $1,200 a month (re: savings?)"),
+      fact("Grew sign-ups by [X%]", { active: false }),
+      fact("built a tool for 300 students", { source: "resume" }),
+      fact("Fluent in Spanish", { source: "manual" }),
+    ];
+    h.gemini.json = { fit: "possible", verdict: "", bullets: [], questions: [] };
+    await analyze(req({ jobId: "j1" }));
+    const factsBlock = h.gemini.prompt.split("CANDIDATE FACTS")[1].split("CANDIDATE'S ANSWERS")[0];
+    expect(factsBlock).toContain("- Saved $1,200 a month");
+    expect(factsBlock).toContain("- Fluent in Spanish");
+    expect(factsBlock).not.toContain("Grew sign-ups");
+    expect(factsBlock).not.toContain("300 students");
+  });
+
+  it("a fact linked to one bullet lends its numbers to that bullet only, not to the others", async () => {
+    h.facts = [fact("Built a tool for 300 students used by 45 TAs", { source: "coaching", resume_id: "r", bullet_id: "b1" })];
+    h.gemini.json = {
+      fit: "possible",
+      verdict: "",
+      bullets: [{ bullet_id: "b1", rating: "weak", note: "", rewrite: "Built a tool for 300 students and 45 TAs" }],
+      questions: [],
+    };
+    const body = await (await analyze(req({ jobId: "j1" }))).json();
+    // "45" is only in a fact linked to b1, which isn't b1's own text: it isn't a shared source.
+    expect(body.analysis.bullets[0].rewrite).toBe("Built a tool for 300 students and [N] TAs");
+  });
+
+  it("the cover letter uses active facts as candidate numbers", async () => {
+    h.facts = [fact("Mentored 12 first-years"), fact("Raised [$X] for the club", { active: false })];
+    h.gemini.text = "Dear [Hiring Manager],\n\nI mentored 12 first-years and raised $900.";
+    const body = await (await coverLetter(req({ jobId: "j1" }))).json();
+    expect(body.cover_letter).toBe("Dear [Hiring Manager],\n\nI mentored 12 first-years and raised [$X].");
   });
 });

@@ -4,6 +4,7 @@ import { geminiJSON } from "@/lib/gemini";
 import { parseResumePrompt } from "@/lib/prompts";
 import { normalizeResume } from "@/lib/resume";
 import { friendlyError } from "@/lib/api";
+import { budgetErrorResponse, withAiBudget } from "@/lib/aiBudget";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
 export const maxDuration = 120;
@@ -12,7 +13,7 @@ const MAX_PDF_BYTES = 4 * 1024 * 1024; // Vercel caps request bodies at ~4.5 MB
 
 /** Accepts JSON {text} or multipart form-data with a "file" (PDF or .txt). Returns {resume}. */
 export async function POST(req: Request) {
-  const { user } = await requireUser();
+  const { supabase, user } = await requireUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
   let text: string | null = null;
@@ -38,16 +39,21 @@ export async function POST(req: Request) {
   }
 
   try {
-    const parsed = await geminiJSON<unknown>(parseResumePrompt(pdf ? null : text), {
-      temperature: 0,
-      files: pdf ? [{ mimeType: "application/pdf", data: pdf }] : undefined,
-    });
+    const parsed = await withAiBudget(supabase, { action: "parse_resume" }, (meter) =>
+      geminiJSON<unknown>(parseResumePrompt(pdf ? null : text), {
+        temperature: 0,
+        files: pdf ? [{ mimeType: "application/pdf", data: pdf }] : undefined,
+        onUsage: meter.add,
+      }),
+    );
     const resume = normalizeResume({ ...(parsed as object), version: 2 }); // prompt already uses the v2 layout
     if (!resume.sections.length) {
       return NextResponse.json({ error: "Couldn't find any resume sections in that file." }, { status: 422 });
     }
     return NextResponse.json({ resume });
   } catch (e) {
+    const limited = budgetErrorResponse(e);
+    if (limited) return limited;
     console.error("parse-resume failed:", e);
     return NextResponse.json({ error: friendlyError(e, "Couldn't read that resume. Try again, or paste the text instead.") }, { status: 502 });
   }

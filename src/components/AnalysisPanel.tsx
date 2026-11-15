@@ -23,11 +23,11 @@ type Props = {
   drafts: Record<string, string>;
   onDraftsChange: (drafts: Record<string, string>) => void;
   /**
-   * Write the answers' facts to the master resume, then store the answers on the analysis.
+   * Write the answers' facts to the facts table, then store the answers on the analysis.
    * `error` is a plain-language sentence. Never rejects.
    */
   onSaveAnswers: (answers: Record<string, string>) => Promise<{ ok: true; added: number } | { ok: false; error: string }>;
-  /** Ids of answered questions whose fact isn't on the master resume yet (e.g. an earlier save failed there). */
+  /** Ids of answered questions whose fact isn't saved yet (e.g. an earlier save failed there). */
   missingFacts: string[];
   /** Suggested edits still waiting (stale ones excluded). */
   pendingCount: number;
@@ -42,6 +42,12 @@ type Props = {
    * questions, suggested edits or re-analyze), since edits no longer change what was sent.
    */
   quiet?: boolean;
+  /**
+   * Shown at the top in place of the "N suggested edits" box: the job tab's priority list (rewrites
+   * to review first, then missing keywords). Everything below (verdict, questions, gaps, strengths)
+   * stays as it is.
+   */
+  top?: React.ReactNode;
 };
 
 const SEVERITY: Record<string, string> = { high: "text-bad", medium: "text-ok", low: "text-muted" };
@@ -99,7 +105,7 @@ export function AnalysisPanel(p: Props) {
       return;
     }
     setSaveError("");
-    setSavedNote(res.added ? "Saved to your master resume's facts. Re-analyze to use them." : "Saved.");
+    setSavedNote(res.added ? "Saved to your facts. Re-analyze to use them." : "Saved.");
     noteTimer.current = setTimeout(() => setSavedNote(""), 6000);
   }
 
@@ -150,8 +156,8 @@ export function AnalysisPanel(p: Props) {
   const missingBox = missing > 0 && !dirty && !saveError && !saving && (
     <div role="status" className="card border-ok/40 bg-ok-bg p-3 text-sm space-y-2">
       <p>
-        {missing === 1 ? "1 answer isn't" : `${missing} answers aren't`} in your master resume&apos;s facts yet, so other jobs
-        can&apos;t use {missing === 1 ? "it" : "them"}.
+        {missing === 1 ? "1 answer isn't" : `${missing} answers aren't`} in your facts yet, so other jobs can&apos;t use{" "}
+        {missing === 1 ? "it" : "them"}.
       </p>
       <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={save}>
         Save answers
@@ -198,7 +204,8 @@ export function AnalysisPanel(p: Props) {
           )
         )}
         {a && <p className="text-sm">{a.verdict}</p>}
-        {a && !p.quiet && p.pendingCount > 0 && (
+        {a && !p.quiet && p.top}
+        {a && !p.quiet && !p.top && p.pendingCount > 0 && (
           <div className="rounded-lg bg-accent/5 border border-accent/30 p-3 space-y-2">
             <p className="text-sm">
               <strong>{p.pendingCount} suggested edit{p.pendingCount > 1 ? "s" : ""}</strong> to tailor your resume for this job.
@@ -223,7 +230,7 @@ export function AnalysisPanel(p: Props) {
             <div className="card p-4 space-y-3 border-accent">
               <h3 className="label text-accent">Questions for you</h3>
               {unanswered.map(field)}
-              <p className="text-xs text-muted">Answers are added to your master resume&apos;s facts, so other jobs can use them too.</p>
+              <p className="text-xs text-muted">Answers are saved to your facts, so other jobs can use them too.</p>
               {saveRow}
             </div>
           )}
@@ -240,7 +247,7 @@ export function AnalysisPanel(p: Props) {
               <summary className="label cursor-pointer">Your answers ({answered.length}) · edit</summary>
               <div className="mt-3 space-y-3">
                 {answered.map(field)}
-                <p className="text-xs text-muted">Editing an answer replaces its fact on your master resume.</p>
+                <p className="text-xs text-muted">Editing an answer replaces its fact.</p>
                 {saveRow}
               </div>
             </details>

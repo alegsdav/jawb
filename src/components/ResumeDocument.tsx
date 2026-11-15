@@ -34,7 +34,18 @@ type Props = {
    * card). Suggestions are hidden by passing no `feedback`.
    */
   quiet?: boolean;
+  /**
+   * Called whenever the selection changes (a section, an entry or a bullet; null when nothing is
+   * selected, e.g. after a tap outside the document). The coaching panel follows it.
+   */
+  onSelectionChange?: (selection: DocSelection | null) => void;
 };
+
+/** What's selected in the document, by id. */
+export type DocSelection =
+  | { kind: "section"; sectionId: string }
+  | { kind: "entry"; sectionId: string; entryId: string }
+  | { kind: "bullet"; sectionId: string; entryId: string; bulletId: string };
 
 /** What's selected, by id (indexes go stale after a move). */
 type Active =
@@ -169,9 +180,22 @@ function locateBullet(r: Resume, bid: string): { sid: string; iid: string } | nu
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
-  reveal, quiet = false,
+  reveal, quiet = false, onSelectionChange,
 }: Props) {
   const [active, setActive] = useState<Active>(null);
+  const selectionCb = useRef(onSelectionChange);
+  selectionCb.current = onSelectionChange;
+  const activeKey = active ? `${active.kind}:${active.sid}:${"iid" in active ? active.iid : ""}:${active.kind === "bullet" ? active.bid : ""}` : "";
+  // Report selection changes (by value, so re-renders with the same selection don't fire).
+  useEffect(() => {
+    const cb = selectionCb.current;
+    if (!cb) return;
+    if (!active) return cb(null);
+    if (active.kind === "section") return cb({ kind: "section", sectionId: active.sid });
+    if (active.kind === "item") return cb({ kind: "entry", sectionId: active.sid, entryId: active.iid });
+    cb({ kind: "bullet", sectionId: active.sid, entryId: active.iid, bulletId: active.bid });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey]);
   const focusNext = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);

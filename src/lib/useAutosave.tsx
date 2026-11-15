@@ -121,7 +121,7 @@ export function SaveErrorToast({ status, onRetry }: { status: string; onRetry?: 
   return (
     <div
       role="alert"
-      className="fixed z-40 inset-x-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:inset-x-auto sm:right-4 sm:bottom-4 sm:max-w-sm flex items-center gap-3 rounded-xl border border-bad/40 bg-surface px-4 py-3 text-sm shadow-lg"
+      className="fixed z-40 inset-x-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:inset-x-auto sm:right-4 lg:bottom-4 sm:max-w-sm flex items-center gap-3 rounded-xl border border-bad/40 bg-surface px-4 py-3 text-sm shadow-lg"
     >
       <span className="flex-1 min-w-0">
         <strong className="text-bad">Not saved</strong>

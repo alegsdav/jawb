@@ -11,7 +11,7 @@ export function DocToolbar({
   onSlot?: (el: HTMLDivElement | null) => void;
 }) {
   return (
-    <div className="doc-toolbar sm:sticky sm:top-14 z-10 -mx-3 sm:mx-0 px-3 sm:px-2 py-2 bg-bg/95 sm:backdrop-blur border-b border-border sm:border sm:rounded-xl flex flex-wrap items-center gap-1.5">
+    <div className="doc-toolbar sm:sticky sm:top-14 lg:top-0 z-10 -mx-3 sm:mx-0 px-3 sm:px-2 py-2 bg-bg/95 sm:backdrop-blur border-b border-border sm:border sm:rounded-xl flex flex-wrap items-center gap-1.5">
       {children}
       {/* Always takes the same height, so selecting something never shifts the page under the pointer. */}
       {onSlot && (

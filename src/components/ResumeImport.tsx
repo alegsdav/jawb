@@ -5,11 +5,13 @@ import type { Resume } from "@/lib/types";
 import { postApi } from "@/lib/api";
 
 export function ResumeImport({
-  onImported, onCancel, replaceWarning,
+  onImported, onCancel, replaceWarning, mode = "both",
 }: {
   onImported: (r: Resume) => void;
   onCancel?: () => void;
   replaceWarning: boolean;
+  /** "file": only the PDF drop zone; "text": only the paste box (onboarding shows them as separate cards). */
+  mode?: "both" | "file" | "text";
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,6 +44,7 @@ export function ResumeImport({
           <span className="text-muted">Your facts are kept.</span>
         </p>
       )}
+      {mode !== "text" && (
       <label
         onDragOver={(e) => {
           e.preventDefault();
@@ -72,21 +75,29 @@ export function ResumeImport({
           }}
         />
       </label>
-      <div className="flex items-center gap-2 text-xs text-muted">
-        <span className="h-px flex-1 bg-border" />or paste text<span className="h-px flex-1 bg-border" />
-      </div>
-      <textarea
-        className="input w-full h-36 font-mono text-xs"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Paste resume text…"
-      />
+      )}
+      {mode === "both" && (
+        <div className="flex items-center gap-2 text-xs text-muted">
+          <span className="h-px flex-1 bg-border" />or paste text<span className="h-px flex-1 bg-border" />
+        </div>
+      )}
+      {mode !== "file" && (
+        <textarea
+          className="input w-full h-36 font-mono text-xs"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Paste resume text…"
+          aria-label="Resume text"
+        />
+      )}
       <div className="flex flex-wrap items-center gap-2">
-        <button className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => run()}>
-          {busy ? "Parsing…" : "Import text"}
-        </button>
+        {mode !== "file" && (
+          <button className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => run()}>
+            {busy ? "Parsing…" : "Import text"}
+          </button>
+        )}
         {onCancel && <button className="btn btn-sm" onClick={onCancel}>Cancel</button>}
-        {error && <p className="text-sm text-bad">{error}</p>}
+        {error && <p role="alert" className="text-sm text-bad">{error}</p>}
       </div>
     </div>
   );
