@@ -10,12 +10,12 @@ function FitInput({
   value, placeholder, onChange, className = "",
 }: { value: string; placeholder: string; onChange: (v: string) => void; className?: string }) {
   return (
-    <span className={`relative inline-grid min-w-0 ${className}`}>
-      <span aria-hidden className="invisible min-w-0 max-w-full overflow-hidden whitespace-pre border border-transparent px-1 py-0.5">
+    <span className={`relative inline-grid shrink-0 ${className}`}>
+      <span aria-hidden className="invisible max-w-full overflow-hidden whitespace-pre border border-transparent px-1 py-0.5">
         {value || placeholder}
       </span>
       <input
-        className="ghost-input absolute inset-0 w-full min-w-0"
+        className="ghost-input absolute inset-0 w-full min-w-0 font-[inherit] text-[length:inherit] leading-[inherit]"
         value={value}
         placeholder={placeholder}
         aria-label={placeholder}
