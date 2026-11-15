@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Poppins } from "next/font/google";
 import "./globals.css";
 
-const ui = Plus_Jakarta_Sans({ variable: "--font-ui", subsets: ["latin"] });
+const ui = Poppins({ variable: "--font-ui", subsets: ["latin"], weight: ["400", "500", "600"] });
 
 export const metadata: Metadata = {
   title: "Job Pipeline",

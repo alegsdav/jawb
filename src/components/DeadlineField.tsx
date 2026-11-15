@@ -54,7 +54,7 @@ export function DeadlineField({
       </label>
       {urgency && value && (
         <span
-          className={`chip border-0 whitespace-nowrap font-semibold ${urgency === "overdue" ? "text-bad bg-bad-bg" : "text-ok bg-ok-bg"}`}
+          className={`whitespace-nowrap text-xs font-medium ${urgency === "overdue" ? "text-bad" : "text-ok"}`}
         >
           {flagText(value, today)}
         </span>

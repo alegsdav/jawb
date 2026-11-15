@@ -5,22 +5,13 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { signOut } from "@/app/login/actions";
-import { FIT_LABEL } from "@/lib/fit";
 import { STATUSES, type JobStatus } from "@/lib/types";
 import { NAV_JOB_COLS, navJob, recentJobs, searchJobs, type NavJob } from "@/lib/jobNav";
 import { UsageMeter } from "./UsageMeter";
 import { DocIcon, HomeIcon, Logo, LogoutIcon, PlusIcon, SearchIcon, UserIcon } from "./icons";
+import { STATUS_DOT } from "./StatusSelect";
 
-const DOT: Record<JobStatus, string> = {
-  to_apply: "bg-border ring-1 ring-muted/40",
-  applied: "bg-accent",
-  interview: "bg-good",
-  offer: "bg-good ring-2 ring-good/30",
-  rejected: "bg-bad",
-  skipped: "bg-muted/50",
-};
 const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label])) as Record<JobStatus, string>;
-const FIT_TEXT = { strong: "text-good", possible: "text-ok", stretch: "text-muted" } as const;
 
 function JobRow({ j, active }: { j: NavJob; active: boolean }) {
   return (
@@ -28,9 +19,9 @@ function JobRow({ j, active }: { j: NavJob; active: boolean }) {
       <Link
         href={`/jobs/${j.id}`}
         aria-current={active ? "page" : undefined}
-        className={`flex items-start gap-2.5 rounded-xl px-2.5 py-2 text-sm transition-colors ${active ? "bg-accent-soft text-fg" : "hover:bg-surface-2"}`}
+        className={`flex items-start gap-2.5 rounded-xl px-2.5 py-2 text-sm ${active ? "bg-surface-2" : "hover:bg-surface-2"}`}
       >
-        <span aria-hidden className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[j.status]}`} />
+        <span aria-hidden className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_DOT[j.status] }} />
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium">{j.title || "Untitled role"}</span>
           <span className="block truncate text-xs text-muted">
@@ -38,7 +29,7 @@ function JobRow({ j, active }: { j: NavJob; active: boolean }) {
             <span className="sr-only">, {STATUS_LABEL[j.status]}</span>
           </span>
         </span>
-        {j.fit && <span className={`shrink-0 text-[11px] ${FIT_TEXT[j.fit]}`}>{FIT_LABEL[j.fit]}</span>}
+        
       </Link>
     </li>
   );
@@ -77,9 +68,7 @@ export function Sidebar() {
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
-      className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
-        active ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-surface-2 hover:text-fg"
-      }`}
+      className={`flex items-center gap-3.5 rounded-xl px-3 py-2.5 text-sm ${active ? "font-semibold text-fg" : "text-muted hover:text-fg"}`}
     >
       {icon}
       {label}
@@ -87,16 +76,19 @@ export function Sidebar() {
   );
 
   return (
-    <nav aria-label="Workspace" className="flex h-full flex-col gap-4 overflow-hidden px-3 py-4">
-      <Link href="/" className="flex items-center gap-2.5 px-2 font-semibold tracking-tight">
+    <nav aria-label="Workspace" className="flex h-dvh flex-col gap-6 overflow-hidden px-4 py-7">
+      <Link href="/" className="flex items-center gap-2.5 px-3 text-lg font-semibold tracking-tight">
         <Logo />
-        <span className="text-[15px]">Job Pipeline</span>
+        Job Pipeline
       </Link>
-      <div className="space-y-0.5">
+      <div className="space-y-1">
         {link("/", "Dashboard", path === "/", <HomeIcon />)}
         {link("/resume", "Master resume", path.startsWith("/resume"), <DocIcon />)}
+        <Link href="/#add-job" className="flex items-center gap-3.5 rounded-xl px-3 py-2.5 text-sm text-muted hover:text-fg">
+          <PlusIcon />
+          Add job
+        </Link>
       </div>
-      <Link href="/#add-job" className="btn btn-primary w-full py-2.5"><PlusIcon className="h-4 w-4" /> Add job</Link>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         <label htmlFor="job-search" className="sr-only">Search jobs</label>
@@ -105,14 +97,13 @@ export function Sidebar() {
           <input
             id="job-search"
             type="search"
-            className="input w-full py-2 pl-9 bg-surface-2"
+            className="input w-full rounded-full border-transparent bg-surface-2 py-2 pl-9"
             placeholder="Search jobs"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <p className="px-2 pt-1 text-xs font-semibold text-muted">{query.trim() ? `Results (${shown.length})` : "Recent jobs"}</p>
-        <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+        <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pt-1" aria-label={query.trim() ? `Results (${shown.length})` : "Recent jobs"}>
           {shown.map((j) => (
             <JobRow key={j.id} j={j} active={path === `/jobs/${j.id}`} />
           ))}
@@ -122,17 +113,14 @@ export function Sidebar() {
         </ul>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         <UsageMeter />
-        <div className="flex items-center gap-1 text-sm">
-          <div className="min-w-0 flex-1">{link("/account", "Account", path.startsWith("/account"), <UserIcon />)}</div>
+        <div className="space-y-1">
+          {link("/account", "Account", path.startsWith("/account"), <UserIcon />)}
           <form action={signOut}>
-            <button
-              className="grid h-9 w-9 place-items-center rounded-xl text-muted transition-colors hover:bg-surface-2 hover:text-fg"
-              aria-label="Sign out"
-              title="Sign out"
-            >
+            <button className="flex w-full items-center gap-3.5 rounded-xl px-3 py-2.5 text-sm text-muted hover:text-fg">
               <LogoutIcon />
+              Sign out
             </button>
           </form>
         </div>

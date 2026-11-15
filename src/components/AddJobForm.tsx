@@ -213,7 +213,7 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
   if (collapsible && !open) {
     return (
       <div className="flex items-center gap-3">
-        <h2 className="text-lg font-bold tracking-tight">Jobs</h2>
+        <h2 className="text-lg font-semibold">Jobs</h2>
         <p className="hidden md:block text-sm text-muted truncate">Paste a link or a description, or use the bookmarklet.</p>
         <button className="btn btn-primary ml-auto min-h-10 px-4" aria-expanded={false} onClick={() => setOpen(true)}>
           ＋ Add job
@@ -230,11 +230,11 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
-      className={`card p-4 space-y-3 transition ${dragging ? "border-accent ring-2 ring-accent/30" : ""}`}
+      className={`rounded-2xl bg-surface-2 p-5 space-y-3 border ${dragging ? "border-fg/40" : "border-transparent"}`}
     >
       <div>
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-bold tracking-tight">Add a job</h2>
+          <h2 className="text-lg font-semibold">Add a job</h2>
           {collapsible && (
             <button
               className="btn btn-sm ml-auto min-h-9"

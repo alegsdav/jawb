@@ -43,19 +43,14 @@ export const SparkIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.5l-1.9-5.7L4.5 10.9 10.1 9z" /></svg>
 );
 
-/** The app mark: a violet rounded square with a sparkle, like the Notelify reference. */
-export function Logo({ size = 32 }: { size?: number }) {
+/** The app mark: a small black glyph next to the wordmark, as in the reference. */
+export function Logo({ size = 26 }: { size?: number }) {
   return (
-    <span
-      aria-hidden
-      className="grid place-items-center rounded-[10px] text-white"
-      style={{
-        width: size, height: size,
-        background: "linear-gradient(160deg, var(--accent-2), var(--accent))",
-        boxShadow: "inset 0 1px 0 rgb(255 255 255 / 0.3), 0 6px 14px -6px rgb(98 64 232 / 0.6)",
-      }}
-    >
-      <svg width={size * 0.58} height={size * 0.58} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5 14.2 9.8 21.5 12l-7.3 2.2L12 21.5l-2.2-7.3L2.5 12l7.3-2.2z" /></svg>
-    </span>
+    <svg aria-hidden width={size} height={size} viewBox="0 0 24 24" className="text-fg">
+      <circle cx="7" cy="7" r="4" fill="currentColor" />
+      <circle cx="17" cy="7" r="4" fill="currentColor" />
+      <circle cx="7" cy="17" r="4" fill="currentColor" />
+      <rect x="13" y="13" width="8" height="8" rx="2.5" fill="currentColor" />
+    </svg>
   );
 }

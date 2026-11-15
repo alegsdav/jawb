@@ -1,66 +1,54 @@
 @import "tailwindcss";
 
 :root {
-  /* Soft lavender canvas, white panels, one violet accent (after the Logip and Notelify references). */
-  --bg: #f4f3fb;
+  /* After the Logip reference: white canvas, black and grey type, hairlines, one pale blue. */
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f8f7fd;
-  --border: #e9e7f3;
-  --fg: #1a1830;
-  --muted: #66647a;
-  --accent: #6240e8;
-  --accent-2: #7a5cf5;
-  --accent-soft: #efebfe;
+  --surface-2: #f5f5f5;
+  --border: #ededed;
+  --fg: #171717;
+  --muted: #737373;
+  --accent: #2f74b5;
+  --accent-soft: #e8f2fc;
   --accent-fg: #ffffff;
-  --good: #1a8a5a;
-  --ok: #b26b0a;
-  --bad: #d23b4a;
-  --good-bg: #e7f7ef;
-  --ok-bg: #fdf1df;
-  --bad-bg: #fdeaec;
-  /* Pastel icon chips (dashboard stats) */
-  --tint-blue: #e4edff;
-  --tint-blue-fg: #2f5fd0;
-  --tint-peach: #ffeadb;
-  --tint-peach-fg: #b4560f;
-  --tint-mint: #dcf5e9;
-  --tint-mint-fg: #17794f;
-  --tint-rose: #fde4ea;
-  --tint-rose-fg: #bf2f4f;
-  --shadow-card: 0 1px 2px rgb(38 26 110 / 0.04), 0 10px 28px -14px rgb(38 26 110 / 0.12);
-  --shadow-pop: 0 2px 6px rgb(38 26 110 / 0.08), 0 18px 40px -12px rgb(38 26 110 / 0.22);
-  --ring: rgb(98 64 232 / 0.28);
+  --primary-bg: #bcdcf6;
+  --primary-bg-hover: #a9d0f2;
+  --primary-fg: #10263d;
+  --good: #178a5c;
+  --ok: #b8650f;
+  --bad: #d23c3c;
+  --good-bg: #ecf8f2;
+  --ok-bg: #fdf3e8;
+  --bad-bg: #fdeeee;
+  /* Status dots */
+  --dot-blue: #5b9bd5;
+  --dot-orange: #f2994a;
+  --dot-green: #4cc38a;
+  --dot-red: #e5484d;
+  --dot-grey: #c4c4c4;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f0e18;
-    --surface: #181726;
-    --surface-2: #1e1d2f;
-    --border: #2a2940;
-    --fg: #ecebf7;
-    --muted: #9b99b3;
-    --accent: #9d86ff;
-    --accent-2: #b3a0ff;
-    --accent-soft: #272244;
-    --accent-fg: #100c26;
-    --good: #5fd19b;
-    --ok: #e8b25a;
-    --bad: #f27c88;
-    --good-bg: #14261f;
-    --ok-bg: #2a2214;
-    --bad-bg: #2d1820;
-    --tint-blue: #1d2848;
-    --tint-blue-fg: #8fb0ff;
-    --tint-peach: #35241a;
-    --tint-peach-fg: #f0a870;
-    --tint-mint: #152c24;
-    --tint-mint-fg: #6fd7a5;
-    --tint-rose: #351a25;
-    --tint-rose-fg: #f08aa4;
-    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 10px 28px -14px rgb(0 0 0 / 0.5);
-    --shadow-pop: 0 2px 6px rgb(0 0 0 / 0.4), 0 18px 40px -12px rgb(0 0 0 / 0.6);
-    --ring: rgb(157 134 255 / 0.35);
+    --bg: #111111;
+    --surface: #161616;
+    --surface-2: #1f1f1f;
+    --border: #2a2a2a;
+    --fg: #ededed;
+    --muted: #9a9a9a;
+    --accent: #7db4e6;
+    --accent-soft: #19242f;
+    --accent-fg: #0d0d0d;
+    --primary-bg: #2a4560;
+    --primary-bg-hover: #325172;
+    --primary-fg: #e8f2fc;
+    --good: #5fcf98;
+    --ok: #eba65e;
+    --bad: #f07878;
+    --good-bg: #14241c;
+    --ok-bg: #2a2116;
+    --bad-bg: #2c1818;
+    --dot-grey: #555555;
   }
 }
 
@@ -86,54 +74,34 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-sans), system-ui, sans-serif;
-  letter-spacing: -0.005em;
 }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-::selection { background: rgb(98 64 232 / 0.18); }
 
 @layer components {
-  .card { @apply bg-surface border border-border rounded-2xl; box-shadow: var(--shadow-card); }
+  .card { @apply bg-surface border border-border rounded-2xl; }
   .input {
     @apply bg-surface border border-border rounded-xl px-3 py-2 text-sm outline-none
-      placeholder:text-muted/80;
-    transition: border-color 0.15s, box-shadow 0.15s;
+      focus:border-fg/40 placeholder:text-muted;
   }
-  .input:hover { border-color: color-mix(in srgb, var(--fg) 22%, var(--border)); }
-  .input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--ring); }
   .ghost-input {
     @apply bg-transparent rounded-lg px-1 py-0.5 outline-none border border-transparent
-      hover:border-border focus:border-accent placeholder:text-muted/60;
+      hover:border-border focus:border-fg/40 placeholder:text-muted/60;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-xl border border-border
-      bg-surface px-3 py-1.5 text-sm font-medium disabled:opacity-50
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full border border-border
+      bg-surface px-3.5 py-1.5 text-sm font-medium hover:bg-surface-2 disabled:opacity-50
       disabled:cursor-not-allowed cursor-pointer;
-    transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
   }
-  .btn:hover:not(:disabled) { background: var(--surface-2); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
-  .btn:active:not(:disabled) { transform: translateY(1px); }
   .btn-primary {
-    color: var(--accent-fg); border-color: transparent;
-    background: linear-gradient(180deg, var(--accent-2), var(--accent));
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 6px 16px -6px rgb(98 64 232 / 0.55);
+    background: var(--primary-bg); color: var(--primary-fg); border-color: transparent;
   }
-  .btn-primary:hover:not(:disabled) {
-    background: linear-gradient(180deg, var(--accent-2), var(--accent)); border-color: transparent; filter: brightness(1.06);
-  }
-  .btn-sm { @apply px-2.5 py-1 text-xs rounded-lg; }
+  .btn-primary:hover:not(:disabled) { background: var(--primary-bg-hover); }
+  .btn-sm { @apply px-2.5 py-1 text-xs; }
   .chip { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs border border-border; }
   .label { @apply text-xs font-medium text-muted; }
-  /* Pastel round icon holder (stats, empty states) */
-  .icon-chip { @apply inline-grid h-10 w-10 shrink-0 place-items-center rounded-full; }
-}
-
-/* One orchestrated moment: dashboard panels settle in once, in sequence. */
-@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.rise { animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 70ms); }
-@media (prefers-reduced-motion: reduce) {
-  .rise { animation: none; }
-  .btn:active:not(:disabled) { transform: none; }
+  /* Grey round icon holder, as in the reference's stats and task rows */
+  .icon-chip { @apply inline-grid h-11 w-11 shrink-0 place-items-center rounded-full bg-surface-2 text-fg; }
 }
 
 /* iOS zooms into any field under 16px on focus; keep fields at 16px on phones. */
@@ -171,8 +139,8 @@ body {
 /* ---------- Resume "document" (Harvard single-page layout on paper) ---------- */
 @layer components {
 .doc-canvas {
-  background: color-mix(in srgb, var(--accent) 7%, #e9e8f0);
-  border-radius: 20px;
+  background: var(--surface-2);
+  border-radius: 16px;
   padding: 28px 12px 40px;
   overflow-x: hidden;
 }

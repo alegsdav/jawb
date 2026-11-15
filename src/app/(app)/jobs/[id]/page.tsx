@@ -1020,7 +1020,7 @@ export default function JobPage() {
       )}
 
       {/* Tabs */}
-      <div role="tablist" className="flex overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-1 gap-1 sm:w-fit sm:rounded-2xl sm:border sm:border-border sm:bg-surface sm:p-1 sm:shadow-[var(--shadow-card)]">
+      <div role="tablist" className="flex overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 gap-1">
         {TABS.map(([key, short, full]) => (
           <button
             key={key}
@@ -1028,8 +1028,8 @@ export default function JobPage() {
             role="tab"
             aria-selected={tab === key}
             onClick={() => selectTab(key)}
-            className={`shrink-0 px-3 sm:px-3.5 py-2 text-sm rounded-xl flex items-center gap-1.5 transition-colors ${key === "analysis" ? "lg:hidden" : ""} ${
-              tab === key ? "bg-accent-soft text-accent font-semibold" : "text-muted hover:text-fg hover:bg-surface-2"
+            className={`shrink-0 px-3 sm:px-3.5 py-2 text-sm rounded-full flex items-center gap-1.5 ${key === "analysis" ? "lg:hidden" : ""} ${
+              tab === key ? "bg-surface-2 text-fg font-medium" : "text-muted hover:text-fg"
             }`}
           >
             <span className="sm:hidden">{short}</span>

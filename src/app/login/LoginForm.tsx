@@ -12,11 +12,11 @@ export function LoginForm({ notice }: { notice?: string }) {
   const [linkState, linkAction, linkPending] = useActionState(sendMagicLink, { message: "" });
 
   return (
-    <main className="min-h-dvh grid place-items-center px-4 bg-[radial-gradient(60rem_30rem_at_50%_-10%,var(--accent-soft),transparent)]">
-      <div className="card rise w-full max-w-sm p-7 space-y-5">
+    <main className="min-h-dvh grid place-items-center px-4">
+      <div className="card w-full max-w-sm p-7 space-y-5">
         <div className="space-y-3">
-          <Logo size={40} />
-          <h1 className="text-2xl font-bold tracking-tight">Job Pipeline</h1>
+          <Logo size={28} />
+          <h1 className="text-2xl font-semibold tracking-tight">Job Pipeline</h1>
           <p className="text-sm text-muted">
             {mode === "password" ? "Sign in to your account." : "Get a one-time sign-in link by email."}
           </p>

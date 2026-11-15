@@ -46,7 +46,7 @@ export function JobHeader({
     <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
       <div className="w-full lg:flex-1 lg:min-w-64">
         <input
-          className="ghost-input w-full text-xl sm:text-2xl font-bold tracking-tight"
+          className="ghost-input w-full text-xl sm:text-2xl font-semibold tracking-tight"
           value={job.title}
           placeholder="Job title"
           aria-label="Job title"

@@ -14,15 +14,13 @@ import { Logo } from "@/components/icons";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-dvh lg:flex">
-      <aside className="hidden lg:block lg:w-64 lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh lg:p-3 lg:pr-0">
-        <div className="card h-full overflow-hidden">
-          <Sidebar />
-        </div>
+      <aside className="hidden lg:block lg:w-60 lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh border-r border-border bg-surface">
+        <Sidebar />
       </aside>
       <div className="min-w-0 flex-1 pb-16 lg:pb-0">
-        <header className="lg:hidden border-b border-border bg-surface/90 backdrop-blur sticky top-0 z-20">
+        <header className="lg:hidden border-b border-border bg-surface sticky top-0 z-20">
           <div className="mx-auto max-w-7xl px-4 h-12 sm:h-14 flex items-center gap-6">
-            <Link href="/" className="flex items-center gap-2 font-semibold"><Logo size={26} />Job Pipeline</Link>
+            <Link href="/" className="flex items-center gap-2 font-semibold"><Logo size={22} />Job Pipeline</Link>
             <div className="ml-auto flex items-center gap-4 text-sm">
               <form action={signOut}>
                 <button className="text-muted hover:text-fg">Sign out</button>
@@ -30,9 +28,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-[1440px] px-3 sm:px-4 lg:px-6 py-4 sm:py-6">{children}</main>
+        <main className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10 py-5 sm:py-8">{children}</main>
         {/* Bottom tab bar below lg */}
-        <div className="lg:hidden fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+        <div className="lg:hidden fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface pb-[env(safe-area-inset-bottom)]">
           <NavLinks mobile />
         </div>
       </div>

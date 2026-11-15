@@ -4,23 +4,23 @@
  */
 
 function Badge() {
-  return <span className="chip border-transparent bg-accent-soft text-accent text-[11px] font-semibold">Coming soon</span>;
+  return <span className="text-xs text-muted">Coming soon</span>;
 }
 
 const Bar = ({ w }: { w: string }) => <span className={`block h-2.5 rounded-full bg-border ${w}`} />;
 
 export function RecommendedCard() {
   return (
-    <section className="rise card p-4 sm:p-5 space-y-3" aria-labelledby="recs-heading" style={{ ["--i" as string]: 4 }}>
+    <section className="rounded-2xl bg-surface-2 p-5 space-y-3" aria-labelledby="recs-heading">
       <div className="flex items-center gap-2">
-        <h2 id="recs-heading" className="text-base font-bold tracking-tight">Recommended internships</h2>
+        <h2 id="recs-heading" className="text-base font-semibold">Recommended internships</h2>
         <Badge />
       </div>
       <p className="text-sm text-muted">Postings that match your resume and facts, ready to tailor in one click.</p>
       <ul aria-hidden className="space-y-3 opacity-60 select-none">
         {["w-3/4", "w-2/3", "w-4/5"].map((w, i) => (
-          <li key={i} className="flex items-center gap-3 rounded-xl border border-border p-3">
-            <span className="h-9 w-9 shrink-0 rounded-full bg-accent-soft" />
+          <li key={i} className="flex items-center gap-3 rounded-xl bg-surface p-3">
+            <span className="h-9 w-9 shrink-0 rounded-full bg-surface-2" />
             <span className="min-w-0 flex-1 space-y-2">
               <Bar w={w} />
               <Bar w="w-1/3" />
@@ -39,15 +39,15 @@ export function RecommendedCard() {
 
 export function InboxCard() {
   return (
-    <section className="rise card p-4 sm:p-5 space-y-3" aria-labelledby="inbox-heading" style={{ ["--i" as string]: 5 }}>
+    <section className="rounded-2xl bg-surface-2 p-5 space-y-3" aria-labelledby="inbox-heading">
       <div className="flex items-center gap-2">
-        <h2 id="inbox-heading" className="text-base font-bold tracking-tight">Inbox updates</h2>
+        <h2 id="inbox-heading" className="text-base font-semibold">Inbox updates</h2>
         <Badge />
       </div>
       <p className="text-sm text-muted">Interview invites and replies from your email, matched to the right application automatically.</p>
       <ul aria-hidden className="grid gap-2 sm:grid-cols-3 opacity-60 select-none">
         {["w-2/3", "w-3/4", "w-1/2"].map((w, i) => (
-          <li key={i} className="rounded-xl border border-border p-3 space-y-2">
+          <li key={i} className="rounded-xl bg-surface p-3 space-y-2">
             <span className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-border" />
               <Bar w={w} />

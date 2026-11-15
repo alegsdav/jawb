@@ -23,7 +23,7 @@ export function NavLinks({ mobile = false }: { mobile?: boolean }) {
             key={l.href}
             href={l.href}
             aria-current={isActive(l.href) ? "page" : undefined}
-            className={`flex flex-col items-center gap-0.5 py-2 text-xs ${isActive(l.href) ? "text-accent font-semibold" : "text-muted"}`}
+            className={`flex flex-col items-center gap-0.5 py-2 text-xs ${isActive(l.href) ? "text-fg font-semibold" : "text-muted"}`}
           >
             <l.Icon className="h-5 w-5" />
             {l.short}
