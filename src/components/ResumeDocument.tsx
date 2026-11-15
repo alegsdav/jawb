@@ -147,7 +147,7 @@ function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => voi
  */
 function ContextBar({ label, children }: { slot?: HTMLElement | null; label: string; children: React.ReactNode }) {
   return (
-    <div className="doc-ui float-dark absolute -top-9 left-0 z-20 flex flex-row flex-nowrap items-center gap-0.5 whitespace-nowrap p-1 text-xs">
+    <div className="doc-ui float-dark absolute bottom-full left-0 z-20 mb-1.5 flex w-max max-w-[calc(100vw-3rem)] flex-row flex-wrap items-center gap-0.5 p-1 text-xs">
       <span className="float-muted px-1.5 text-[11px] uppercase tracking-wide">{label}</span>
       {children}
     </div>
