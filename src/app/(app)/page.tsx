@@ -368,7 +368,7 @@ export default function TrackerPage() {
     );
 
   return (
-    <div className="space-y-6 sm:space-y-8">
+    <div className="space-y-6 sm:space-y-8 px-4 sm:px-6 lg:px-10 py-5 sm:py-8">
       {migrationBanner}
       <Greeting jobs={jobs} due={due.length} closing={closing.length} />
       {!noJobs && <StatStrip jobs={jobs} attention={due.length + closing.length} />}

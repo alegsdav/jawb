@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { Bullet, Item, Resume, Section } from "@/lib/types";
 import { emptyItem, isInlineItem, uid } from "@/lib/resume";
 import { PLACEHOLDER_RE } from "@/lib/facts";
@@ -133,7 +132,8 @@ function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => voi
       // it's only cleared by taps outside the document, not by blur.)
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className={`min-h-10 sm:min-h-0 px-2.5 py-1.5 sm:px-2 sm:py-1 rounded-md text-xs whitespace-nowrap hover:bg-black/5 active:bg-black/10 ${danger ? "text-[#c53030]" : "text-[#3c3c3a]"}`}
+      className="float-item min-h-9 whitespace-nowrap sm:min-h-0"
+      style={danger ? { color: "#ff8a8a" } : undefined}
     >
       {label}
     </button>
@@ -141,32 +141,23 @@ function ToolBtn({ label, onClick, danger }: { label: string; onClick: () => voi
 }
 
 /**
- * Contextual move/delete actions for the selected section/entry/bullet.
- * Desktop: rendered into the page toolbar (like Docs). Phones: inline under what you're editing.
+ * Contextual move/delete actions for the selected section/entry/bullet: a small dark floating bar just above
+ * the block (the block is `position: relative`, so this never shifts the layout). Shown only while selected.
+ * `slot` is still accepted for compatibility; the bar no longer portals into the page toolbar.
  */
-function ContextBar({ slot, label, children }: { slot?: HTMLElement | null; label: string; children: React.ReactNode }) {
-  const bar = (inline: boolean) => (
-    <div
-      className={`doc-ui flex flex-wrap items-center gap-0.5 ${
-        inline ? "sm:hidden mt-2 rounded-lg border border-[#e2e2de] bg-[#fafaf8] px-1 py-1" : "hidden sm:flex"
-      }`}
-    >
-      <span className="px-1.5 text-[11px] font-medium uppercase tracking-wide text-[#6b6b66]">{label}</span>
+function ContextBar({ label, children }: { slot?: HTMLElement | null; label: string; children: React.ReactNode }) {
+  return (
+    <div className="doc-ui float-dark absolute -top-9 left-0 z-20 flex flex-row flex-nowrap items-center gap-0.5 whitespace-nowrap p-1 text-xs">
+      <span className="float-muted px-1.5 text-[11px] uppercase tracking-wide">{label}</span>
       {children}
     </div>
-  );
-  return (
-    <>
-      {slot && createPortal(bar(false), slot)}
-      {bar(true)}
-    </>
   );
 }
 
 const RATING: Record<Rating, { label: string; tint: string; dot: string; text: string }> = {
-  strong: { label: "Strong", tint: "bg-[#e9f6ee]", dot: "bg-[#1f8a4c]", text: "text-[#1f8a4c]" },
-  ok: { label: "Okay", tint: "bg-[#fdf5e2]", dot: "bg-[#c98a12]", text: "text-[#a86f05]" },
-  weak: { label: "Weak", tint: "bg-[#fdecec]", dot: "bg-[#c53030]", text: "text-[#c53030]" },
+  strong: { label: "Strong", tint: "bg-[#e9f6ee]", dot: "bg-[#1f8a4c]", text: "text-[#5fd08a]" },
+  ok: { label: "Okay", tint: "bg-[#fdf5e2]", dot: "bg-[#c98a12]", text: "text-[#f0b84a]" },
+  weak: { label: "Weak", tint: "bg-[#fdecec]", dot: "bg-[#c53030]", text: "text-[#ff8a8a]" },
 };
 
 const isField = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("input, textarea, button, select, a");
@@ -543,17 +534,17 @@ export function ResumeDocument({
             {view?.state === "updated" && (
               <p>
                 <span className="font-semibold">Updated.</span>{" "}
-                <span className="text-[#6b6b66]">You accepted the suggested edit. Re-analyze to rate the new wording.</span>
+                <span className="float-muted">You accepted the suggested edit. Re-analyze to rate the new wording.</span>
               </p>
             )}
             {view?.state === "stale" && (
-              <p className="text-[#6b6b66]">Edited since the last analysis, so its rating is hidden. Re-analyze for feedback on this wording.</p>
+              <p className="float-muted">Edited since the last analysis, so its rating is hidden. Re-analyze for feedback on this wording.</p>
             )}
             {suggestion && (
               <div className="mt-2 space-y-1.5">
-                <p className="text-[11px] uppercase tracking-wide text-[#6b6b66]">Suggested edit</p>
-                <p className="line-through decoration-[#c53030]/60 text-[#8a8a85]">{b.text}</p>
-                <p className="text-[#1f6b3f] bg-[#e9f6ee] rounded px-1 -mx-1">{suggestion}</p>
+                <p className="text-[11px] uppercase tracking-wide float-muted">Suggested edit</p>
+                <p className="line-through decoration-[#ff8a8a]/70 float-muted">{b.text}</p>
+                <p className="text-[#bff0d2] bg-[#1f6b3f]/40 rounded px-1 -mx-1">{suggestion}</p>
                 <div className="flex gap-1.5 pt-1">
                   <button
                     type="button"
@@ -567,7 +558,7 @@ export function ResumeDocument({
                     <button
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
-                      className="rounded-md border border-[#e2e2de] px-3 py-1.5 text-xs"
+                      className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-[#e9e9ea] hover:bg-white/10"
                       onClick={() => onReject(b.id)}
                     >
                       ✕ Reject
@@ -577,13 +568,13 @@ export function ResumeDocument({
               </div>
             )}
             {showChanges && changed && (
-              <div className="mt-2 border-t border-[#efefeb] pt-2">
-                <p className="text-[11px] uppercase tracking-wide text-[#6b6b66]">Master resume version</p>
-                <p className="text-[#6b6b66]">{original}</p>
+              <div className="mt-2 border-t border-white/10 pt-2">
+                <p className="text-[11px] uppercase tracking-wide float-muted">Master resume version</p>
+                <p className="float-muted">{original}</p>
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
-                  className="mt-1 min-h-8 text-xs text-[#2f5bd3] underline underline-offset-2"
+                  className="mt-1 min-h-8 text-xs text-[#8fb0ff] underline underline-offset-2"
                   onClick={() => replace(original!)}
                 >
                   Revert to master resume
@@ -591,7 +582,7 @@ export function ResumeDocument({
               </div>
             )}
             {showChanges && isNew && !view && (
-              <p className="text-[#6b6b66]">Added in this tailored copy (not in your master resume).</p>
+              <p className="float-muted">Added in this tailored copy (not in your master resume).</p>
             )}
           </div>
         )}

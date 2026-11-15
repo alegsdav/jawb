@@ -4,11 +4,13 @@ import { useState } from "react";
 import type { Resume } from "@/lib/types";
 import { resumeToPlainText } from "@/lib/resume";
 import { downloadResumePdf } from "./pdfDownload";
+import { CopyIcon, DownloadIcon } from "./icons";
+import { IconButton } from "./DocToolbar";
 
 /** What gets printed or copied: never the master-only `facts`. */
 const printable = (r: Resume): Resume => ({ version: r.version, header: r.header, sections: r.sections });
 
-/** "Copy as text" and "Download PDF" buttons. Failures show a short message instead of failing silently. */
+/** "Copy as text" and "Download PDF" as icon buttons. Failures show a short message instead of failing silently. */
 export function ResumeActions({ resume: full, fileName }: { resume: Resume; fileName: string }) {
   const resume = printable(full);
   const [busy, setBusy] = useState(false);
@@ -41,12 +43,14 @@ export function ResumeActions({ resume: full, fileName }: { resume: Resume; file
 
   return (
     <>
-      <button className="btn btn-sm" onClick={copy}>{copied ? "Copied" : "Copy as text"}</button>
-      <button className="btn btn-sm btn-primary" onClick={downloadPdf} disabled={busy}>
-        {busy ? "Building…" : "Download PDF"}
-      </button>
+      <IconButton label={copied ? "Copied" : "Copy as text"} onClick={copy}>
+        <CopyIcon />
+      </IconButton>
+      <IconButton label={busy ? "Building PDF…" : "Download PDF"} onClick={downloadPdf} disabled={busy}>
+        <DownloadIcon />
+      </IconButton>
       {error && (
-        <span role="alert" className="basis-full text-right text-xs text-bad">
+        <span role="alert" className="max-w-xs truncate px-1 text-xs text-bad" title={error}>
           {error}
         </span>
       )}

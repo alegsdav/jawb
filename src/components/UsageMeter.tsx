@@ -41,21 +41,20 @@ function useUsage(): Usage | null {
   return usage;
 }
 
-/** Compact meter for the sidebar footer. Renders nothing until loaded or without migration 0004. */
+/** Quiet one-line meter for the sidebar footer: text and a thin bar, no card. Renders nothing until loaded or without migration 0004. */
 export function UsageMeter() {
   const usage = useUsage();
   if (!usage?.available) return null;
   const { heavy } = usage;
   const pct = heavy.limit ? Math.round((heavy.remaining / heavy.limit) * 100) : 0;
   return (
-    <div
-      className="space-y-2.5 rounded-2xl bg-surface-2 p-4 text-center"
-      title="Job analyses, resume imports and resume drafts. Rolling 24 hours."
-    >
-      <p className="text-sm font-semibold">AI analyses</p>
-      <p className={`text-xs ${heavy.remaining ? "text-muted" : "text-bad"}`}>{heavyLine(heavy)}</p>
+    <div className="space-y-1.5 px-2 text-[13px]" title="Job analyses, resume imports and resume drafts. Rolling 24 hours.">
+      <p className={`truncate ${heavy.remaining ? "text-muted" : "text-bad"}`}>
+        {heavyLine(heavy)}
+        {!heavy.remaining && heavy.resetAt && <> · next one at {clock(heavy.resetAt)}</>}
+      </p>
       <div
-        className="h-1.5 overflow-hidden rounded-full bg-border"
+        className="h-[3px] overflow-hidden rounded-full bg-fg/10"
         role="meter"
         aria-label="Analyses left today"
         aria-valuemin={0}
@@ -64,7 +63,6 @@ export function UsageMeter() {
       >
         <div className={`h-full rounded-full ${heavy.remaining ? "bg-[var(--dot-blue)]" : "bg-bad"}`} style={{ width: `${pct}%` }} />
       </div>
-      {!heavy.remaining && heavy.resetAt && <p className="text-xs text-muted">Next one at {clock(heavy.resetAt)}</p>}
     </div>
   );
 }

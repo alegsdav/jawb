@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Account · Job Pipeline" };
 export default async function AccountPage() {
   const { user } = await requireUser();
   return (
-    <div className="max-w-sm mx-auto space-y-4">
+    <div className="max-w-sm mx-auto space-y-4 px-4 sm:px-6 lg:px-10 py-5 sm:py-8">
       <div>
         <h1 className="text-xl font-semibold">Account</h1>
         {user?.email && (

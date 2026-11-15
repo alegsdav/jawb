@@ -1,52 +1,75 @@
 "use client";
 
 import { Popover } from "./Menu";
+import { RedoIcon, UndoIcon } from "./icons";
 
-/** Sticky toolbar above the document, like Google Docs' menu bar. Buttons are 40px tall on phones (globals.css). */
+/**
+ * Slim top bar for editor pages: h-11, hairline bottom border, children laid out left to right.
+ * Use `<div className="ml-auto flex items-center gap-1">` for the right-hand group.
+ */
 export function DocToolbar({
-  children, onSlot,
+  children,
 }: {
   children: React.ReactNode;
-  /** Receives the element where the document renders its contextual (move/delete) actions. */
+  /** Kept for compatibility. Selection actions now float inside the document, so nothing renders here. */
   onSlot?: (el: HTMLDivElement | null) => void;
 }) {
   return (
-    <div className="doc-toolbar sm:sticky sm:top-14 lg:top-0 z-10 -mx-3 sm:mx-0 px-3 sm:px-2 py-2 bg-bg/95 sm:backdrop-blur border-b border-border sm:border sm:rounded-xl flex flex-wrap items-center gap-1.5">
+    <div className="doc-toolbar sticky top-0 z-10 flex h-11 shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-3">
       {children}
-      {/* Always takes the same height, so selecting something never shifts the page under the pointer. */}
-      {onSlot && (
-        <div ref={onSlot} className="doc-slot hidden sm:flex items-center min-h-[33px] w-full border-t border-border pt-1.5 mt-0.5 -mb-0.5" />
-      )}
     </div>
+  );
+}
+
+/** Ghost icon button (`.icon-btn`, 28px) with an accessible name and a tooltip. */
+export function IconButton({
+  label, onClick, disabled, children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button type="button" className="icon-btn" aria-label={label} title={label} onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
   );
 }
 
 export function UndoRedo({ undo, redo, canUndo, canRedo }: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean }) {
   return (
-    <div className="flex">
-      <button className="btn btn-sm rounded-r-none" onClick={undo} disabled={!canUndo} title="Undo (Ctrl/⌘+Z)" aria-label="Undo">↶</button>
-      <button className="btn btn-sm rounded-l-none -ml-px" onClick={redo} disabled={!canRedo} title="Redo (Ctrl/⌘+Shift+Z)" aria-label="Redo">↷</button>
+    <div className="flex items-center gap-0.5">
+      <IconButton label="Undo (Ctrl/⌘+Z)" onClick={undo} disabled={!canUndo}>
+        <UndoIcon />
+      </IconButton>
+      <IconButton label="Redo (Ctrl/⌘+Shift+Z)" onClick={redo} disabled={!canRedo}>
+        <RedoIcon />
+      </IconButton>
     </div>
   );
 }
 
+/** Quiet muted text like "2173 words" / "1 page". Over-length is flagged in text-bad. */
 export function PageCount({ pages, overflowLines }: { pages: number; overflowLines: number }) {
-  if (pages <= 1) return <span className="text-xs text-good" title="Fits on one page">1 page ✓</span>;
+  if (pages <= 1) return <span className="px-1 text-xs text-muted" title="Fits on one page">1 page</span>;
   return (
-    <span className="text-xs text-bad" title="Most internship resumes should be one page">
+    <span className="px-1 text-xs text-bad" title="Most internship resumes should be one page">
       {pages} pages · ~{overflowLines} lines over
     </span>
   );
 }
 
-/** On/off button that says its state ("Feedback: On"). */
+/** Small text toggle that says its state ("Feedback: On"). */
 export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <button
       type="button"
       onClick={() => onChange(!on)}
       aria-pressed={on}
-      className={`btn btn-sm ${on ? "border-accent text-accent bg-accent/5" : "text-muted"}`}
+      className={`rounded-md px-2 py-1 text-xs transition-colors hover:bg-surface-2 hover:text-fg ${
+        on ? "font-medium text-fg" : "text-muted"
+      }`}
     >
       {toggleLabel(label, on)}
     </button>

@@ -13,7 +13,8 @@ import { CoachPanel } from "@/components/CoachPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
 import { ResumeActions } from "@/components/ResumeActions";
-import { DocToolbar, PageCount, UndoRedo } from "@/components/DocToolbar";
+import { DocToolbar, IconButton, PageCount, UndoRedo } from "@/components/DocToolbar";
+import { DocIcon, HelpIcon, ImportIcon, PlusIcon } from "@/components/icons";
 import { ResumeImport } from "@/components/ResumeImport";
 import { FactsPanel } from "@/components/FactsPanel";
 import { Builder } from "@/components/Builder";
@@ -26,6 +27,9 @@ import { useHistory } from "@/lib/useHistory";
 
 /** Re-import keeps bullet ids stable (so jobs' "changes vs master" and linked facts stay right). */
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
+
+/** The editing tips, shown as the help button's tooltip (the document itself stays uncluttered). */
+const EDIT_TIPS = "Click any line to edit. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it. Undo with Ctrl/⌘+Z.";
 
 type MasterRow = { id: string; content: unknown; updated_at: string };
 const MASTER_COLS = "id, content, updated_at";
@@ -282,144 +286,154 @@ export default function MasterResumePage() {
   };
 
   return (
-    <div className="max-w-5xl lg:max-w-7xl mx-auto space-y-3">
-      <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap">
-        <h1 className="text-xl font-semibold">Master resume</h1>
-        <p className="text-sm text-muted">Everything true about you. Each job gets its own tailored copy.</p>
-      </div>
+    <div className="flex flex-col lg:h-full lg:min-h-0">
+      <DocToolbar onSlot={setSlot}>
+        <h1 className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-normal text-muted">
+          <DocIcon className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Master resume</span>
+          <span className="sr-only sm:hidden">Master resume</span>
+        </h1>
+        <span className="ml-2 hidden truncate text-xs text-muted md:inline">Everything true about you</span>
+        <div className="ml-auto flex items-center gap-1">
+          <SaveStatus status={conflict ? "error" : status} />
+          <span className="hidden md:inline"><PageCount {...measure} /></span>
+          <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
+          <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
+          <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
+          <IconButton
+            label="Add section"
+            onClick={() => {
+              const title = prompt("Section name (only add sections you actually have):");
+              if (title?.trim()) doc.set((cur) => ({ ...cur, sections: [...cur.sections, emptySection(title.trim())] }), true);
+            }}
+          >
+            <PlusIcon />
+          </IconButton>
+          <IconButton label="Re-import" onClick={() => setImportOpen((o) => !o)}>
+            <ImportIcon />
+          </IconButton>
+          <ResumeActions resume={resume} fileName={`${resume.header.name} Resume`} />
+          <IconButton label={EDIT_TIPS} onClick={() => {}}>
+            <HelpIcon />
+          </IconButton>
+          <a
+            href="#side-panel"
+            className="hidden rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg sm:inline-flex lg:hidden"
+            onClick={() => setSideTab("facts")}
+          >
+            Facts ({factCount})
+          </a>
+        </div>
+      </DocToolbar>
 
-      {empty && !importOpen ? (
-        building ? (
-          <Builder email={email} onBuilt={onBuilt} onCancel={() => setBuilding(false)} />
-        ) : (
-          <Onboarding onImported={onImported} onBuild={() => setBuilding(true)} />
-        )
-      ) : (
-        <>
-          {built && (
-            <section aria-labelledby="built-heading" className="card border-good/40 bg-good-bg p-4 space-y-2">
-              <h2 id="built-heading" className="font-medium">Your first draft is ready.</h2>
-              <p className="text-sm text-muted">
-                It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
-                a few quick questions help you find numbers worth adding.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {built
-                  .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
-                  .filter((x): x is NonNullable<typeof x> => !!x)
-                  .map(({ sec, it }) => (
-                    <button key={it.id} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => goDeeper(sec.id, it.id)}>
-                      Go deeper: {it.title || "this experience"}
-                    </button>
-                  ))}
-                <Link href="/" className="btn btn-sm btn-primary min-h-10 sm:min-h-0">Next: add a job →</Link>
-                <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setBuilt(null)}>Dismiss</button>
-              </div>
-            </section>
-          )}
-          {justImported && (
-            <div className="card border-good/40 bg-good-bg p-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex-1 min-w-48">
-                <p className="font-medium">Step 1 done — your master resume is ready.</p>
-                <p className="text-sm text-muted">Check it below, then add the first job you want to tailor it for.</p>
-              </div>
-              <Link href="/" className="btn btn-primary py-2 w-full sm:w-auto">Next: add a job →</Link>
-            </div>
-          )}
-
-          {/* Desktop: facts in a sticky right-hand column beside the page. Phones: below it, with a jump link. */}
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
-            <div className="min-w-0 space-y-3">
-              <DocToolbar onSlot={setSlot}>
-                <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
-                <SaveStatus status={conflict ? "error" : status} />
-                <span className="hidden md:inline"><PageCount {...measure} /></span>
-                <a
-                  href="#side-panel"
-                  className="btn btn-sm lg:hidden"
-                  onClick={() => setSideTab("facts")}
-                >
-                  Facts ({factCount})
-                </a>
-                <div className="ml-auto flex flex-wrap items-center gap-1.5">
-                  <button className="btn btn-sm" onClick={() => setImportOpen((o) => !o)}>Re-import</button>
-                  <button
-                    className="btn btn-sm"
-                    onClick={() => {
-                      const title = prompt("Section name (only add sections you actually have):");
-                      if (title?.trim()) doc.set((cur) => ({ ...cur, sections: [...cur.sections, emptySection(title.trim())] }), true);
-                    }}
-                  >
-                    + Section
-                  </button>
-                  <ResumeActions resume={resume} fileName={`${resume.header.name} Resume`} />
-                </div>
-              </DocToolbar>
-
-              {importOpen && (
-                <div className="card p-4">
-                  <ResumeImport replaceWarning onImported={onImported} onCancel={() => setImportOpen(false)} />
-                </div>
-              )}
-              {error && <p className="text-sm text-bad">{error}</p>}
-              {notice && <p role="status" className="text-sm text-good px-1">{notice}</p>}
-
-              <p className="text-xs text-muted px-1">
-                Click any line to edit. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it.
-                Undo with Ctrl/⌘+Z.
-              </p>
-              <ResumeDocument value={resume} onChange={doc.set} onMeasure={setMeasure} actionsSlot={slot} onSelectionChange={onSelection} />
-            </div>
-
-            <div id="side-panel" className="lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto space-y-3 scroll-mt-16">
-              <SideTabs
-                label="Panel"
-                value={sideTab}
-                onChange={setSideTab}
-                tabs={[
-                  { key: "coach", label: "Coach" },
-                  { key: "facts", label: `Facts (${factCount})` },
-                ]}
-              />
-              {sideTab === "coach" &&
-                (coachTarget ? (
-                  <CoachPanel
-                    key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}:${coachStart ?? ""}`}
-                    resume={resume}
-                    resumeId={id}
-                    target={coachTarget}
-                    facts={facts}
-                    startWith={coachStart}
-                    onBack={() => setCoachTarget(null)}
-                    onInsert={insertBullet}
-                  />
-                ) : (
-                  <section className="card p-4 space-y-2" aria-labelledby="coach-intro">
-                    <h2 id="coach-intro" className="font-semibold">Coach</h2>
+      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
+        {/* Document column: plain white, centred. Scrolls on its own on lg+. */}
+        <div className="min-w-0 flex-1 lg:overflow-y-auto">
+          <div className="mx-auto max-w-[860px] space-y-3 px-4 py-6 sm:px-8">
+            {empty && !importOpen ? (
+              building ? (
+                <Builder email={email} onBuilt={onBuilt} onCancel={() => setBuilding(false)} />
+              ) : (
+                <Onboarding onImported={onImported} onBuild={() => setBuilding(true)} />
+              )
+            ) : (
+              <>
+                {built && (
+                  <section aria-labelledby="built-heading" className="space-y-2 rounded-lg border border-border p-4">
+                    <h2 id="built-heading" className="text-sm font-medium">Your first draft is ready.</h2>
                     <p className="text-sm text-muted">
-                      Select any entry or bullet on your resume to see examples of strong bullets, or answer a few questions
-                      that help you find your real numbers. Nothing goes on your resume until you choose it.
+                      It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
+                      a few quick questions help you find numbers worth adding.
                     </p>
+                    <div className="flex flex-wrap gap-2">
+                      {built
+                        .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
+                        .filter((x): x is NonNullable<typeof x> => !!x)
+                        .map(({ sec, it }) => (
+                          <button key={it.id} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => goDeeper(sec.id, it.id)}>
+                            Go deeper: {it.title || "this experience"}
+                          </button>
+                        ))}
+                      <Link href="/" className="btn btn-sm btn-primary min-h-10 sm:min-h-0">Next: add a job →</Link>
+                      <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setBuilt(null)}>Dismiss</button>
+                    </div>
                   </section>
-                ))}
-              {sideTab === "facts" && (
-              <FactsPanel
-                facts={facts.facts}
-                status={facts.status}
-                error={facts.error}
-                onAdd={async (lines) => {
-                  const added = await facts.add(lines.map((text) => ({ text, source: "manual" })));
-                  if (added?.length) setNotice(`Saved ${plural(added.length, "fact")}.`);
-                  else if (added) setNotice("You already have that fact.");
-                }}
-                onEdit={facts.edit}
-                onDelete={deleteFact}
-              />
-              )}
-            </div>
+                )}
+                {justImported && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border p-4">
+                    <div className="min-w-48 flex-1">
+                      <p className="text-sm font-medium">Step 1 done — your master resume is ready.</p>
+                      <p className="text-xs text-muted">Check it below, then add the first job you want to tailor it for.</p>
+                    </div>
+                    <Link href="/" className="btn btn-sm btn-primary w-full sm:w-auto">Next: add a job →</Link>
+                  </div>
+                )}
+
+                {importOpen && (
+                  <div className="rounded-lg border border-border p-4">
+                    <ResumeImport replaceWarning onImported={onImported} onCancel={() => setImportOpen(false)} />
+                  </div>
+                )}
+                {error && <p className="px-1 text-sm text-bad">{error}</p>}
+                {notice && <p role="status" className="px-1 text-sm text-good">{notice}</p>}
+
+                <ResumeDocument value={resume} onChange={doc.set} onMeasure={setMeasure} actionsSlot={slot} onSelectionChange={onSelection} />
+              </>
+            )}
           </div>
-        </>
-      )}
+        </div>
+
+        {/* Side panel: hairline divider on lg+, its own scroll. Phones: stacked below the document. */}
+        <div
+          id="side-panel"
+          className="scroll-mt-16 space-y-4 border-t border-border p-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
+        >
+          <SideTabs
+            label="Panel"
+            value={sideTab}
+            onChange={setSideTab}
+            tabs={[
+              { key: "coach", label: "Coach" },
+              { key: "facts", label: `Facts (${factCount})` },
+            ]}
+          />
+          {sideTab === "coach" &&
+            (coachTarget ? (
+              <CoachPanel
+                key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}:${coachStart ?? ""}`}
+                resume={resume}
+                resumeId={id}
+                target={coachTarget}
+                facts={facts}
+                startWith={coachStart}
+                onBack={() => setCoachTarget(null)}
+                onInsert={insertBullet}
+              />
+            ) : (
+              <section className="space-y-2" aria-labelledby="coach-intro">
+                <h2 id="coach-intro" className="text-sm font-medium">Coach</h2>
+                <p className="text-sm text-muted">
+                  Select any entry or bullet on your resume to see examples of strong bullets, or answer a few questions
+                  that help you find your real numbers. Nothing goes on your resume until you choose it.
+                </p>
+              </section>
+            ))}
+          {sideTab === "facts" && (
+            <FactsPanel
+              facts={facts.facts}
+              status={facts.status}
+              error={facts.error}
+              onAdd={async (lines) => {
+                const added = await facts.add(lines.map((text) => ({ text, source: "manual" })));
+                if (added?.length) setNotice(`Saved ${plural(added.length, "fact")}.`);
+                else if (added) setNotice("You already have that fact.");
+              }}
+              onEdit={facts.edit}
+              onDelete={deleteFact}
+            />
+          )}
+        </div>
+      </div>
 
       {undo && (
         <UndoToast

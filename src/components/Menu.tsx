@@ -92,7 +92,7 @@ export function Menu({
           id={id}
           role="menu"
           onKeyDown={onListKey}
-          className={`absolute z-40 mt-1 w-64 max-w-[calc(100vw-1.5rem)] rounded-xl border border-border bg-surface p-1 shadow-lg ${
+          className={`float-dark absolute z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] p-1 ${
             alignLeft ? "left-0" : "right-0"
           }`}
         >
@@ -199,12 +199,11 @@ export function MenuItem({
         close();
         onSelect();
       }}
-      className={`block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-black/5 focus:bg-black/5 focus:outline-none active:bg-black/10 disabled:opacity-50 dark:hover:bg-white/10 dark:focus:bg-white/10 ${
-        danger ? "text-bad" : ""
-      } ${className}`}
+      className={`float-item w-full flex-col items-start focus:outline-none disabled:opacity-50 ${className}`}
+      style={danger ? { color: "#ff8a8a" } : undefined}
     >
       {children}
-      {hint && <span className="block text-xs text-muted">{hint}</span>}
+      {hint && <span className="float-muted block text-[11px] leading-snug">{hint}</span>}
     </button>
   );
 }

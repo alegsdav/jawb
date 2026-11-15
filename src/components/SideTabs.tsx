@@ -1,6 +1,6 @@
 "use client";
 
-/** Tabs at the top of the editor's right panel ("Coach" / "Facts"). */
+/** Quiet text tabs ("Coach" / "Facts"): small type, the active tab gets a 1.5px underline. */
 export function SideTabs<T extends string>({
   tabs, value, onChange, label,
 }: {
@@ -10,21 +10,24 @@ export function SideTabs<T extends string>({
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="flex gap-1">
-      {tabs.map((t) => (
-        <button
-          key={t.key}
-          type="button"
-          role="tab"
-          aria-selected={value === t.key}
-          onClick={() => onChange(t.key)}
-          className={`rounded-full px-3.5 py-1.5 text-sm min-h-10 sm:min-h-0 transition-colors ${
-            value === t.key ? "bg-surface-2 text-fg font-medium" : "text-muted hover:text-fg"
-          }`}
-        >
-          {t.label}
-        </button>
-      ))}
+    <div role="tablist" aria-label={label} className="flex gap-4 border-b border-border">
+      {tabs.map((t) => {
+        const active = value === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(t.key)}
+            className={`-mb-px min-h-10 border-b-[1.5px] px-0.5 text-[13px] transition-colors sm:min-h-0 sm:py-2 ${
+              active ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"
+            }`}
+          >
+            {t.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

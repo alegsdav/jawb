@@ -125,18 +125,11 @@ body {
   .ph-mirror { font-size: 16px !important; }
 }
 
-/* Empty contextual-actions row in the document toolbar */
-.doc-slot:empty::before {
-  content: "Click a section, entry or bullet to move or delete it.";
-  padding: 0 6px; font-size: 12px; color: var(--muted);
-}
-
 /* ---------- Resume "document" (Harvard single-page layout on paper) ---------- */
 @layer components {
 .doc-canvas {
-  background: var(--surface-2);
-  border-radius: 16px;
-  padding: 28px 12px 40px;
+  background: transparent;
+  padding: 8px 0 40px;
   overflow-x: hidden;
 }
 .doc-page {
@@ -148,7 +141,6 @@ body {
   padding: 58px;               /* 0.6in */
   background: #fff;
   color: #111;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12), 0 6px 24px rgb(0 0 0 / 0.06);
   font-family: "Times New Roman", Times, "Liberation Serif", serif;
   font-size: 14.67px;          /* 11pt */
   line-height: 1.25;
@@ -169,7 +161,7 @@ body {
   line-height: inherit;
 }
 .doc-field:hover { background: rgb(0 0 0 / 0.035); }
-.doc-field:focus { background: rgb(47 91 211 / 0.07); }
+.doc-field:focus { background: rgb(0 0 0 / 0.05); }
 .doc-field::placeholder { color: #b0b0aa; }
 .doc-entry:not(.is-active) .doc-field::placeholder,
 .doc-section .doc-field:not(:focus)::placeholder { color: transparent; }
@@ -180,8 +172,7 @@ body {
 /* Selectable blocks (sections, entries): click blank space to select, then move/delete from the toolbar. */
 .doc-block { position: relative; border-radius: 3px; }
 .doc-block.doc-block.is-selected {
-  outline: 2px solid rgb(47 91 211 / 0.55); outline-offset: 3px;
-  background: rgb(47 91 211 / 0.04);
+  background: rgb(0 0 0 / 0.03);
 }
 .doc-section-title {
   display: block; width: 100%;
@@ -189,17 +180,19 @@ body {
   border-bottom: 1px solid #111; border-radius: 0; padding-bottom: 1px; margin-bottom: 5px;
 }
 .doc-entry { margin-bottom: 6px; }
-.doc-entry.is-active { outline: 1px solid rgb(47 91 211 / 0.25); outline-offset: 4px; border-radius: 2px; }
+.doc-entry.is-active { outline: 1px solid rgb(0 0 0 / 0.08); outline-offset: 4px; border-radius: 2px; }
 .doc-bullets { margin-top: 1px; padding-left: 10px; }
 .doc-bullets li + li { margin-top: 1px; }
 .doc-ui { font-family: var(--font-ui), system-ui, sans-serif; }
 /* Read-only page (submitted snapshot) */
 .doc-readonly .doc-contact, .doc-readonly .doc-entry { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Per-bullet feedback card: the same dark floating look as the contextual popovers (.float-dark). */
 .doc-comment {
   margin: 6px 0 8px 18px; padding: 10px 12px;
-  font-size: 13px; line-height: 1.4; color: #1b1b1a;
-  background: #fff; border: 1px solid #e2e2de; border-left: 3px solid #2f5bd3;
-  border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.08);
+  font-size: 12px; line-height: 1.45; color: #e9e9ea;
+  background: rgb(44 44 46 / 0.94); border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 12px; box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.35), 0 2px 6px rgb(0 0 0 / 0.15);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
 /* [placeholder] highlight: a copy of the bullet's text laid out exactly like the textarea on top of it
    (same box, font and wrapping), invisible except for the marked spans. The textarea's own text stays
