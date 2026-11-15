@@ -9,6 +9,7 @@ import { FIT_LABEL } from "@/lib/fit";
 import { STATUSES, type JobStatus } from "@/lib/types";
 import { NAV_JOB_COLS, navJob, recentJobs, searchJobs, type NavJob } from "@/lib/jobNav";
 import { UsageMeter } from "./UsageMeter";
+import { DocIcon, HomeIcon, Logo, LogoutIcon, PlusIcon, SearchIcon, UserIcon } from "./icons";
 
 const DOT: Record<JobStatus, string> = {
   to_apply: "bg-border ring-1 ring-muted/40",
@@ -27,7 +28,7 @@ function JobRow({ j, active }: { j: NavJob; active: boolean }) {
       <Link
         href={`/jobs/${j.id}`}
         aria-current={active ? "page" : undefined}
-        className={`flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm ${active ? "bg-accent/10 text-fg" : "hover:bg-bg"}`}
+        className={`flex items-start gap-2.5 rounded-xl px-2.5 py-2 text-sm transition-colors ${active ? "bg-accent-soft text-fg" : "hover:bg-surface-2"}`}
       >
         <span aria-hidden className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[j.status]}`} />
         <span className="min-w-0 flex-1">
@@ -72,36 +73,45 @@ export function Sidebar() {
   }, [supabase, path]);
 
   const shown = query.trim() ? searchJobs(jobs, query) : recentJobs(jobs);
-  const link = (href: string, label: string, active: boolean) => (
+  const link = (href: string, label: string, active: boolean, icon: React.ReactNode) => (
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
-      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${active ? "bg-accent/10 font-medium text-fg" : "text-muted hover:bg-bg hover:text-fg"}`}
+      className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
+        active ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-surface-2 hover:text-fg"
+      }`}
     >
+      {icon}
       {label}
     </Link>
   );
 
   return (
-    <nav aria-label="Workspace" className="flex h-dvh flex-col gap-4 overflow-hidden px-3 py-4">
-      <Link href="/" className="px-2 font-semibold">Job Pipeline</Link>
+    <nav aria-label="Workspace" className="flex h-full flex-col gap-4 overflow-hidden px-3 py-4">
+      <Link href="/" className="flex items-center gap-2.5 px-2 font-semibold tracking-tight">
+        <Logo />
+        <span className="text-[15px]">Job Pipeline</span>
+      </Link>
       <div className="space-y-0.5">
-        {link("/", "Dashboard", path === "/")}
-        {link("/resume", "📌 Master resume", path.startsWith("/resume"))}
+        {link("/", "Dashboard", path === "/", <HomeIcon />)}
+        {link("/resume", "Master resume", path.startsWith("/resume"), <DocIcon />)}
       </div>
-      <Link href="/#add-job" className="btn btn-primary w-full">+ Add job</Link>
+      <Link href="/#add-job" className="btn btn-primary w-full py-2.5"><PlusIcon className="h-4 w-4" /> Add job</Link>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         <label htmlFor="job-search" className="sr-only">Search jobs</label>
-        <input
-          id="job-search"
-          type="search"
-          className="input w-full py-1.5"
-          placeholder="Search jobs"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <p className="label px-2">{query.trim() ? `Results (${shown.length})` : "Recent jobs"}</p>
+        <div className="relative">
+          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input
+            id="job-search"
+            type="search"
+            className="input w-full py-2 pl-9 bg-surface-2"
+            placeholder="Search jobs"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <p className="px-2 pt-1 text-xs font-semibold text-muted">{query.trim() ? `Results (${shown.length})` : "Recent jobs"}</p>
         <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
           {shown.map((j) => (
             <JobRow key={j.id} j={j} active={path === `/jobs/${j.id}`} />
@@ -112,14 +122,18 @@ export function Sidebar() {
         </ul>
       </div>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="px-2">
-          <UsageMeter />
-        </div>
+      <div className="space-y-2">
+        <UsageMeter />
         <div className="flex items-center gap-1 text-sm">
-          {link("/account", "Account", path.startsWith("/account"))}
-          <form action={signOut} className="ml-auto">
-            <button className="rounded-lg px-2 py-1.5 text-muted hover:bg-bg hover:text-fg">Sign out</button>
+          <div className="min-w-0 flex-1">{link("/account", "Account", path.startsWith("/account"), <UserIcon />)}</div>
+          <form action={signOut}>
+            <button
+              className="grid h-9 w-9 place-items-center rounded-xl text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogoutIcon />
+            </button>
           </form>
         </div>
       </div>

@@ -12,25 +12,37 @@ const COLORS: Record<JobStatus, string> = {
   skipped: "text-muted",
 };
 
+const DOT: Record<JobStatus, string> = {
+  to_apply: "var(--muted)",
+  applied: "var(--tint-blue-fg)",
+  interview: "var(--good)",
+  offer: "var(--good)",
+  rejected: "var(--bad)",
+  skipped: "var(--border)",
+};
+
+/** Status as a pill: a coloured dot and the label, still a native select underneath. */
 export function StatusSelect({ value, onChange }: { value: JobStatus; onChange: (s: JobStatus) => void }) {
   return (
-    <select
-      aria-label="Status"
-      className={`input py-1 text-xs ${COLORS[value]}`}
-      value={value}
-      onChange={(e) => onChange(e.target.value as JobStatus)}
-    >
-      {STATUSES.map((s) => (
-        <option key={s.value} value={s.value}>{s.label}</option>
-      ))}
-    </select>
+    <span className="relative inline-flex items-center">
+      <span aria-hidden className="pointer-events-none absolute left-3 h-2 w-2 rounded-full" style={{ background: DOT[value] }} />
+      <select
+        aria-label="Status"
+        className={`input rounded-full py-1 pl-7 pr-2 text-xs font-medium ${COLORS[value]}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value as JobStatus)}
+      >
+        {STATUSES.map((s) => (
+          <option key={s.value} value={s.value}>{s.label}</option>
+        ))}
+      </select>
+    </span>
   );
 }
-
 const FIT_CLS: Record<Fit, string> = {
-  strong: "text-good bg-good-bg border-good/30",
-  possible: "text-ok bg-ok-bg border-ok/30",
-  stretch: "text-muted bg-bg border-border",
+  strong: "text-good bg-good-bg border-transparent",
+  possible: "text-ok bg-ok-bg border-transparent",
+  stretch: "text-muted bg-surface-2 border-border",
 };
 
 /** Coarse fit bucket as a colored chip. Never shows a number. */

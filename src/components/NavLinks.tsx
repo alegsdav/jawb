@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { DocIcon, HomeIcon, UserIcon } from "./icons";
 
 const LINKS = [
-  { href: "/", label: "Dashboard", short: "Dashboard", desktop: true },
-  { href: "/resume", label: "Master resume", short: "Master", desktop: true },
+  { href: "/", label: "Dashboard", short: "Dashboard", desktop: true, Icon: HomeIcon },
+  { href: "/resume", label: "Master resume", short: "Master", desktop: true, Icon: DocIcon },
   // On desktop (lg and up) the sidebar has all three; this is the tab bar below lg.
-  { href: "/account", label: "Account", short: "Account", desktop: false },
+  { href: "/account", label: "Account", short: "Account", desktop: false, Icon: UserIcon },
 ];
 
 export function NavLinks({ mobile = false }: { mobile?: boolean }) {
@@ -21,8 +22,10 @@ export function NavLinks({ mobile = false }: { mobile?: boolean }) {
           <Link
             key={l.href}
             href={l.href}
-            className={`py-3 text-center text-sm ${isActive(l.href) ? "text-accent font-semibold" : "text-muted"}`}
+            aria-current={isActive(l.href) ? "page" : undefined}
+            className={`flex flex-col items-center gap-0.5 py-2 text-xs ${isActive(l.href) ? "text-accent font-semibold" : "text-muted"}`}
           >
+            <l.Icon className="h-5 w-5" />
             {l.short}
           </Link>
         ))}

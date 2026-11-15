@@ -10,7 +10,7 @@ export function SideTabs<T extends string>({
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="flex gap-1 border-b border-border">
+    <div role="tablist" aria-label={label} className="flex gap-1 rounded-2xl bg-surface-2 p-1">
       {tabs.map((t) => (
         <button
           key={t.key}
@@ -18,8 +18,8 @@ export function SideTabs<T extends string>({
           role="tab"
           aria-selected={value === t.key}
           onClick={() => onChange(t.key)}
-          className={`px-3 py-2 text-sm -mb-px border-b-2 min-h-10 sm:min-h-0 ${
-            value === t.key ? "border-accent text-fg font-medium" : "border-transparent text-muted hover:text-fg"
+          className={`flex-1 rounded-xl px-3 py-1.5 text-sm min-h-10 sm:min-h-0 transition-colors ${
+            value === t.key ? "bg-surface text-accent font-semibold shadow-[var(--shadow-card)]" : "text-muted hover:text-fg"
           }`}
         >
           {t.label}

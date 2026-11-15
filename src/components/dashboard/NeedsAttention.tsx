@@ -23,8 +23,8 @@ export function NeedsAttention({
     return n === 0 ? "due today" : n === 1 ? "due tomorrow" : `due ${shortDate(d)}`;
   };
   return (
-    <section aria-labelledby="attention-heading" className="card border-ok/60 bg-ok-bg/40 p-3 space-y-2">
-      <h2 id="attention-heading" className="text-sm font-semibold">Needs attention</h2>
+    <section aria-labelledby="attention-heading" className="rise card border-transparent bg-ok-bg p-4 space-y-2.5" style={{ ["--i" as string]: 1 }}>
+      <h2 id="attention-heading" className="text-sm font-bold">Needs attention</h2>
       <ul className="grid gap-x-6 gap-y-1.5 text-sm md:grid-cols-2">
         {followUps.map((j) => (
           <li key={`f${j.id}`} className="flex flex-wrap items-center gap-2 min-w-0">

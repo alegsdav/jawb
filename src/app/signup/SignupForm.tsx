@@ -1,5 +1,6 @@
 "use client";
 
+import { Logo } from "@/components/icons";
 import Link from "next/link";
 import { useActionState } from "react";
 import { signUp, type SignupState } from "./actions";
@@ -10,10 +11,11 @@ export function SignupForm({ initialCode = "" }: { initialCode?: string }) {
   const invalid = (f: SignupState["field"]) => (state.field === f ? true : undefined);
 
   return (
-    <main className="min-h-dvh grid place-items-center px-4">
-      <div className="card w-full max-w-sm p-6 space-y-4">
-        <div>
-          <h1 className="text-xl font-semibold">Create your account</h1>
+    <main className="min-h-dvh grid place-items-center px-4 bg-[radial-gradient(60rem_30rem_at_50%_-10%,var(--accent-soft),transparent)]">
+      <div className="card rise w-full max-w-sm p-7 space-y-5">
+        <div className="space-y-3">
+          <Logo size={40} />
+          <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
           <p className="text-sm text-muted">Job Pipeline is invite-only. Use the code you were given.</p>
         </div>
         <form action={action} className="space-y-3" noValidate>

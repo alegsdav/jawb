@@ -20,7 +20,9 @@ import { DeadlineField, deadlineUrgency, isClosingSoon } from "@/components/Dead
 import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
 import { InboxCard, RecommendedCard } from "@/components/dashboard/ComingSoon";
+import { Greeting, StatStrip } from "@/components/dashboard/Overview";
 import { useIsDesktop } from "@/lib/useMedia";
+import { CompanyMark } from "@/components/CompanyMark";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
@@ -366,9 +368,10 @@ export default function TrackerPage() {
     );
 
   return (
-    <div className="space-y-3 sm:space-y-4">
+    <div className="space-y-4 sm:space-y-5">
       {migrationBanner}
-      <h1 className="sr-only">Dashboard</h1>
+      <Greeting jobs={jobs} due={due.length} closing={closing.length} />
+      {!noJobs && <StatStrip jobs={jobs} attention={due.length + closing.length} />}
       <NeedsAttention followUps={due} closing={closing} today={today} onFollowedUp={followedUp} />
 
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-12 lg:items-start">
@@ -381,7 +384,7 @@ export default function TrackerPage() {
           <InProgress jobs={jobs} today={today} loading={loading} />
 
           <section aria-labelledby="all-apps-heading" className="space-y-3">
-            <h2 id="all-apps-heading" className="font-semibold px-1">All applications</h2>
+            <h2 id="all-apps-heading" className="text-lg font-bold tracking-tight px-1">All applications</h2>
             <OutcomeStats jobs={jobs} />
 
             {loadError && (
@@ -402,10 +405,10 @@ export default function TrackerPage() {
                     aria-pressed={filter === s.value}
                     className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-1 ${
                       filter === s.value
-                        ? "bg-fg text-bg border-fg"
+                        ? "bg-accent text-[var(--accent-fg)] border-accent font-medium"
                         : s.value === "closing" && counts.closing
                           ? "border-ok text-ok"
-                          : "hover:border-fg/40"
+                          : "bg-surface hover:border-accent/40"
                     }`}
                   >
                     {s.label} {counts[s.value] ?? 0}
@@ -439,7 +442,8 @@ export default function TrackerPage() {
                       key={j.id}
                       className={`card p-3 space-y-2 ${urgency === "overdue" ? "border-l-4 border-l-bad" : urgency === "soon" ? "border-l-4 border-l-ok" : ""}`}
                     >
-                      <div className="flex items-start gap-2">
+                      <div className="flex items-start gap-3">
+                        <CompanyMark name={j.company} />
                         <Link href={`/jobs/${j.id}`} className="flex-1 min-w-0">
                           <div className="font-medium truncate">{j.title || "Untitled role"}</div>
                           <div className="text-sm text-muted truncate">
@@ -477,7 +481,7 @@ export default function TrackerPage() {
 
             <div className="card overflow-x-auto hidden sm:block">
               <table className="w-full text-sm">
-                <thead className="text-left text-muted">
+                <thead className="text-left text-xs text-muted bg-surface-2">
                   <tr className="border-b border-border">
                     <th className="p-3 font-medium">Role</th>
                     <th className="p-3 font-medium hidden 2xl:table-cell">Location</th>
@@ -500,12 +504,17 @@ export default function TrackerPage() {
                       const fit = fitOf(j.analysis);
                       const isDue = followUpDue(j, today);
                       return (
-                        <tr key={j.id} className="border-b border-border last:border-0 hover:bg-bg/60 align-top">
+                        <tr key={j.id} className="border-b border-border last:border-0 hover:bg-surface-2 align-top transition-colors">
                           <td className="p-3">
-                            <Link href={`/jobs/${j.id}`} className="font-medium hover:underline">
-                              {j.title || "Untitled role"}
-                            </Link>
-                            <div className="text-muted">{j.company}</div>
+                            <div className="flex items-center gap-3">
+                              <CompanyMark name={j.company} />
+                              <div className="min-w-0">
+                                <Link href={`/jobs/${j.id}`} className="font-semibold hover:text-accent">
+                                  {j.title || "Untitled role"}
+                                </Link>
+                                <div className="text-muted">{j.company}</div>
+                              </div>
+                            </div>
                           </td>
                           <td className="p-3 hidden 2xl:table-cell text-muted">{j.location}</td>
                           <td className="p-3">{fit ? <FitBadge fit={fit} /> : <span className="text-muted">–</span>}</td>

@@ -46,7 +46,7 @@ export function JobHeader({
     <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
       <div className="w-full lg:flex-1 lg:min-w-64">
         <input
-          className="ghost-input w-full text-lg sm:text-xl font-semibold"
+          className="ghost-input w-full text-xl sm:text-2xl font-bold tracking-tight"
           value={job.title}
           placeholder="Job title"
           aria-label="Job title"
@@ -81,7 +81,7 @@ export function JobHeader({
         {/* Phones: inside the "Details" disclosure. Desktop: inline. */}
         <div
           id="job-details"
-          className={`${detailsOpen ? "flex" : "hidden"} sm:flex w-full sm:w-auto flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-surface p-2 sm:border-0 sm:bg-transparent sm:p-0`}
+          className={`${detailsOpen ? "flex" : "hidden"} sm:flex w-full sm:w-auto flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-surface p-2 sm:border-0 sm:bg-transparent sm:p-0`}
         >
           {!applied && followUp}
           <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => onPatch({ deadline: v })} />

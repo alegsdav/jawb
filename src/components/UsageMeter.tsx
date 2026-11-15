@@ -48,10 +48,13 @@ export function UsageMeter() {
   const { heavy } = usage;
   const pct = heavy.limit ? Math.round((heavy.remaining / heavy.limit) * 100) : 0;
   return (
-    <div className="space-y-1" title="Job analyses, resume imports and resume drafts. Rolling 24 hours.">
-      <p className={`text-xs ${heavy.remaining ? "text-muted" : "text-bad"}`}>{heavyLine(heavy)}</p>
+    <div
+      className="space-y-2 rounded-2xl bg-accent-soft p-3.5"
+      title="Job analyses, resume imports and resume drafts. Rolling 24 hours."
+    >
+      <p className="text-sm font-semibold">AI analyses</p>
       <div
-        className="h-1.5 rounded-full bg-border overflow-hidden"
+        className="h-2 overflow-hidden rounded-full bg-surface/70"
         role="meter"
         aria-label="Analyses left today"
         aria-valuemin={0}
@@ -60,6 +63,7 @@ export function UsageMeter() {
       >
         <div className={`h-full rounded-full ${heavy.remaining ? "bg-accent" : "bg-bad"}`} style={{ width: `${pct}%` }} />
       </div>
+      <p className={`text-xs ${heavy.remaining ? "text-muted" : "text-bad"}`}>{heavyLine(heavy)}</p>
       {!heavy.remaining && heavy.resetAt && <p className="text-xs text-muted">Next one at {clock(heavy.resetAt)}</p>}
     </div>
   );
