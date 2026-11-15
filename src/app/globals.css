@@ -162,7 +162,6 @@ body {
 }
 .doc-field:hover { background: rgb(0 0 0 / 0.035); }
 .doc-field:focus { background: rgb(0 0 0 / 0.05); }
-.doc-page :is(input, textarea):focus-visible { outline: none; }
 .doc-field::placeholder { color: #b0b0aa; }
 .doc-entry:not(.is-active) .doc-field::placeholder,
 .doc-section .doc-field:not(:focus)::placeholder { color: transparent; }
@@ -224,3 +223,5 @@ body {
 }
 
 }
+/* Unlayered on purpose: the global :focus-visible outline (top of this file) is unlayered and would win otherwise. */
+.doc-page :is(input, textarea):focus-visible { outline: none; }
