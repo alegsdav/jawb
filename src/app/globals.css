@@ -26,33 +26,13 @@
   --dot-green: #4cc38a;
   --dot-red: #e5484d;
   --dot-grey: #c4c4c4;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111111;
-    --surface: #161616;
-    --surface-2: #1f1f1f;
-    --border: #2a2a2a;
-    --fg: #ededed;
-    --muted: #9a9a9a;
-    --accent: #7db4e6;
-    --accent-soft: #19242f;
-    --accent-fg: #0d0d0d;
-    --primary-bg: #2a4560;
-    --primary-bg-hover: #325172;
-    --primary-fg: #e8f2fc;
-    --good: #5fcf98;
-    --ok: #eba65e;
-    --bad: #f07878;
-    --good-bg: #14241c;
-    --ok-bg: #2a2116;
-    --bad-bg: #2c1818;
-    --dot-grey: #555555;
-  }
+  /* Window chrome behind the white work panel (app shell) */
+  --chrome: #f0f0f0;
+  color-scheme: light;
 }
 
 @theme inline {
+  --color-chrome: var(--chrome);
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -71,7 +51,7 @@
 }
 
 body {
-  background: var(--bg);
+  background: var(--chrome);
   color: var(--fg);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
@@ -100,6 +80,21 @@ body {
   .btn-sm { @apply px-2.5 py-1 text-xs; }
   .chip { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs border border-border; }
   .label { @apply text-xs font-medium text-muted; }
+  /* Editor chrome (after the editor reference): small ghost icon buttons and dark floating popovers. */
+  .icon-btn {
+    @apply inline-grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted hover:bg-surface-2 hover:text-fg
+      disabled:opacity-40 disabled:pointer-events-none cursor-pointer;
+  }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .float-dark {
+    background: rgb(44 44 46 / 0.94); color: #f4f4f5; border: 1px solid rgb(255 255 255 / 0.08);
+    border-radius: 12px; box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.35), 0 2px 6px rgb(0 0 0 / 0.15);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  }
+  .float-dark .float-item { @apply flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left; color: #e9e9ea; }
+  .float-dark .float-item:hover:not(:disabled), .float-dark .float-item:focus-visible { background: rgb(255 255 255 / 0.09); }
+  .float-dark .float-muted { color: #a1a1a6; }
+  .float-dark .float-sep { height: 1px; background: rgb(255 255 255 / 0.08); }
   /* Grey round icon holder, as in the reference's stats and task rows */
   .icon-chip { @apply inline-grid h-11 w-11 shrink-0 place-items-center rounded-full bg-surface-2 text-fg; }
 }

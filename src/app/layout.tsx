@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { Poppins } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const ui = Poppins({ variable: "--font-ui", subsets: ["latin"], weight: ["400", "500", "600"] });
+const ui = Inter({ variable: "--font-ui", subsets: ["latin"], weight: ["400", "500", "600"] });
 
 export const metadata: Metadata = {
   title: "Job Pipeline",
