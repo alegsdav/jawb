@@ -5,21 +5,26 @@ import type { Resume } from "@/lib/types";
 import { Menu, Popover } from "./Menu";
 import { RedoIcon, UndoIcon } from "./icons";
 
-type DocField = HTMLInputElement | HTMLTextAreaElement;
-const DOC_FIELD_SELECTOR = "input.doc-field, textarea.doc-field";
+/**
+ * Editable document targets: the legacy field inputs, and the resume editor's contentEditable root
+ * (`.doc-editor`, inside `.doc-canvas`). A focused element inside the editor counts as the editor.
+ */
+const DOC_FIELD_SELECTOR = "input.doc-field, textarea.doc-field, .doc-editor";
 
-/** The document field that had focus last. Menu clicks don't move focus (see MenuItem), so this stays valid. */
-let lastDocField: DocField | null = null;
+/** The document target that had focus last. Menu clicks don't move focus (see MenuItem), so this stays valid. */
+let lastDocField: HTMLElement | null = null;
 let docFieldTrackerRefs = 0;
 
 const onDocFocusIn = (e: FocusEvent) => {
   const t = e.target;
-  if (t instanceof Element && t.matches(DOC_FIELD_SELECTOR)) lastDocField = t as DocField;
+  if (!(t instanceof Element)) return;
+  const field = t.closest(DOC_FIELD_SELECTOR);
+  if (field instanceof HTMLElement) lastDocField = field;
 };
 
 /**
- * Remembers the last focused document field (`input.doc-field, textarea.doc-field`) so that menu
- * commands like Cut/Copy/Paste/Select all can act on it. Installs one document listener, shared by all callers.
+ * Remembers the last focused document target (see DOC_FIELD_SELECTOR) so that menu commands like
+ * Cut/Copy/Paste/Select all can act on it. Installs one document listener, shared by all callers.
  */
 export function useDocFieldTracker(): void {
   useEffect(() => {
@@ -36,7 +41,8 @@ export function useDocFieldTracker(): void {
 }
 
 /**
- * Edit command for the remembered document field. Refocuses it without scrolling, then runs the command.
+ * Edit command for the remembered document target. Refocuses it without scrolling, then runs the command.
+ * Inputs and textareas use their own select; the contentEditable editor uses execCommand for every command.
  * Paste reads the clipboard and inserts through execCommand, so React's onChange fires as for typing.
  */
 export async function docEdit(cmd: "cut" | "copy" | "paste" | "selectAll"): Promise<void> {
@@ -45,7 +51,8 @@ export async function docEdit(cmd: "cut" | "copy" | "paste" | "selectAll"): Prom
     if (!el || !el.isConnected) return;
     el.focus({ preventScroll: true });
     if (cmd === "selectAll") {
-      el.select();
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.select();
+      else document.execCommand("selectAll");
       return;
     }
     if (cmd === "paste") {
@@ -66,9 +73,9 @@ export async function docEdit(cmd: "cut" | "copy" | "paste" | "selectAll"): Prom
 
 /** Helper text for a menu hint: the editing and print shortcuts of the document. */
 export const EDIT_SHORTCUTS =
-  "Enter: new bullet or next field · Backspace on an empty bullet: remove it · Alt+↑/↓: move bullet · " +
-  "Arrow keys: move between lines and fields · Ctrl/⌘+Z: undo · Ctrl/⌘+Shift+Z: redo · Ctrl/⌘+P: print · " +
-  "Ctrl/⌘+X/C/V: cut, copy, paste";
+  "Enter: new line · Backspace at the start of a line: join it with the line above (on a bullet: turn it into normal text) · " +
+  "Tab: jump to the right-aligned part of an entry line · Ctrl/⌘+Z: undo · Ctrl/⌘+Shift+Z: redo · " +
+  "Ctrl/⌘+B / I: bold / italic · Ctrl/⌘+P: print · Ctrl/⌘+X/C/V: cut, copy, paste";
 
 /** Row of menu triggers (File, Edit, View...) for the top bar. */
 export function MenuBar({ children }: { children: React.ReactNode }) {

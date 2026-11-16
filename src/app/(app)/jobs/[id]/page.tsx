@@ -29,7 +29,8 @@ import {
   planSaveAsMaster, planTailoredRefresh, readJob, rebaseJob, saveTailoredDocument, statusConflictOutcome, tailoredFromRow,
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
-import { ResumeDocument, type DocCommands, type DocSelection, type FormatState } from "@/components/ResumeDocument";
+import { ResumeDocument } from "@/components/ResumeDocument";
+import { EMPTY_FORMAT_STATE, LINE_KIND_LABELS, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { JobHeader } from "@/components/job/JobHeader";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
@@ -76,9 +77,12 @@ const REFRESH_GAP_MS = 1500;
 const ZOOM_CHOICES: [number, string][] = [[0, "Fit"], [0.5, "50%"], [0.75, "75%"], [0.9, "90%"], [1, "100%"], [1.25, "125%"], [1.5, "150%"]];
 
 /** A check mark in a fixed-width cell, so the labels of ticked and unticked menu items line up. */
-/** Help > Editing tips: the same habits the resume page's tips describe, in one line. */
+/** Help > Editing tips: the same habits as the resume page's tips, plus how the coaching panel follows the caret. */
 const EDITING_TIPS =
-  "Click a bullet to see its feedback and suggested edits. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it.";
+  "Click a bullet to see its feedback and suggested edits. Type anywhere, like a normal document. Each line has a style " +
+  "(Section heading, Entry title, Entry subtitle, Bullet, Normal text): change it from Format or the style box in the toolbar. " +
+  "Enter starts a new line, Backspace joins lines. On an entry title or subtitle line, Tab jumps to the right-aligned part " +
+  "(location or dates). Undo with Ctrl/⌘+Z.";
 
 const tick = (on: boolean) => <span className="inline-block w-3 shrink-0 text-center">{on ? "✓" : ""}</span>;
 
@@ -148,12 +152,10 @@ export default function JobPage() {
   /** This job's tailored copy's row id (facts coached here link to it). */
   const [tailoredId, setTailoredId] = useState<string | null>(null);
   const [factUndo, setFactUndo] = useState<Fact | null>(null);
-  /** What's selected in the document (entry, bullet or section), for the Insert menu's enabled states. */
-  const [docSel, setDocSel] = useState<DocSelection | null>(null);
-  /** Imperative document commands (add bullet, entry, role line, section) for the Insert menu. */
+  /** Imperative document commands (bold, italic, reset, set a line's style) for the Format menu. */
   const commandsRef = useRef<DocCommands | null>(null);
-  /** Bold/italic state of the focused field (drives the Format menu's check marks and enabled states). */
-  const [formatState, setFormatState] = useState<FormatState>({ canFormat: false, bold: false, italic: false });
+  /** Formatting state of the caret's line (drives the Format menu's check marks and enabled states). */
+  const [formatState, setFormatState] = useState<FormatState>(EMPTY_FORMAT_STATE);
 
   const autoRan = useRef(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -709,7 +711,6 @@ export default function JobPage() {
 
   /** The document's selection drives the coaching panel (a section alone doesn't). */
   const onSelection = useCallback((sel: DocSelection | null) => {
-    setDocSel(sel);
     if (!sel || sel.kind === "section") return;
     setCoachTarget((cur) => {
       const next = { sectionId: sel.sectionId, entryId: sel.entryId, bulletId: sel.kind === "bullet" ? sel.bulletId : null };
@@ -1103,6 +1104,8 @@ export default function JobPage() {
     </div>
   );
 
+  /** Style changes apply to the caret's line; none apply to the name and contact lines. */
+  const noLineStyle = formatState.lineKind === null || formatState.lineKind === "name" || formatState.lineKind === "contact";
   const topBar = (
     <DocToolbar>
       <Link
@@ -1167,34 +1170,6 @@ export default function JobPage() {
             </MenuItem>
           ))}
         </MenuBarMenu>
-        <MenuBarMenu label="Insert">
-          <MenuItem
-            onSelect={() => commandsRef.current?.addBullet()}
-            disabled={!(docSel?.kind === "entry" || docSel?.kind === "bullet")}
-            hint="After the selected bullet, or at the end of the selected entry"
-          >
-            Bullet
-          </MenuItem>
-          <MenuItem onSelect={() => commandsRef.current?.addEntry()} disabled={!docSel} hint="In the selected section">
-            Entry
-          </MenuItem>
-          <MenuItem
-            onSelect={() => commandsRef.current?.addRoleLine()}
-            disabled={!(docSel?.kind === "entry" || docSel?.kind === "bullet")}
-            hint="Role, dates and location under the selected entry"
-          >
-            Role &amp; dates line
-          </MenuItem>
-          <MenuSeparator />
-          <MenuItem
-            onSelect={() => {
-              const title = window.prompt("Section name (only add sections you actually have):");
-              if (title?.trim()) commandsRef.current?.addSection(title.trim());
-            }}
-          >
-            Section…
-          </MenuItem>
-        </MenuBarMenu>
         <MenuBarMenu label="Format">
           <MenuItem onSelect={() => commandsRef.current?.toggleBold()} disabled={!formatState.canFormat} shortcut="Ctrl+B">
             <span className="flex items-center gap-1.5">{tick(formatState.bold)}Bold</span>
@@ -1202,6 +1177,24 @@ export default function JobPage() {
           <MenuItem onSelect={() => commandsRef.current?.toggleItalic()} disabled={!formatState.canFormat} shortcut="Ctrl+I">
             <span className="flex items-center gap-1.5">{tick(formatState.italic)}Italic</span>
           </MenuItem>
+          <MenuSeparator />
+          {LINE_KIND_LABELS.map(({ kind, label, hint }) => {
+            const current = formatState.lineKind === kind;
+            return (
+              <MenuItem
+                key={kind}
+                onSelect={() => commandsRef.current?.setLineKind(kind)}
+                disabled={noLineStyle}
+                hint={hint}
+              >
+                <span className="flex items-center gap-1.5">
+                  {tick(current)}
+                  {label}
+                  {current && <span className="sr-only">(current)</span>}
+                </span>
+              </MenuItem>
+            );
+          })}
           <MenuSeparator />
           <MenuItem onSelect={() => commandsRef.current?.resetFormat()} disabled={!formatState.canFormat}>
             Reset to default style
@@ -1211,7 +1204,7 @@ export default function JobPage() {
           <MenuItem onSelect={() => {}} hint={EDITING_TIPS}>
             Editing tips
           </MenuItem>
-          <MenuItem onSelect={() => {}} hint={`${EDIT_SHORTCUTS} · Ctrl/⌘+B / I (bold / italic on titles, dates and headers)`}>
+          <MenuItem onSelect={() => {}} hint={`${EDIT_SHORTCUTS} · Ctrl/⌘+B / I (bold / italic)`}>
             Keyboard shortcuts
           </MenuItem>
           <MenuItem

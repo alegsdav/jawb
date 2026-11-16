@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { emptyResume, emptySection, isEmptyResume, normalizeResume, reconcileIds, uid } from "@/lib/resume";
+import { emptyResume, isEmptyResume, normalizeResume, reconcileIds, uid } from "@/lib/resume";
 import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
 import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import type { Fact, Resume } from "@/lib/types";
-import { ResumeDocument, type DocCommands, type DocSelection, type FormatState } from "@/components/ResumeDocument";
+import { ResumeDocument } from "@/components/ResumeDocument";
+import { EMPTY_FORMAT_STATE, LINE_KIND_LABELS, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { CoachPanel } from "@/components/CoachPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
@@ -34,10 +35,13 @@ import { useHistory } from "@/lib/useHistory";
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
 
 /** The editing tips, shown as the Help menu's hint (the document itself stays uncluttered). */
-const EDIT_TIPS = "Click any line to edit. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it. Undo with Ctrl/⌘+Z.";
+const EDIT_TIPS =
+  "Type anywhere, like a normal document. Each line has a style (Section heading, Entry title, Entry subtitle, Bullet, Normal text): " +
+  "change it from Format or the style box in the toolbar. Enter starts a new line, Backspace joins lines. " +
+  "On an entry title or subtitle line, Tab jumps to the right-aligned part (location or dates). Undo with Ctrl/⌘+Z.";
 
 /** Help > Keyboard shortcuts: the document's shortcuts, plus bold and italic. */
-const EDIT_SHORTCUTS_HELP = `${EDIT_SHORTCUTS} · Ctrl/⌘+B / I (bold / italic on titles, dates and headers)`;
+const EDIT_SHORTCUTS_HELP = `${EDIT_SHORTCUTS} · Ctrl/⌘+B / I (bold / italic)`;
 
 /** Zoom choices for View > Zoom (0 = Fit). */
 const ZOOM_CHOICES: { label: string; value: number }[] = [
@@ -153,12 +157,12 @@ export default function MasterResumePage() {
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   const [commentEl, setCommentEl] = useState<HTMLDivElement | null>(null);
-  /** What is selected in the document (drives the Edit and Insert menus' disabled states). */
+  /** What is selected in the document (drives the Edit menu's disabled states). */
   const [docSel, setDocSel] = useState<DocSelection | null>(null);
-  /** The document's commands (add bullet/entry/role line/section) for the Insert menu. */
+  /** The document's commands (bold, italic, reset, set a line's style) for the Format menu. */
   const commandsRef = useRef<DocCommands | null>(null);
-  /** Bold/italic state of the focused field (drives the Format menu's check marks and enabled states). */
-  const [formatState, setFormatState] = useState<FormatState>({ canFormat: false, bold: false, italic: false });
+  /** Formatting state of the caret's line (drives the Format menu's check marks and enabled states). */
+  const [formatState, setFormatState] = useState<FormatState>(EMPTY_FORMAT_STATE);
   const [zoom, setZoom] = useZoom("resume");
   const facts = useFacts(supabase);
   const mirrorRef = useRef(facts.mirror);
@@ -324,14 +328,8 @@ export default function MasterResumePage() {
   const deleteFact = async (f: Fact) => {
     if (await facts.remove([f.id])) setUndo({ message: "Fact deleted", restore: [f] });
   };
-  const insertSection = () => {
-    const title = prompt("Section name (only add sections you actually have):");
-    if (!title?.trim()) return;
-    // The document focuses the new section's title; with no document on screen (empty resume), just add it.
-    if (commandsRef.current) commandsRef.current.addSection(title.trim());
-    else doc.set((cur) => ({ ...cur, sections: [...cur.sections, emptySection(title.trim())] }), true);
-  };
-  const inEntry = docSel?.kind === "entry" || docSel?.kind === "bullet";
+  /** Style changes apply to the caret's line; none apply to the name and contact lines. */
+  const noLineStyle = formatState.lineKind === null || formatState.lineKind === "name" || formatState.lineKind === "contact";
 
   const onboarding = empty && !importOpen;
   const banners = (
@@ -416,13 +414,6 @@ export default function MasterResumePage() {
                 </MenuItem>
               ))}
             </MenuBarMenu>
-            <MenuBarMenu label="Insert">
-              <MenuItem onSelect={() => commandsRef.current?.addBullet()} disabled={!inEntry}>Bullet</MenuItem>
-              <MenuItem onSelect={() => commandsRef.current?.addEntry()} disabled={!docSel}>Entry</MenuItem>
-              <MenuItem onSelect={() => commandsRef.current?.addRoleLine()} disabled={!inEntry}>Role &amp; dates line</MenuItem>
-              <MenuSeparator />
-              <MenuItem onSelect={insertSection}>Section…</MenuItem>
-            </MenuBarMenu>
             <MenuBarMenu label="Format">
               <MenuItem onSelect={() => commandsRef.current?.toggleBold()} disabled={!formatState.canFormat} shortcut="Ctrl+B">
                 <span className="inline-flex items-center gap-2">
@@ -438,6 +429,24 @@ export default function MasterResumePage() {
                   {formatState.italic && <span className="sr-only">(on)</span>}
                 </span>
               </MenuItem>
+              <MenuSeparator />
+              {LINE_KIND_LABELS.map(({ kind, label, hint }) => {
+                const current = formatState.lineKind === kind;
+                return (
+                  <MenuItem
+                    key={kind}
+                    onSelect={() => commandsRef.current?.setLineKind(kind)}
+                    disabled={noLineStyle}
+                    hint={hint}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <span aria-hidden="true" className="inline-block w-3">{current ? "✓" : ""}</span>
+                      {label}
+                      {current && <span className="sr-only">(current)</span>}
+                    </span>
+                  </MenuItem>
+                );
+              })}
               <MenuSeparator />
               <MenuItem onSelect={() => commandsRef.current?.resetFormat()} disabled={!formatState.canFormat}>Reset to default style</MenuItem>
             </MenuBarMenu>
