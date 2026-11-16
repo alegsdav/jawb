@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Resume } from "@/lib/types";
 import { resumeToPlainText } from "@/lib/resume";
 import { downloadResumePdf } from "./pdfDownload";
@@ -10,14 +10,17 @@ import { IconButton } from "./DocToolbar";
 /** What gets printed or copied: never the master-only `facts`. */
 const printable = (r: Resume): Resume => ({ version: r.version, header: r.header, sections: r.sections });
 
-/** "Copy as text" and "Download PDF" as icon buttons. Failures show a short message instead of failing silently. */
-export function ResumeActions({ resume: full, fileName }: { resume: Resume; fileName: string }) {
-  const resume = printable(full);
+/**
+ * "Download PDF" and "Copy as text" as reusable actions (toolbar buttons, menu items, or the compact
+ * `ResumeActions` below). Failures set `error` to a short message instead of failing silently.
+ */
+export function useResumeActions(full: Resume, fileName: string) {
+  const resume = useMemo(() => printable(full), [full]);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
 
-  async function downloadPdf() {
+  const download = useCallback(async () => {
     setBusy(true);
     setError("");
     try {
@@ -28,9 +31,9 @@ export function ResumeActions({ resume: full, fileName }: { resume: Resume; file
     } finally {
       setBusy(false);
     }
-  }
+  }, [resume, fileName]);
 
-  async function copy() {
+  const copy = useCallback(async () => {
     setError("");
     try {
       await navigator.clipboard.writeText(resumeToPlainText(resume));
@@ -39,14 +42,20 @@ export function ResumeActions({ resume: full, fileName }: { resume: Resume; file
     } catch {
       setError("Couldn't copy. Your browser blocked the clipboard; download the PDF instead.");
     }
-  }
+  }, [resume]);
 
+  return { download, copy, busy, copied, error };
+}
+
+/** "Copy as text" and "Download PDF" as icon buttons, with the error message next to them. */
+export function ResumeActions({ resume, fileName }: { resume: Resume; fileName: string }) {
+  const { download, copy, busy, copied, error } = useResumeActions(resume, fileName);
   return (
     <>
       <IconButton label={copied ? "Copied" : "Copy as text"} onClick={copy}>
         <CopyIcon />
       </IconButton>
-      <IconButton label={busy ? "Building PDF…" : "Download PDF"} onClick={downloadPdf} disabled={busy}>
+      <IconButton label={busy ? "Building PDF…" : "Download PDF"} onClick={download} disabled={busy}>
         <DownloadIcon />
       </IconButton>
       {error && (

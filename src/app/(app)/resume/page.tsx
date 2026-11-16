@@ -12,9 +12,13 @@ import { ResumeDocument, type DocSelection } from "@/components/ResumeDocument";
 import { CoachPanel } from "@/components/CoachPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
-import { ResumeActions } from "@/components/ResumeActions";
-import { DocToolbar, IconButton, PageCount, UndoRedo } from "@/components/DocToolbar";
-import { DocIcon, HelpIcon, ImportIcon, PlusIcon } from "@/components/icons";
+import { useResumeActions } from "@/components/ResumeActions";
+import {
+  countWords, DocToolbar, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, ToolbarSep, UndoRedo, useEditorShortcuts, useZoom, ZoomSelect,
+} from "@/components/DocToolbar";
+import { MenuItem, MenuSeparator } from "@/components/Menu";
+import { EditorCanvas } from "@/components/ZoomFrame";
+import { CopyIcon, DocIcon, DownloadIcon } from "@/components/icons";
 import { ResumeImport } from "@/components/ResumeImport";
 import { FactsPanel } from "@/components/FactsPanel";
 import { Builder } from "@/components/Builder";
@@ -28,8 +32,30 @@ import { useHistory } from "@/lib/useHistory";
 /** Re-import keeps bullet ids stable (so jobs' "changes vs master" and linked facts stay right). */
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
 
-/** The editing tips, shown as the help button's tooltip (the document itself stays uncluttered). */
+/** The editing tips, shown as the Help menu's hint (the document itself stays uncluttered). */
 const EDIT_TIPS = "Click any line to edit. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it. Undo with Ctrl/⌘+Z.";
+const SHORTCUTS =
+  "Enter: new bullet · Backspace: remove an empty bullet · Alt+↑/↓: move a bullet · Arrow keys: move between fields · Ctrl/⌘+Z: undo · Ctrl/⌘+P: print";
+
+/** Zoom choices for View > Zoom (0 = Fit). */
+const ZOOM_CHOICES: { label: string; value: number }[] = [
+  { label: "Fit", value: 0 },
+  { label: "50%", value: 0.5 },
+  { label: "75%", value: 0.75 },
+  { label: "90%", value: 0.9 },
+  { label: "100%", value: 1 },
+  { label: "125%", value: 1.25 },
+  { label: "150%", value: 1.5 },
+];
+
+/** Printer glyph (same 24px stroke style as ./icons; there is no printer icon there). */
+function PrintIcon({ className }: { className?: string }) {
+  return (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <path d="M7 9V4h10v5" /><rect x="4" y="9" width="16" height="7" rx="1.5" /><path d="M7 14h10v6H7z" />
+    </svg>
+  );
+}
 
 type MasterRow = { id: string; content: unknown; updated_at: string };
 const MASTER_COLS = "id, content, updated_at";
@@ -124,6 +150,8 @@ export default function MasterResumePage() {
   const [justImported, setJustImported] = useState(false);
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
+  const [commentEl, setCommentEl] = useState<HTMLDivElement | null>(null);
+  const [zoom, setZoom] = useZoom("resume");
   const facts = useFacts(supabase);
   const mirrorRef = useRef(facts.mirror);
   mirrorRef.current = facts.mirror;
@@ -133,23 +161,9 @@ export default function MasterResumePage() {
   const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
   const [coachStart, setCoachStart] = useState<"questions" | undefined>(undefined);
   const [sideTab, setSideTab] = useState<"coach" | "facts">("coach");
-  const [tipsOpen, setTipsOpen] = useState(false);
-  const tipsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!tipsOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!tipsRef.current?.contains(e.target as Node)) setTipsOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTipsOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [tipsOpen]);
+  // Print and save shortcuts, and the File/toolbar actions. Hooks run before the early returns below.
+  useEditorShortcuts({ onPrint: () => window.print(), onSave: () => {} });
+  const actions = useResumeActions(resume ?? emptyResume(), `${resume?.header.name ?? ""} Resume`);
   /** Onboarding: "I don't have a resume yet" opens the builder. */
   const [building, setBuilding] = useState(false);
   /** Entry ids of a resume the builder just made (for "Go deeper"). */
@@ -301,57 +315,99 @@ export default function MasterResumePage() {
   const deleteFact = async (f: Fact) => {
     if (await facts.remove([f.id])) setUndo({ message: "Fact deleted", restore: [f] });
   };
+  const addSection = () => {
+    const title = prompt("Section name (only add sections you actually have):");
+    if (title?.trim()) doc.set((cur) => ({ ...cur, sections: [...cur.sections, emptySection(title.trim())] }), true);
+  };
+
+  const onboarding = empty && !importOpen;
+  const banners = (
+    <>
+      {built && (
+        <section aria-labelledby="built-heading" className="space-y-2 rounded-lg border border-border bg-surface p-4">
+          <h2 id="built-heading" className="text-sm font-medium">Your first draft is ready.</h2>
+          <p className="text-sm text-muted">
+            It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
+            a few quick questions help you find numbers worth adding.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {built
+              .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
+              .filter((x): x is NonNullable<typeof x> => !!x)
+              .map(({ sec, it }) => (
+                <button key={it.id} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => goDeeper(sec.id, it.id)}>
+                  Go deeper: {it.title || "this experience"}
+                </button>
+              ))}
+            <Link href="/" className="btn btn-sm btn-primary min-h-10 sm:min-h-0">Next: add a job →</Link>
+            <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setBuilt(null)}>Dismiss</button>
+          </div>
+        </section>
+      )}
+      {justImported && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface p-4">
+          <div className="min-w-48 flex-1">
+            <p className="text-sm font-medium">Step 1 done — your master resume is ready.</p>
+            <p className="text-xs text-muted">Check it below, then add the first job you want to tailor it for.</p>
+          </div>
+          <Link href="/" className="btn btn-sm btn-primary w-full sm:w-auto">Next: add a job →</Link>
+        </div>
+      )}
+      {importOpen && (
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <ResumeImport replaceWarning onImported={onImported} onCancel={() => setImportOpen(false)} />
+        </div>
+      )}
+      {(error || actions.error) && <p role="alert" className="px-1 text-sm text-bad">{error || actions.error}</p>}
+      {notice && <p role="status" className="px-1 text-sm text-good">{notice}</p>}
+    </>
+  );
 
   return (
     <div className="flex flex-col lg:h-full lg:min-h-0">
-      <DocToolbar onSlot={setSlot}>
+      <DocToolbar>
         <h1 className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-normal text-muted">
           <DocIcon className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">Master resume</span>
           <span className="sr-only sm:hidden">Master resume</span>
         </h1>
-        <span className="ml-2 hidden truncate text-xs text-muted md:inline">Everything true about you</span>
-        <div className="ml-auto flex items-center gap-1">
-          <span className="flex items-center gap-2 text-xs text-muted">
-            <SaveStatus status={conflict ? "error" : status} />
-            <span className="hidden md:inline"><PageCount {...measure} /></span>
-          </span>
-          <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
-          <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
-          <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
-          <IconButton
-            label="Add section"
-            onClick={() => {
-              const title = prompt("Section name (only add sections you actually have):");
-              if (title?.trim()) doc.set((cur) => ({ ...cur, sections: [...cur.sections, emptySection(title.trim())] }), true);
-            }}
-          >
-            <PlusIcon />
-          </IconButton>
-          <IconButton label="Re-import" onClick={() => setImportOpen((o) => !o)}>
-            <ImportIcon />
-          </IconButton>
-          <ResumeActions resume={resume} fileName={`${resume.header.name} Resume`} />
-          <div ref={tipsRef} className="relative">
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={EDIT_TIPS}
-              title={EDIT_TIPS}
-              aria-expanded={tipsOpen}
-              aria-controls="edit-tips"
-              onClick={() => setTipsOpen((o) => !o)}
-            >
-              <HelpIcon />
-            </button>
-            <div
-              id="edit-tips"
-              hidden={!tipsOpen}
-              className="float-dark absolute right-0 top-full mt-1.5 z-40 w-72 whitespace-normal p-3 text-xs leading-relaxed"
-            >
-              {EDIT_TIPS}
-            </div>
-          </div>
+        <div className="ml-1 flex min-w-0 items-center">
+          <MenuBar>
+            <MenuBarMenu label="File">
+              <MenuItem onSelect={() => void actions.download()} disabled={actions.busy} hint="Your resume as a PDF, ready to send">
+                Download PDF
+              </MenuItem>
+              <MenuItem onSelect={() => void actions.copy()}>Copy as text</MenuItem>
+              <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
+              <MenuSeparator />
+              <MenuItem onSelect={() => setImportOpen((o) => !o)}>Re-import resume</MenuItem>
+            </MenuBarMenu>
+            <MenuBarMenu label="Edit">
+              <MenuItem onSelect={doc.undo} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
+              <MenuItem onSelect={doc.redo} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
+            </MenuBarMenu>
+            <MenuBarMenu label="View">
+              {ZOOM_CHOICES.map((z) => (
+                <MenuItem key={z.value} onSelect={() => setZoom(z.value)}>
+                  <span className="inline-flex items-center gap-2">
+                    <span aria-hidden="true" className="inline-block w-3">{zoom === z.value ? "✓" : ""}</span>
+                    {z.label}
+                    {zoom === z.value && <span className="sr-only">(current)</span>}
+                  </span>
+                </MenuItem>
+              ))}
+            </MenuBarMenu>
+            <MenuBarMenu label="Insert">
+              <MenuItem onSelect={addSection}>Section…</MenuItem>
+            </MenuBarMenu>
+            <MenuBarMenu label="Help">
+              <MenuItem onSelect={() => {}} hint={EDIT_TIPS}>Editing tips</MenuItem>
+              <MenuItem onSelect={() => {}} hint={SHORTCUTS}>Keyboard shortcuts</MenuItem>
+            </MenuBarMenu>
+          </MenuBar>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <SaveStatus status={conflict ? "error" : status} />
           <a
             href="#side-panel"
             className="hidden rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg sm:inline-flex lg:hidden"
@@ -362,61 +418,61 @@ export default function MasterResumePage() {
         </div>
       </DocToolbar>
 
+      {!empty && (
+        <EditorToolbar>
+          <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
+          <IconButton label="Print (Ctrl/⌘+P)" onClick={() => window.print()}>
+            <PrintIcon />
+          </IconButton>
+          <ZoomSelect value={zoom} onChange={setZoom} />
+          <ToolbarSep />
+          <div ref={setSlot} className="flex items-center" />
+          <ToolbarSep />
+          <IconButton label={actions.copied ? "Copied" : "Copy as text"} onClick={() => void actions.copy()}>
+            <CopyIcon />
+          </IconButton>
+          <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>
+            <DownloadIcon />
+          </IconButton>
+        </EditorToolbar>
+      )}
+
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
-        {/* Document column: plain white, centred. Scrolls on its own on lg+. */}
-        <div className="min-w-0 flex-1 lg:overflow-y-auto">
-          <div className="mx-auto max-w-[860px] space-y-3 px-4 pb-6 pt-4 sm:px-8">
-            {empty && !importOpen ? (
-              building ? (
+        {/* Document column: grey Docs canvas (scrolls on lg+), status bar pinned at its bottom. */}
+        <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+          {onboarding ? (
+            <div className="mx-auto w-full max-w-[860px] space-y-3 px-4 pb-6 pt-4 sm:px-8">
+              {building ? (
                 <Builder email={email} onBuilt={onBuilt} onCancel={() => setBuilding(false)} />
               ) : (
                 <Onboarding onImported={onImported} onBuild={() => setBuilding(true)} />
-              )
-            ) : (
-              <>
-                {built && (
-                  <section aria-labelledby="built-heading" className="space-y-2 rounded-lg border border-border p-4">
-                    <h2 id="built-heading" className="text-sm font-medium">Your first draft is ready.</h2>
-                    <p className="text-sm text-muted">
-                      It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
-                      a few quick questions help you find numbers worth adding.
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {built
-                        .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
-                        .filter((x): x is NonNullable<typeof x> => !!x)
-                        .map(({ sec, it }) => (
-                          <button key={it.id} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => goDeeper(sec.id, it.id)}>
-                            Go deeper: {it.title || "this experience"}
-                          </button>
-                        ))}
-                      <Link href="/" className="btn btn-sm btn-primary min-h-10 sm:min-h-0">Next: add a job →</Link>
-                      <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setBuilt(null)}>Dismiss</button>
-                    </div>
-                  </section>
-                )}
-                {justImported && (
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border p-4">
-                    <div className="min-w-48 flex-1">
-                      <p className="text-sm font-medium">Step 1 done — your master resume is ready.</p>
-                      <p className="text-xs text-muted">Check it below, then add the first job you want to tailor it for.</p>
-                    </div>
-                    <Link href="/" className="btn btn-sm btn-primary w-full sm:w-auto">Next: add a job →</Link>
-                  </div>
-                )}
-
-                {importOpen && (
-                  <div className="rounded-lg border border-border p-4">
-                    <ResumeImport replaceWarning onImported={onImported} onCancel={() => setImportOpen(false)} />
-                  </div>
-                )}
-                {error && <p className="px-1 text-sm text-bad">{error}</p>}
-                {notice && <p role="status" className="px-1 text-sm text-good">{notice}</p>}
-
-                <ResumeDocument value={resume} onChange={doc.set} onMeasure={setMeasure} actionsSlot={slot} onSelectionChange={onSelection} />
-              </>
-            )}
-          </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Banners sit above the canvas, unscaled, in the page's column. */}
+              <div className="mx-auto w-full max-w-[816px] shrink-0 space-y-3 px-4 pt-4 empty:hidden">{banners}</div>
+              <EditorCanvas zoom={zoom} className="min-w-0 flex-1 pb-6 lg:min-h-0 lg:overflow-auto">
+                <ResumeDocument
+                  value={resume}
+                  onChange={doc.set}
+                  onMeasure={setMeasure}
+                  actionsSlot={slot}
+                  commentSlot={commentEl}
+                  onSelectionChange={onSelection}
+                />
+              </EditorCanvas>
+              {!empty && (
+                <StatusBar
+                  pages={measure.pages}
+                  words={countWords(resume)}
+                  saveStatus={<SaveStatus status={conflict ? "error" : status} />}
+                  zoom={zoom}
+                  onZoom={setZoom}
+                />
+              )}
+            </>
+          )}
         </div>
 
         {/* Side panel: hairline divider on lg+, its own scroll. Phones: stacked below the document. */}
@@ -424,6 +480,8 @@ export default function MasterResumePage() {
           id="side-panel"
           className="scroll-mt-16 space-y-4 border-t border-border p-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
         >
+          {/* The selected bullet's comment card (takes no room until a comment exists). */}
+          <div ref={setCommentEl} className="empty:hidden mb-4" />
           <SideTabs
             label="Panel"
             value={sideTab}
