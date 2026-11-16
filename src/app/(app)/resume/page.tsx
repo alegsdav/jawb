@@ -8,7 +8,7 @@ import { emptyResume, emptySection, isEmptyResume, normalizeResume, reconcileIds
 import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
 import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import type { Fact, Resume } from "@/lib/types";
-import { ResumeDocument, type DocCommands, type DocSelection } from "@/components/ResumeDocument";
+import { ResumeDocument, type DocCommands, type DocSelection, type FormatState } from "@/components/ResumeDocument";
 import { CoachPanel } from "@/components/CoachPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
@@ -35,6 +35,9 @@ const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(pre
 
 /** The editing tips, shown as the Help menu's hint (the document itself stays uncluttered). */
 const EDIT_TIPS = "Click any line to edit. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it. Undo with Ctrl/⌘+Z.";
+
+/** Help > Keyboard shortcuts: the document's shortcuts, plus bold and italic. */
+const EDIT_SHORTCUTS_HELP = `${EDIT_SHORTCUTS} · Ctrl/⌘+B / I (bold / italic on titles, dates and headers)`;
 
 /** Zoom choices for View > Zoom (0 = Fit). */
 const ZOOM_CHOICES: { label: string; value: number }[] = [
@@ -154,6 +157,8 @@ export default function MasterResumePage() {
   const [docSel, setDocSel] = useState<DocSelection | null>(null);
   /** The document's commands (add bullet/entry/role line/section) for the Insert menu. */
   const commandsRef = useRef<DocCommands | null>(null);
+  /** Bold/italic state of the focused field (drives the Format menu's check marks and enabled states). */
+  const [formatState, setFormatState] = useState<FormatState>({ canFormat: false, bold: false, italic: false });
   const [zoom, setZoom] = useZoom("resume");
   const facts = useFacts(supabase);
   const mirrorRef = useRef(facts.mirror);
@@ -379,7 +384,8 @@ export default function MasterResumePage() {
           <span className="hidden sm:inline">Master resume</span>
           <span className="sr-only sm:hidden">Master resume</span>
         </h1>
-        <div className="ml-1 flex min-w-0 items-center">
+        {/* Phones: the menus wrap onto a second line and get smaller padding, so each popup stays on screen. */}
+        <div className="ml-1 flex min-w-0 items-center whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-36 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
           <MenuBar>
             <MenuBarMenu label="File">
               <MenuItem onSelect={() => void actions.download()} disabled={actions.busy} hint="Your resume as a PDF, ready to send">
@@ -417,9 +423,27 @@ export default function MasterResumePage() {
               <MenuSeparator />
               <MenuItem onSelect={insertSection}>Section…</MenuItem>
             </MenuBarMenu>
+            <MenuBarMenu label="Format">
+              <MenuItem onSelect={() => commandsRef.current?.toggleBold()} disabled={!formatState.canFormat} shortcut="Ctrl+B">
+                <span className="inline-flex items-center gap-2">
+                  <span aria-hidden="true" className="inline-block w-3">{formatState.bold ? "✓" : ""}</span>
+                  Bold
+                  {formatState.bold && <span className="sr-only">(on)</span>}
+                </span>
+              </MenuItem>
+              <MenuItem onSelect={() => commandsRef.current?.toggleItalic()} disabled={!formatState.canFormat} shortcut="Ctrl+I">
+                <span className="inline-flex items-center gap-2">
+                  <span aria-hidden="true" className="inline-block w-3">{formatState.italic ? "✓" : ""}</span>
+                  Italic
+                  {formatState.italic && <span className="sr-only">(on)</span>}
+                </span>
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem onSelect={() => commandsRef.current?.resetFormat()} disabled={!formatState.canFormat}>Reset to default style</MenuItem>
+            </MenuBarMenu>
             <MenuBarMenu label="Help">
               <MenuItem onSelect={() => {}} hint={EDIT_TIPS}>Editing tips</MenuItem>
-              <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS}>Keyboard shortcuts</MenuItem>
+              <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS_HELP}>Keyboard shortcuts</MenuItem>
             </MenuBarMenu>
           </MenuBar>
         </div>
@@ -478,6 +502,7 @@ export default function MasterResumePage() {
                   commentSlot={commentEl}
                   onSelectionChange={onSelection}
                   commandsRef={commandsRef}
+                  onFormatStateChange={setFormatState}
                 />
               </EditorCanvas>
               {!empty && (

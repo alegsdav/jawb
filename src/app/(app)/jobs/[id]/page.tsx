@@ -29,7 +29,7 @@ import {
   planSaveAsMaster, planTailoredRefresh, readJob, rebaseJob, saveTailoredDocument, statusConflictOutcome, tailoredFromRow,
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
-import { ResumeDocument, type DocCommands, type DocSelection } from "@/components/ResumeDocument";
+import { ResumeDocument, type DocCommands, type DocSelection, type FormatState } from "@/components/ResumeDocument";
 import { JobHeader } from "@/components/job/JobHeader";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
@@ -152,6 +152,8 @@ export default function JobPage() {
   const [docSel, setDocSel] = useState<DocSelection | null>(null);
   /** Imperative document commands (add bullet, entry, role line, section) for the Insert menu. */
   const commandsRef = useRef<DocCommands | null>(null);
+  /** Bold/italic state of the focused field (drives the Format menu's check marks and enabled states). */
+  const [formatState, setFormatState] = useState<FormatState>({ canFormat: false, bold: false, italic: false });
 
   const autoRan = useRef(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1193,11 +1195,23 @@ export default function JobPage() {
             Section…
           </MenuItem>
         </MenuBarMenu>
+        <MenuBarMenu label="Format">
+          <MenuItem onSelect={() => commandsRef.current?.toggleBold()} disabled={!formatState.canFormat} shortcut="Ctrl+B">
+            <span className="flex items-center gap-1.5">{tick(formatState.bold)}Bold</span>
+          </MenuItem>
+          <MenuItem onSelect={() => commandsRef.current?.toggleItalic()} disabled={!formatState.canFormat} shortcut="Ctrl+I">
+            <span className="flex items-center gap-1.5">{tick(formatState.italic)}Italic</span>
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem onSelect={() => commandsRef.current?.resetFormat()} disabled={!formatState.canFormat}>
+            Reset to default style
+          </MenuItem>
+        </MenuBarMenu>
         <MenuBarMenu label="Help">
           <MenuItem onSelect={() => {}} hint={EDITING_TIPS}>
             Editing tips
           </MenuItem>
-          <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS}>
+          <MenuItem onSelect={() => {}} hint={`${EDIT_SHORTCUTS} · Ctrl/⌘+B / I (bold / italic on titles, dates and headers)`}>
             Keyboard shortcuts
           </MenuItem>
           <MenuItem
@@ -1325,6 +1339,7 @@ export default function JobPage() {
                     quiet={quiet}
                     onSelectionChange={onSelection}
                     commandsRef={commandsRef}
+                    onFormatStateChange={setFormatState}
                   />
                 </EditorCanvas>
                 <StatusBar
