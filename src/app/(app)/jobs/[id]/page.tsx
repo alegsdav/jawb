@@ -1024,40 +1024,40 @@ export default function JobPage() {
   /** Notices: shown above the canvas on the resume tab, inside the scrolling column on the others. */
   const notices = (
     <>
-          {migrationHint && (
-            <div role="status" className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-[13px]">
-              <span className="flex-1 text-muted">
-                {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking, progress on the
-                dashboard) aren&apos;t saved.
-              </span>
-              <button type="button" className="px-1 text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setMigrationHint(false)}>✕</button>
-            </div>
-          )}
-          {error && (
-            <div role="alert" className="flex items-start gap-2 rounded-lg border border-bad/40 px-3 py-2 text-[13px]">
-              <span className="flex-1 text-bad">{error}</span>
-              <button type="button" className="px-1 text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setError("")}>✕</button>
-            </div>
-          )}
-          <AppliedNotice
-            job={job}
-            applied={applied}
-            followUp={followUp}
-            statusSelect={statusSelect}
-            reapply={reapply}
-            onReapply={setReapply}
-            onViewSubmitted={() => setViewingSubmitted(true)}
-          />
-          {resumeBar && !quiet && (
-            <PullBanner
-              plan={pull}
-              onPull={pullFromMaster}
-              onAdd={addOne}
-              onAddAll={addAll}
-              onDismissAdditions={leaveOut}
-              onRemoval={onRemoval}
+            {migrationHint && (
+              <div role="status" className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-[13px]">
+                <span className="flex-1 text-muted">
+                  {MIGRATION_HINT} Until then, some details (deadlines, the copy of what you sent, interview tracking, progress on the
+                  dashboard) aren&apos;t saved.
+                </span>
+                <button type="button" className="px-1 text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setMigrationHint(false)}>✕</button>
+              </div>
+            )}
+            {error && (
+              <div role="alert" className="flex items-start gap-2 rounded-lg border border-bad/40 px-3 py-2 text-[13px]">
+                <span className="flex-1 text-bad">{error}</span>
+                <button type="button" className="px-1 text-muted hover:text-fg" aria-label="Dismiss" onClick={() => setError("")}>✕</button>
+              </div>
+            )}
+            <AppliedNotice
+              job={job}
+              applied={applied}
+              followUp={followUp}
+              statusSelect={statusSelect}
+              reapply={reapply}
+              onReapply={setReapply}
+              onViewSubmitted={() => setViewingSubmitted(true)}
             />
-          )}
+            {resumeBar && !quiet && (
+              <PullBanner
+                plan={pull}
+                onPull={pullFromMaster}
+                onAdd={addOne}
+                onAddAll={addAll}
+                onDismissAdditions={leaveOut}
+                onRemoval={onRemoval}
+              />
+            )}
     </>
   );
 
@@ -1117,20 +1117,23 @@ export default function JobPage() {
             </MenuItem>
           ))}
         </MenuBarMenu>
-        <MenuBarMenu label="Help">
-          <MenuItem
-            onSelect={() => {}}
-            hint="Green strong, amber could be stronger, red weak. Blue bar: changed from your master resume. Yellow [N]: a placeholder to fill in."
-          >
-            What the colours mean
-          </MenuItem>
-          <MenuItem
-            onSelect={() => {}}
-            hint="Arrow keys and Enter move between fields. Ctrl+Z undo, Ctrl+Shift+Z redo, Ctrl+P print."
-          >
-            Keyboard shortcuts
-          </MenuItem>
-        </MenuBarMenu>
+        {/* Phones: the Help menu is dropped to leave room for the document tabs. */}
+        <div className="hidden sm:block">
+          <MenuBarMenu label="Help">
+            <MenuItem
+              onSelect={() => {}}
+              hint="Green strong, amber could be stronger, red weak. Blue bar: changed from your master resume. Yellow [N]: a placeholder to fill in."
+            >
+              What the colours mean
+            </MenuItem>
+            <MenuItem
+              onSelect={() => {}}
+              hint="Arrow keys and Enter move between fields. Ctrl+Z undo, Ctrl+Shift+Z redo, Ctrl+P print."
+            >
+              Keyboard shortcuts
+            </MenuItem>
+          </MenuBarMenu>
+        </div>
       </MenuBar>
 
       <div
@@ -1159,7 +1162,8 @@ export default function JobPage() {
         ))}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+      {/* Fixed width: "Saved" / "Saving…" / "Unsaved changes" never resize the tab row beside it. */}
+      <div className="ml-auto flex w-[112px] shrink-0 items-center justify-end pl-2">
         <SaveStatus status={saveState} />
       </div>
     </DocToolbar>
