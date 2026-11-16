@@ -11,11 +11,12 @@ function FitInput({
 }: { value: string; placeholder: string; onChange: (v: string) => void; className?: string }) {
   return (
     <span className={`relative inline-grid shrink-0 ${className}`}>
-      <span aria-hidden className="invisible max-w-full overflow-hidden whitespace-pre border border-transparent px-1 py-0.5">
+      {/* Same font size as the input: phones force fields to 16px (globals.css), so the sizing text does too. */}
+      <span aria-hidden className="invisible max-w-full overflow-hidden whitespace-pre border border-transparent px-1 py-0.5 text-[16px] sm:text-[13px]">
         {value || placeholder}
       </span>
       <input
-        className="ghost-input absolute inset-0 w-full min-w-0 font-[inherit] text-[length:inherit] leading-[inherit]"
+        className="ghost-input absolute inset-0 w-full min-w-0 text-[13px]"
         value={value}
         placeholder={placeholder}
         aria-label={placeholder}
