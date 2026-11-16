@@ -463,6 +463,27 @@ export function ResumeDocument({
     setActive(next);
   }
 
+  /** Clear the selection (closes the comment card) and drop the caret from the document. */
+  function clearSelection() {
+    const el = document.activeElement as HTMLElement | null;
+    if (el && canvasRef.current?.contains(el)) el.blur();
+    setActive(null);
+  }
+
+  // On narrow screens the comment card is a bottom sheet that can cover the bullet being edited. Once the
+  // card has rendered, scroll the bullet into view; the field's scroll-margin (globals.css) keeps it clear of the sheet.
+  // Desktop never scrolls on selection.
+  const activeBid = active?.kind === "bullet" ? active.bid : null;
+  useEffect(() => {
+    if (!activeBid || window.innerWidth >= 1024) return;
+    const frame = requestAnimationFrame(() => {
+      const card = document.querySelector(`[data-comment-for="${activeBid}"]`);
+      if (!card) return;
+      document.querySelector<HTMLTextAreaElement>(`textarea[data-bullet="${activeBid}"]`)?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeKey, activeBid]);
+
   return (
     <>
       <DocActions slot={actionsSlot} buttons={actions} />
@@ -470,7 +491,11 @@ export function ResumeDocument({
         ref={canvasRef}
         className="doc-canvas"
         onPointerDownCapture={(e) => (downOnField.current = isField(e.target))}
-        onKeyDown={(e) => handleDocArrowKeys(e, canvasRef.current)}
+        onKeyDown={(e) => {
+          handleDocArrowKeys(e, canvasRef.current);
+          // Escape clears the selection, unless a menu or popover inside the canvas already handled it.
+          if (e.key === "Escape" && !e.defaultPrevented && !e.nativeEvent.isComposing) clearSelection();
+        }}
       >
         <div className="doc-page">
           {/* Page-break guide (desktop only) */}
@@ -614,6 +639,7 @@ export function ResumeDocument({
     const card =
       isActive && (view || changed || isNew || placeholder) ? (
         <div
+          data-comment-for={b.id}
           className={
             light
               ? "doc-ui rounded-lg border border-border bg-surface shadow-sm p-3 text-[13px] text-fg space-y-2"
@@ -623,7 +649,19 @@ export function ResumeDocument({
           onClick={(e) => e.stopPropagation()}
           onFocus={(e) => e.stopPropagation()}
         >
-          <p className={`line-clamp-2 text-xs ${muted}`}>{b.text.trim() || "Empty bullet"}</p>
+          <div className="flex items-start gap-2">
+            <p className={`line-clamp-2 min-w-0 flex-1 text-xs ${muted}`}>{b.text.trim() || "Empty bullet"}</p>
+            <button
+              type="button"
+              aria-label="Close comment"
+              title="Close comment"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={clearSelection}
+              className={`icon-btn -mr-1 -mt-1 shrink-0 ${light ? "" : "text-[#e9e9ea] hover:bg-white/10"}`}
+            >
+              <span aria-hidden className="text-base leading-none">×</span>
+            </button>
+          </div>
           {placeholder && (
             <div className="rounded bg-[#fff6d6] px-2 py-1.5 text-[#5c4300]">
               <p>Replace each [placeholder] with your real number, or reword the bullet, before you apply.</p>

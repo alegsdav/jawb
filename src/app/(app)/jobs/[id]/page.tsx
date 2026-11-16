@@ -1070,6 +1070,37 @@ export default function JobPage() {
     </>
   );
 
+  /** The document tabs. Desktop: inside the top bar. Phones: their own row under it (the menus keep the whole bar). */
+  const tabList = (className: string) => (
+    <div role="tablist" aria-label="Job sections" className={className}>
+      {TABS.map(([key, short, full]) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={tab === key}
+          onClick={() => selectTab(key)}
+          className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-[1.5px] px-0.5 text-[13px] transition-colors ${
+            key === "analysis" ? "lg:hidden" : ""
+          } ${tab === key ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}
+        >
+          <span className="sm:hidden">{short}</span>
+          <span className="hidden sm:inline">{full}</span>
+          {/* No room for the chip at phone width; the Analysis tab itself shows it. */}
+          {key === "analysis" && fit && <span className="hidden sm:inline-flex"><FitBadge fit={fit} /></span>}
+          {key === "analysis" && analyzeError && !quiet && <span className="text-bad" aria-label="Analysis failed">!</span>}
+          {key === "resume" && pending.length > 0 && <span className="text-xs text-muted">({pending.length})</span>}
+        </button>
+      ))}
+    </div>
+  );
+  /** Fixed width: "Saved" / "Saving…" / "Unsaved changes" never resize the row beside it. */
+  const saveBox = (className: string) => (
+    <div className={`w-[112px] shrink-0 items-center justify-end ${className}`}>
+      <SaveStatus status={saveState} />
+    </div>
+  );
+
   const topBar = (
     <DocToolbar>
       <Link
@@ -1131,95 +1162,66 @@ export default function JobPage() {
             </MenuItem>
           ))}
         </MenuBarMenu>
-        {/* Phones: the Insert and Help menus are dropped to leave room for the document tabs. */}
-        <div className="hidden sm:block">
-          <MenuBarMenu label="Insert">
-            <MenuItem
-              onSelect={() => commandsRef.current?.addBullet()}
-              disabled={!(docSel?.kind === "entry" || docSel?.kind === "bullet")}
-              hint="After the selected bullet, or at the end of the selected entry"
-            >
-              Bullet
-            </MenuItem>
-            <MenuItem onSelect={() => commandsRef.current?.addEntry()} disabled={!docSel} hint="In the selected section">
-              Entry
-            </MenuItem>
-            <MenuItem
-              onSelect={() => commandsRef.current?.addRoleLine()}
-              disabled={!(docSel?.kind === "entry" || docSel?.kind === "bullet")}
-              hint="Role, dates and location under the selected entry"
-            >
-              Role &amp; dates line
-            </MenuItem>
-            <MenuSeparator />
-            <MenuItem
-              onSelect={() => {
-                const title = window.prompt("Section name (only add sections you actually have):");
-                if (title?.trim()) commandsRef.current?.addSection(title.trim());
-              }}
-            >
-              Section…
-            </MenuItem>
-          </MenuBarMenu>
-        </div>
-        <div className="hidden sm:block">
-          <MenuBarMenu label="Help">
-            <MenuItem onSelect={() => {}} hint={EDITING_TIPS}>
-              Editing tips
-            </MenuItem>
-            <MenuItem
-              onSelect={() => {}}
-              hint={EDIT_SHORTCUTS}
-            >
-              Keyboard shortcuts
-            </MenuItem>
-            <MenuItem
-              onSelect={() => {}}
-              hint="Green strong, amber could be stronger, red weak. Blue bar: changed from your master resume. Yellow [N]: a placeholder to fill in."
-            >
-              What the colours mean
-            </MenuItem>
-          </MenuBarMenu>
-        </div>
+        <MenuBarMenu label="Insert">
+          <MenuItem
+            onSelect={() => commandsRef.current?.addBullet()}
+            disabled={!(docSel?.kind === "entry" || docSel?.kind === "bullet")}
+            hint="After the selected bullet, or at the end of the selected entry"
+          >
+            Bullet
+          </MenuItem>
+          <MenuItem onSelect={() => commandsRef.current?.addEntry()} disabled={!docSel} hint="In the selected section">
+            Entry
+          </MenuItem>
+          <MenuItem
+            onSelect={() => commandsRef.current?.addRoleLine()}
+            disabled={!(docSel?.kind === "entry" || docSel?.kind === "bullet")}
+            hint="Role, dates and location under the selected entry"
+          >
+            Role &amp; dates line
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem
+            onSelect={() => {
+              const title = window.prompt("Section name (only add sections you actually have):");
+              if (title?.trim()) commandsRef.current?.addSection(title.trim());
+            }}
+          >
+            Section…
+          </MenuItem>
+        </MenuBarMenu>
+        <MenuBarMenu label="Help">
+          <MenuItem onSelect={() => {}} hint={EDITING_TIPS}>
+            Editing tips
+          </MenuItem>
+          <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS}>
+            Keyboard shortcuts
+          </MenuItem>
+          <MenuItem
+            onSelect={() => {}}
+            hint="Green strong, amber could be stronger, red weak. Blue bar: changed from your master resume. Yellow [N]: a placeholder to fill in."
+          >
+            What the colours mean
+          </MenuItem>
+        </MenuBarMenu>
       </MenuBar>
 
-      <div
-        role="tablist"
-        aria-label="Job sections"
-        className="ml-2 flex h-full min-w-0 flex-1 items-stretch gap-2.5 overflow-x-auto sm:gap-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {TABS.map(([key, short, full]) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => selectTab(key)}
-            className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-[1.5px] px-0.5 text-[13px] transition-colors ${
-              key === "analysis" ? "lg:hidden" : ""
-            } ${tab === key ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}
-          >
-            <span className="sm:hidden">{short}</span>
-            <span className="hidden sm:inline">{full}</span>
-            {/* No room for the chip at phone width; the Analysis tab itself shows it. */}
-            {key === "analysis" && fit && <span className="hidden sm:inline-flex"><FitBadge fit={fit} /></span>}
-            {key === "analysis" && analyzeError && !quiet && <span className="text-bad" aria-label="Analysis failed">!</span>}
-            {key === "resume" && pending.length > 0 && <span className="text-xs text-muted">({pending.length})</span>}
-          </button>
-        ))}
-      </div>
-
-      {/* Fixed width: "Saved" / "Saving…" / "Unsaved changes" never resize the tab row beside it. */}
-      <div className="ml-auto flex w-[112px] shrink-0 items-center justify-end pl-2">
-        <SaveStatus status={saveState} />
-      </div>
+      {tabList("ml-2 hidden h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto sm:flex [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
+      {saveBox("ml-auto hidden pl-2 sm:flex")}
     </DocToolbar>
   );
 
   return (
     // Phones: fill the viewport above the bottom tab bar (header + pb-16 in the app layout), so no grey band shows under the document.
     <div className="flex flex-col min-h-[calc(100dvh-7rem)] sm:min-h-[calc(100dvh-7.5rem)] lg:h-full lg:min-h-0">
-      {topBar}
+      {/* Sticky together: on phones the document tabs and save status sit in a second row under the menus. */}
+      <div className="sticky top-0 z-10 shrink-0">
+        {topBar}
+        <div className="flex h-10 items-center gap-2 border-b border-border bg-surface px-3 sm:hidden">
+          {tabList("flex h-full min-w-0 flex-1 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
+          {saveBox("flex")}
+        </div>
+      </div>
 
       {/* Formatting-style row under the top bar: fixed height, scrolls sideways on phones. Resume tab only. */}
       {resumeBar && (
@@ -1335,32 +1337,36 @@ export default function JobPage() {
         {/* Side panel: the comment card of the selected bullet at the top (only when there is one), then job details
             and the coach/facts/analysis panels. Its own scroll on lg+. Phones: the details come first; the panels show on the Analysis tab. */}
         <aside className="relative order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l">
-          {/* The selected bullet's comment card never takes space in flow: a bottom sheet above the phone tab bar,
-              and an overlay at the top of the panel on desktop (so the panel's content doesn't move). */}
-          <div
-            ref={setCommentEl}
-            className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:absolute lg:inset-x-4 lg:top-4 lg:bottom-auto lg:z-20 lg:max-h-none lg:overflow-visible"
-          />
-          <JobHeader
-            job={job}
-            applied={applied}
-            statusSelect={statusSelect}
-            followUp={followUpRow}
-            saveState={saveState}
-            detailsOpen={detailsOpen}
-            onToggleDetails={() => setDetailsOpen((o) => !o)}
-            onPatch={patch}
-            onDelete={deleteJob}
-          />
-          {resumeBar && showHighlights && (analysis || changedCount > 0) && (
-            // Phones: behind the "Details" toggle. The legend's bordered "?" button is flattened to a plain glyph.
-            <div className={`${detailsOpen ? "flex" : "hidden"} items-center justify-between gap-3 text-xs text-muted sm:flex`}>
-              <span>Colours in the document</span>
-              <div className="[&_button]:border-0 [&_button]:bg-transparent [&_button]:px-1 [&_button]:text-muted">
-                <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+          {/* Header block: the selected bullet's comment card is an overlay under it on desktop (absolute, so the
+              rows above and the panel below never move). On phones it is a bottom sheet above the tab bar. */}
+          <div className="relative">
+            <JobHeader
+              job={job}
+              applied={applied}
+              statusSelect={statusSelect}
+              followUp={followUpRow}
+              saveState={saveState}
+              detailsOpen={detailsOpen}
+              onToggleDetails={() => setDetailsOpen((o) => !o)}
+              onPatch={patch}
+              onDelete={deleteJob}
+            />
+            {resumeBar && showHighlights && (analysis || changedCount > 0) && (
+              // Phones: behind the "Details" toggle. The legend's bordered "?" button is flattened to a plain glyph.
+              <div
+                className={`${detailsOpen ? "flex" : "hidden"} mt-3 items-center justify-between gap-3 text-xs text-muted sm:flex lg:mt-4`}
+              >
+                <span>Colours in the document</span>
+                <div className="[&_button]:border-0 [&_button]:bg-transparent [&_button]:px-1 [&_button]:text-muted">
+                  <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+            <div
+              ref={setCommentEl}
+              className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:absolute lg:inset-x-0 lg:top-full lg:mt-3 lg:bottom-auto lg:z-20 lg:max-h-none lg:overflow-visible"
+            />
+          </div>
           <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>{side}</div>
         </aside>
       </div>

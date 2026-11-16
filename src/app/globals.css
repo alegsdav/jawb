@@ -220,6 +220,10 @@ body {
   .doc-dot { left: -12px; }
   .doc-changebar { right: -10px; }
 }
+/* Below lg the comment card is a bottom sheet (45dvh). Keep a focused or scrolled-to field clear of it. */
+@media (max-width: 1023px) {
+  .doc-page .doc-field { scroll-margin-bottom: 50dvh; }
+}
 
 }
 /* Unlayered on purpose: the global :focus-visible outline (top of this file) is unlayered and would win otherwise. */
