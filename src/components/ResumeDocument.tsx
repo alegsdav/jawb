@@ -2,8 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Bullet, Item, Resume, Section } from "@/lib/types";
+import type { Bullet, Item, Resume, Section, TextStyle } from "@/lib/types";
 import { emptyItem, emptySection, isInlineItem, uid } from "@/lib/resume";
+import { effectiveStyle, toggleStyle, type StyleField } from "@/lib/textStyle";
 import { PLACEHOLDER_RE } from "@/lib/facts";
 import type { BulletFeedback, Rating } from "@/lib/analysis";
 import { markPlaceholders } from "./PlaceholderTextarea";
@@ -55,15 +56,33 @@ type Props = {
    * Insert menu can run them. They act on the current selection, like the toolbar buttons do.
    */
   commandsRef?: React.RefObject<DocCommands | null>;
+  /**
+   * Called when the focused (styleable) field or its bold/italic state changes. canFormat is false when no
+   * styleable field is focused (bullets have no formatting).
+   */
+  onFormatStateChange?: (s: FormatState) => void;
 };
 
-/** Imperative document commands for the page's Insert menu. */
+/** Imperative document commands for the page's Insert menu and format shortcuts. */
 export type DocCommands = {
   addBullet(): void;
   addEntry(): void;
   addRoleLine(): void;
   addSection(title: string): void;
+  /** Toggle bold / italic on the focused field (a no-op when none is focused). */
+  toggleBold(): void;
+  toggleItalic(): void;
+  /** Remove the bold/italic override on the focused field, back to its default. */
+  resetFormat(): void;
 };
+
+export type FormatState = { canFormat: boolean; bold: boolean; italic: boolean };
+
+/** The styleable field that has focus. sid/iid locate it (absent for the header). */
+type FormatTarget = { field: StyleField; sid?: string; iid?: string };
+
+/** A focused field resolved against the current value. */
+type ResolvedFormat = { target: FormatTarget; override: TextStyle | undefined; item?: Item; cur: Required<TextStyle> };
 
 /** What's selected in the document, by id. */
 export type DocSelection =
@@ -99,27 +118,54 @@ function move<T>(arr: T[], i: number, dir: -1 | 1): T[] {
   return next;
 }
 
+/** Tailwind classes for an effective bold/italic style. The one place the Harvard defaults become CSS. */
+const styleCls = (s: Required<TextStyle>) => `${s.bold ? "font-bold" : "font-normal"} ${s.italic ? "italic" : "not-italic"}`;
+
+/** Copy of `obj` with `key` set to `val`, or the key removed when `val` is undefined. */
+function withKey<T extends object>(obj: T, key: string, val: unknown): T {
+  const out: Record<string, unknown> = { ...obj };
+  if (val === undefined) delete out[key];
+  else out[key] = val;
+  return out as T;
+}
+
+/** Copy of a styles map with one flag set (or removed); undefined when no flags are left. */
+function putStyle(
+  obj: Record<string, TextStyle | undefined> | undefined,
+  key: string,
+  next: TextStyle | undefined,
+): Record<string, TextStyle> | undefined {
+  const out: Record<string, TextStyle> = {};
+  for (const [k, v] of Object.entries(obj ?? {})) if (k !== key && v) out[k] = v;
+  if (next) out[key] = next;
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** Text input that grows with its content (for right-aligned dates/locations and inline labels). */
 function AutoInput({
-  value, onChange, placeholder, className = "", inputClass = "",
+  value, onChange, placeholder, className = "", inputClass = "", textClass = "", onFocus,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   className?: string;
   inputClass?: string;
+  /** Bold/italic classes (styleCls) for the text and its sizing box. */
+  textClass?: string;
+  onFocus?: () => void;
 }) {
   return (
     <span className={`inline-grid max-w-full ${className}`}>
-      <span aria-hidden className="invisible whitespace-pre col-start-1 row-start-1 px-[2px]">
+      <span aria-hidden className={`invisible whitespace-pre col-start-1 row-start-1 px-[2px] ${textClass}`}>
         {value || placeholder}
       </span>
       <input
         size={1}
-        className={`doc-field col-start-1 row-start-1 w-full min-w-[1ch] ${inputClass}`}
+        className={`doc-field col-start-1 row-start-1 w-full min-w-[1ch] ${textClass} ${inputClass}`}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
         aria-label={placeholder}
       />
     </span>
