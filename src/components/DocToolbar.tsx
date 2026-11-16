@@ -1,7 +1,161 @@
 "use client";
 
-import { Popover } from "./Menu";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Resume } from "@/lib/types";
+import { Menu, Popover } from "./Menu";
 import { RedoIcon, UndoIcon } from "./icons";
+
+/** Row of menu triggers (File, Edit, View...) for the top bar. */
+export function MenuBar({ children }: { children: React.ReactNode }) {
+  return <div className="flex items-center gap-0.5">{children}</div>;
+}
+
+/** One menu in the MenuBar: a plain 13px text trigger with a `Menu` popup of `MenuItem`s. */
+export function MenuBarMenu({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <Menu label={label} buttonClassName="rounded px-2 py-1 text-[13px] text-fg hover:bg-surface-2">
+      {children}
+    </Menu>
+  );
+}
+
+/** Formatting-style toolbar row under the top bar. Fixed height, never changes width when content changes. */
+export function EditorToolbar({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-10 items-center gap-0.5 overflow-x-auto whitespace-nowrap border-b border-border bg-surface px-2 [scrollbar-width:none]">
+      {children}
+    </div>
+  );
+}
+
+/** Vertical hairline between toolbar groups. */
+export function ToolbarSep() {
+  return <div aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-border" />;
+}
+
+/** Zoom levels for the document. 0 means "Fit" (the page computes the scale to fit its column). */
+const ZOOM_OPTIONS: { label: string; value: number }[] = [
+  { label: "Fit", value: 0 },
+  { label: "50%", value: 0.5 },
+  { label: "75%", value: 0.75 },
+  { label: "90%", value: 0.9 },
+  { label: "100%", value: 1 },
+  { label: "125%", value: 1.25 },
+  { label: "150%", value: 1.5 },
+];
+
+/** Compact native zoom picker. Value 0 = Fit, 1 = 100%. */
+export function ZoomSelect({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const known = ZOOM_OPTIONS.some((o) => o.value === value);
+  return (
+    <select
+      aria-label="Zoom"
+      className="rounded px-1.5 py-1 text-[13px] hover:bg-surface-2 bg-transparent"
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+    >
+      {!known && <option value={value}>{Math.round(value * 100)}%</option>}
+      {ZOOM_OPTIONS.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * Word-style status bar under the document column: page count, word count, save status, zoom.
+ * Fixed height so it never shifts when the save status text changes.
+ */
+export function StatusBar({
+  pages, words, saveStatus, zoom, onZoom,
+}: {
+  pages: number;
+  words: number;
+  saveStatus: React.ReactNode;
+  zoom: number;
+  onZoom: (z: number) => void;
+}) {
+  return (
+    <div className="h-7 shrink-0 flex items-center gap-3 px-3 border-t border-border bg-surface text-[11px] text-muted">
+      <span className="whitespace-nowrap">
+        Page 1 of {Math.max(1, pages)} · {words.toLocaleString()} {words === 1 ? "word" : "words"}
+      </span>
+      <span className="min-w-0 truncate">{saveStatus}</span>
+      <div className="ml-auto shrink-0">
+        <ZoomSelect value={zoom} onChange={onZoom} />
+      </div>
+    </div>
+  );
+}
+
+const tokens = (s: string | null | undefined) => (s ? (s.match(/\S+/g) ?? []).length : 0);
+
+/** Presentational word count: header, section titles, entry lines and bullet text. */
+export function countWords(resume: Resume): number {
+  let n = tokens(resume.header.name) + tokens(resume.header.contact);
+  for (const s of resume.sections) {
+    n += tokens(s.title);
+    for (const it of s.items) {
+      n += tokens(it.title) + tokens(it.subtitle) + tokens(it.location) + tokens(it.dates);
+      for (const b of it.bullets) n += tokens(b.text);
+    }
+  }
+  return n;
+}
+
+/** Document-wide shortcuts: Ctrl/Cmd+P prints the page only, Ctrl/Cmd+S saves (no browser dialog). */
+export function useEditorShortcuts({ onPrint, onSave }: { onPrint: () => void; onSave?: () => void }) {
+  const handlers = useRef({ onPrint, onSave });
+  useEffect(() => {
+    handlers.current = { onPrint, onSave };
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.altKey || !(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "p") {
+        e.preventDefault();
+        handlers.current.onPrint();
+      } else if (k === "s") {
+        e.preventDefault();
+        handlers.current.onSave?.();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+
+const ZOOM_VALUES = ZOOM_OPTIONS.map((o) => o.value);
+const zoomKey = (key: string) => `doc-zoom:${key}`;
+
+/** Document zoom (1 = 100%, 0 = Fit), remembered per document key in localStorage. */
+export function useZoom(key: string): [number, (z: number) => void] {
+  const [zoom, setZoomState] = useState(1);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(zoomKey(key));
+      const v = raw === null ? NaN : Number(raw);
+      if (ZOOM_VALUES.includes(v)) setZoomState(v);
+    } catch {
+      // Storage blocked or unavailable: keep the default.
+    }
+  }, [key]);
+  const setZoom = useCallback(
+    (z: number) => {
+      setZoomState(z);
+      try {
+        window.localStorage.setItem(zoomKey(key), String(z));
+      } catch {
+        // Storage blocked or unavailable: the zoom still applies for this visit.
+      }
+    },
+    [key],
+  );
+  return [zoom, setZoom];
+}
 
 /**
  * Slim top bar for editor pages: h-11, hairline bottom border, children laid out left to right.

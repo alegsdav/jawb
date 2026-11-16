@@ -48,9 +48,11 @@ export function Menu({
 
   function toggle(e: React.MouseEvent) {
     if (open) return setOpen(false);
-    // Open toward whichever side has room (the popup is ~16rem wide).
+    // Open below the trigger, aligned to its left edge when the ~16rem popup fits to the right;
+    // otherwise align to its right edge so it opens toward the room on the left.
     const r = button.current?.getBoundingClientRect();
-    setAlignLeft(!!r && r.right < 272);
+    const popupWidth = 272;
+    setAlignLeft(!r || r.left + popupWidth <= window.innerWidth);
     setOpen(true);
     // Keyboard activation (detail 0): move focus into the menu.
     if (e.detail === 0) requestAnimationFrame(() => items()[0]?.focus());
@@ -92,7 +94,7 @@ export function Menu({
           id={id}
           role="menu"
           onKeyDown={onListKey}
-          className={`float-dark absolute z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] p-1 ${
+          className={`float-dark absolute top-full z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] p-1 ${
             alignLeft ? "left-0" : "right-0"
           }`}
         >
@@ -177,8 +179,13 @@ export function Popover({
   );
 }
 
+/** Hairline divider between groups of items in a `Menu`. */
+export function MenuSeparator() {
+  return <div role="separator" className="float-sep my-1" />;
+}
+
 export function MenuItem({
-  onSelect, children, hint, danger, disabled, className = "",
+  onSelect, children, hint, shortcut, danger, disabled, className = "",
 }: {
   onSelect: () => void;
   children: React.ReactNode;
@@ -186,6 +193,8 @@ export function MenuItem({
   className?: string;
   /** Secondary line under the label. */
   hint?: React.ReactNode;
+  /** Keyboard shortcut shown right-aligned on the same line, e.g. "Ctrl+Z". */
+  shortcut?: string;
   danger?: boolean;
   disabled?: boolean;
 }) {
@@ -202,7 +211,14 @@ export function MenuItem({
       className={`float-item w-full flex-col items-start focus:outline-none disabled:opacity-50 ${className}`}
       style={danger ? { color: "#ff8a8a" } : undefined}
     >
-      {children}
+      {shortcut ? (
+        <span className="flex w-full items-center justify-between gap-6">
+          <span>{children}</span>
+          <span className="float-muted shrink-0 text-[11px]">{shortcut}</span>
+        </span>
+      ) : (
+        children
+      )}
       {hint && <span className="float-muted block text-[11px] leading-snug">{hint}</span>}
     </button>
   );

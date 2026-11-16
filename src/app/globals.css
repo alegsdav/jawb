@@ -211,8 +211,8 @@ body {
 }
 @media (max-width: 639px) {
   /* Phones get a reflowed page, like Google Docs' mobile view. */
-  .doc-canvas { padding: 10px 0 24px; background: transparent; }
-  .doc-page { min-height: 0; padding: 20px 16px; font-size: 16px; }
+  .doc-canvas { padding: 0 0 24px; background: transparent; }
+  .doc-page { min-height: 0; padding: 20px 16px; font-size: 16px; box-shadow: none; }
   .doc-name { font-size: 24px; }
   .doc-contact { font-size: 16px; } /* >= 16px so iOS doesn't zoom when it's focused */
   .doc-bullets { padding-left: 2px; }
@@ -224,3 +224,16 @@ body {
 }
 /* Unlayered on purpose: the global :focus-visible outline (top of this file) is unlayered and would win otherwise. */
 .doc-page :is(input, textarea):focus-visible { outline: none; }
+
+/* Print: only the resume sheet(s), no app chrome, no zoom scaling, no placeholders or highlights. */
+@media print {
+  @page { size: letter; margin: 0; }
+  html, body { background: #fff !important; }
+  body * { visibility: hidden !important; }
+  .doc-page, .doc-page * { visibility: visible !important; }
+  .doc-page { position: absolute; left: 0; top: 0; box-shadow: none !important; margin: 0 !important; }
+  .zoom-frame { transform: none !important; }
+  .doc-ui, .doc-pagebreak { display: none !important; }
+  .doc-mirror mark { background: transparent !important; box-shadow: none !important; }
+  ::placeholder { color: transparent !important; }
+}
