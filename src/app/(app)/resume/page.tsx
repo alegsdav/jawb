@@ -8,13 +8,14 @@ import { emptyResume, emptySection, isEmptyResume, normalizeResume, reconcileIds
 import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
 import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import type { Fact, Resume } from "@/lib/types";
-import { ResumeDocument, type DocSelection } from "@/components/ResumeDocument";
+import { ResumeDocument, type DocCommands, type DocSelection } from "@/components/ResumeDocument";
 import { CoachPanel } from "@/components/CoachPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
 import { useResumeActions } from "@/components/ResumeActions";
 import {
-  countWords, DocToolbar, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, ToolbarSep, UndoRedo, useEditorShortcuts, useZoom, ZoomSelect,
+  countWords, DocToolbar, EDIT_SHORTCUTS, docEdit, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, ToolbarSep, UndoRedo,
+  useEditorShortcuts, useZoom, ZoomSelect,
 } from "@/components/DocToolbar";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
 import { EditorCanvas } from "@/components/ZoomFrame";
@@ -34,8 +35,6 @@ const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(pre
 
 /** The editing tips, shown as the Help menu's hint (the document itself stays uncluttered). */
 const EDIT_TIPS = "Click any line to edit. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it. Undo with Ctrl/⌘+Z.";
-const SHORTCUTS =
-  "Enter: new bullet · Backspace: remove an empty bullet · Alt+↑/↓: move a bullet · Arrow keys: move between fields · Ctrl/⌘+Z: undo · Ctrl/⌘+P: print";
 
 /** Zoom choices for View > Zoom (0 = Fit). */
 const ZOOM_CHOICES: { label: string; value: number }[] = [
@@ -151,6 +150,10 @@ export default function MasterResumePage() {
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   const [commentEl, setCommentEl] = useState<HTMLDivElement | null>(null);
+  /** What is selected in the document (drives the Edit and Insert menus' disabled states). */
+  const [docSel, setDocSel] = useState<DocSelection | null>(null);
+  /** The document's commands (add bullet/entry/role line/section) for the Insert menu. */
+  const commandsRef = useRef<DocCommands | null>(null);
   const [zoom, setZoom] = useZoom("resume");
   const facts = useFacts(supabase);
   const mirrorRef = useRef(facts.mirror);
@@ -172,6 +175,7 @@ export default function MasterResumePage() {
   const latestDoc = useRef<Resume | null>(null);
   latestDoc.current = resume;
   const onSelection = useCallback((sel: DocSelection | null) => {
+    setDocSel(sel);
     if (!sel || sel.kind === "section") return;
     setCoachTarget((cur) => {
       const next = { sectionId: sel.sectionId, entryId: sel.entryId, bulletId: sel.kind === "bullet" ? sel.bulletId : null };
@@ -315,10 +319,14 @@ export default function MasterResumePage() {
   const deleteFact = async (f: Fact) => {
     if (await facts.remove([f.id])) setUndo({ message: "Fact deleted", restore: [f] });
   };
-  const addSection = () => {
+  const insertSection = () => {
     const title = prompt("Section name (only add sections you actually have):");
-    if (title?.trim()) doc.set((cur) => ({ ...cur, sections: [...cur.sections, emptySection(title.trim())] }), true);
+    if (!title?.trim()) return;
+    // The document focuses the new section's title; with no document on screen (empty resume), just add it.
+    if (commandsRef.current) commandsRef.current.addSection(title.trim());
+    else doc.set((cur) => ({ ...cur, sections: [...cur.sections, emptySection(title.trim())] }), true);
   };
+  const inEntry = docSel?.kind === "entry" || docSel?.kind === "bullet";
 
   const onboarding = empty && !importOpen;
   const banners = (
@@ -385,6 +393,11 @@ export default function MasterResumePage() {
             <MenuBarMenu label="Edit">
               <MenuItem onSelect={doc.undo} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
               <MenuItem onSelect={doc.redo} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
+              <MenuSeparator />
+              <MenuItem onSelect={() => void docEdit("cut")} disabled={!docSel} shortcut="Ctrl+X">Cut</MenuItem>
+              <MenuItem onSelect={() => void docEdit("copy")} disabled={!docSel} shortcut="Ctrl+C">Copy</MenuItem>
+              <MenuItem onSelect={() => void docEdit("paste")} disabled={!docSel} shortcut="Ctrl+V">Paste</MenuItem>
+              <MenuItem onSelect={() => void docEdit("selectAll")} disabled={!docSel} shortcut="Ctrl+A">Select all</MenuItem>
             </MenuBarMenu>
             <MenuBarMenu label="View">
               {ZOOM_CHOICES.map((z) => (
@@ -398,11 +411,15 @@ export default function MasterResumePage() {
               ))}
             </MenuBarMenu>
             <MenuBarMenu label="Insert">
-              <MenuItem onSelect={addSection}>Section…</MenuItem>
+              <MenuItem onSelect={() => commandsRef.current?.addBullet()} disabled={!inEntry}>Bullet</MenuItem>
+              <MenuItem onSelect={() => commandsRef.current?.addEntry()} disabled={!docSel}>Entry</MenuItem>
+              <MenuItem onSelect={() => commandsRef.current?.addRoleLine()} disabled={!inEntry}>Role &amp; dates line</MenuItem>
+              <MenuSeparator />
+              <MenuItem onSelect={insertSection}>Section…</MenuItem>
             </MenuBarMenu>
             <MenuBarMenu label="Help">
               <MenuItem onSelect={() => {}} hint={EDIT_TIPS}>Editing tips</MenuItem>
-              <MenuItem onSelect={() => {}} hint={SHORTCUTS}>Keyboard shortcuts</MenuItem>
+              <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS}>Keyboard shortcuts</MenuItem>
             </MenuBarMenu>
           </MenuBar>
         </div>
@@ -460,13 +477,13 @@ export default function MasterResumePage() {
                   actionsSlot={slot}
                   commentSlot={commentEl}
                   onSelectionChange={onSelection}
+                  commandsRef={commandsRef}
                 />
               </EditorCanvas>
               {!empty && (
                 <StatusBar
                   pages={measure.pages}
                   words={countWords(resume)}
-                  saveStatus={<SaveStatus status={conflict ? "error" : status} />}
                   zoom={zoom}
                   onZoom={setZoom}
                 />
@@ -478,10 +495,13 @@ export default function MasterResumePage() {
         {/* Side panel: hairline divider on lg+, its own scroll. Phones: stacked below the document. */}
         <div
           id="side-panel"
-          className="scroll-mt-16 space-y-4 border-t border-border p-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
+          className="scroll-mt-16 space-y-4 border-t border-border p-4 lg:relative lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
         >
-          {/* The selected bullet's comment card (takes no room until a comment exists). */}
-          <div ref={setCommentEl} className="empty:hidden mb-4" />
+          {/* The selected bullet's comment card. Takes no room in flow: a bottom sheet on phones, an overlay on the panel on lg+. */}
+          <div
+            ref={setCommentEl}
+            className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto lg:absolute lg:inset-x-4 lg:bottom-auto lg:top-4 lg:z-20 lg:max-h-[70%]"
+          />
           <SideTabs
             label="Panel"
             value={sideTab}

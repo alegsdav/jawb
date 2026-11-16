@@ -29,7 +29,7 @@ import {
   planSaveAsMaster, planTailoredRefresh, readJob, rebaseJob, saveTailoredDocument, statusConflictOutcome, tailoredFromRow,
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
-import { ResumeDocument, type DocSelection } from "@/components/ResumeDocument";
+import { ResumeDocument, type DocCommands, type DocSelection } from "@/components/ResumeDocument";
 import { JobHeader } from "@/components/job/JobHeader";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
@@ -43,8 +43,8 @@ import { progressFields } from "@/lib/progress";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, FitBadge } from "@/components/StatusSelect";
 import {
-  countWords, DocToolbar, EditorToolbar, FeedbackLegend, IconButton, MenuBar, MenuBarMenu, PageCount, PlaceholderCount,
-  StatusBar, Toggle, ToolbarSep, UndoRedo, useEditorShortcuts, useZoom, ZoomSelect,
+  countWords, DocToolbar, docEdit, EDIT_SHORTCUTS, EditorToolbar, FeedbackLegend, IconButton, MenuBar, MenuBarMenu, PageCount,
+  PlaceholderCount, StatusBar, Toggle, ToolbarSep, UndoRedo, useEditorShortcuts, useZoom, ZoomSelect,
 } from "@/components/DocToolbar";
 import { EditorCanvas } from "@/components/ZoomFrame";
 import { BriefcaseIcon, ChevronRightIcon } from "@/components/icons";
@@ -76,6 +76,10 @@ const REFRESH_GAP_MS = 1500;
 const ZOOM_CHOICES: [number, string][] = [[0, "Fit"], [0.5, "50%"], [0.75, "75%"], [0.9, "90%"], [1, "100%"], [1.25, "125%"], [1.5, "150%"]];
 
 /** A check mark in a fixed-width cell, so the labels of ticked and unticked menu items line up. */
+/** Help > Editing tips: the same habits the resume page's tips describe, in one line. */
+const EDITING_TIPS =
+  "Click a bullet to see its feedback and suggested edits. Enter adds a bullet, Backspace on an empty bullet removes it, Alt+↑/↓ moves it.";
+
 const tick = (on: boolean) => <span className="inline-block w-3 shrink-0 text-center">{on ? "✓" : ""}</span>;
 
 const PrintIcon = ({ className }: { className?: string }) => (
@@ -144,6 +148,10 @@ export default function JobPage() {
   /** This job's tailored copy's row id (facts coached here link to it). */
   const [tailoredId, setTailoredId] = useState<string | null>(null);
   const [factUndo, setFactUndo] = useState<Fact | null>(null);
+  /** What's selected in the document (entry, bullet or section), for the Insert menu's enabled states. */
+  const [docSel, setDocSel] = useState<DocSelection | null>(null);
+  /** Imperative document commands (add bullet, entry, role line, section) for the Insert menu. */
+  const commandsRef = useRef<DocCommands | null>(null);
 
   const autoRan = useRef(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -699,6 +707,7 @@ export default function JobPage() {
 
   /** The document's selection drives the coaching panel (a section alone doesn't). */
   const onSelection = useCallback((sel: DocSelection | null) => {
+    setDocSel(sel);
     if (!sel || sel.kind === "section") return;
     setCoachTarget((cur) => {
       const next = { sectionId: sel.sectionId, entryId: sel.entryId, bulletId: sel.kind === "bullet" ? sel.bulletId : null };
@@ -1101,6 +1110,11 @@ export default function JobPage() {
           <MenuItem onSelect={doc.undo} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
           <MenuItem onSelect={doc.redo} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
           <MenuSeparator />
+          <MenuItem onSelect={() => void docEdit("cut")} shortcut="Ctrl+X">Cut</MenuItem>
+          <MenuItem onSelect={() => void docEdit("copy")} shortcut="Ctrl+C">Copy</MenuItem>
+          <MenuItem onSelect={() => void docEdit("paste")} shortcut="Ctrl+V">Paste</MenuItem>
+          <MenuItem onSelect={() => void docEdit("selectAll")} shortcut="Ctrl+A">Select all</MenuItem>
+          <MenuSeparator />
           <MenuItem onSelect={reviewNext} disabled={pending.length === 0}>Review next suggestion</MenuItem>
           <MenuItem onSelect={acceptAll} disabled={pending.length === 0}>Accept all suggestions</MenuItem>
         </MenuBarMenu>
@@ -1117,20 +1131,53 @@ export default function JobPage() {
             </MenuItem>
           ))}
         </MenuBarMenu>
-        {/* Phones: the Help menu is dropped to leave room for the document tabs. */}
+        {/* Phones: the Insert and Help menus are dropped to leave room for the document tabs. */}
+        <div className="hidden sm:block">
+          <MenuBarMenu label="Insert">
+            <MenuItem
+              onSelect={() => commandsRef.current?.addBullet()}
+              disabled={!(docSel?.kind === "entry" || docSel?.kind === "bullet")}
+              hint="After the selected bullet, or at the end of the selected entry"
+            >
+              Bullet
+            </MenuItem>
+            <MenuItem onSelect={() => commandsRef.current?.addEntry()} disabled={!docSel} hint="In the selected section">
+              Entry
+            </MenuItem>
+            <MenuItem
+              onSelect={() => commandsRef.current?.addRoleLine()}
+              disabled={!(docSel?.kind === "entry" || docSel?.kind === "bullet")}
+              hint="Role, dates and location under the selected entry"
+            >
+              Role &amp; dates line
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem
+              onSelect={() => {
+                const title = window.prompt("Section name (only add sections you actually have):");
+                if (title?.trim()) commandsRef.current?.addSection(title.trim());
+              }}
+            >
+              Section…
+            </MenuItem>
+          </MenuBarMenu>
+        </div>
         <div className="hidden sm:block">
           <MenuBarMenu label="Help">
+            <MenuItem onSelect={() => {}} hint={EDITING_TIPS}>
+              Editing tips
+            </MenuItem>
+            <MenuItem
+              onSelect={() => {}}
+              hint={EDIT_SHORTCUTS}
+            >
+              Keyboard shortcuts
+            </MenuItem>
             <MenuItem
               onSelect={() => {}}
               hint="Green strong, amber could be stronger, red weak. Blue bar: changed from your master resume. Yellow [N]: a placeholder to fill in."
             >
               What the colours mean
-            </MenuItem>
-            <MenuItem
-              onSelect={() => {}}
-              hint="Arrow keys and Enter move between fields. Ctrl+Z undo, Ctrl+Shift+Z redo, Ctrl+P print."
-            >
-              Keyboard shortcuts
             </MenuItem>
           </MenuBarMenu>
         </div>
@@ -1271,12 +1318,12 @@ export default function JobPage() {
                     reveal={reveal}
                     quiet={quiet}
                     onSelectionChange={onSelection}
+                    commandsRef={commandsRef}
                   />
                 </EditorCanvas>
                 <StatusBar
                   pages={measure.pages}
                   words={countWords(resume)}
-                  saveStatus={<SaveStatus status={saveState} />}
                   zoom={zoom}
                   onZoom={setZoom}
                 />
@@ -1287,8 +1334,13 @@ export default function JobPage() {
 
         {/* Side panel: the comment card of the selected bullet at the top (only when there is one), then job details
             and the coach/facts/analysis panels. Its own scroll on lg+. Phones: the details come first; the panels show on the Analysis tab. */}
-        <aside className="order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l">
-          <div ref={setCommentEl} className="empty:hidden mb-4" />
+        <aside className="relative order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l">
+          {/* The selected bullet's comment card never takes space in flow: a bottom sheet above the phone tab bar,
+              and an overlay at the top of the panel on desktop (so the panel's content doesn't move). */}
+          <div
+            ref={setCommentEl}
+            className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:absolute lg:inset-x-4 lg:top-4 lg:bottom-auto lg:z-20 lg:max-h-none lg:overflow-visible"
+          />
           <JobHeader
             job={job}
             applied={applied}

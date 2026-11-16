@@ -1,7 +1,6 @@
 "use client";
 
 import type { Job } from "@/lib/types";
-import { SaveStatus } from "@/lib/useAutosave";
 import { DeadlineField } from "../DeadlineField";
 import { ChevronDownIcon } from "../icons";
 
@@ -32,14 +31,15 @@ function FitInput({
  * toggle so the document isn't pushed down. On desktop it's all shown as a compact definition list.
  */
 export function JobHeader({
-  job, applied, statusSelect, followUp, saveState, detailsOpen, onToggleDetails, onPatch, onDelete,
+  job, applied, statusSelect, followUp, detailsOpen, onToggleDetails, onPatch, onDelete,
 }: {
   job: Job;
   applied: boolean;
   statusSelect: React.ReactNode;
   /** The follow-up date as a grid row (label + input). */
   followUp: React.ReactNode;
-  saveState: string;
+  /** Kept for compatibility: save status now lives only in the page's top bar. */
+  saveState?: string;
   detailsOpen: boolean;
   onToggleDetails: () => void;
   onPatch: (p: Partial<Job>) => void;
@@ -90,10 +90,6 @@ export function JobHeader({
               <div className="justify-self-start -ml-2.5">{statusSelect}</div>
             </>
           )}
-          <span className="text-muted">Saved</span>
-          <div className="justify-self-start">
-            <SaveStatus status={saveState} />
-          </div>
           {!applied && followUp}
           {/* DeadlineField's own label sits in the same 84px column as the other labels. */}
           <div className="col-span-2 [&_label]:gap-3 [&_label>span]:w-[84px] [&_label>span]:shrink-0 [&_label>span]:text-[13px] [&_input]:text-[13px] [&_input]:sm:-ml-[5px]">
