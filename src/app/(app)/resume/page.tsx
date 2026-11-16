@@ -447,8 +447,11 @@ export default function MasterResumePage() {
             </MenuBarMenu>
           </MenuBar>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <SaveStatus status={conflict ? "error" : status} />
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          {/* Phones: the status gets whatever room the menus leave and truncates, so it never covers Help. */}
+          <span className="block min-w-0 max-w-[72px] overflow-hidden text-right sm:max-w-none [&>span]:block [&>span]:truncate">
+            <SaveStatus status={conflict ? "error" : status} />
+          </span>
           <a
             href="#side-panel"
             className="hidden rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg sm:inline-flex lg:hidden"
