@@ -129,7 +129,7 @@ body {
 @layer components {
 .doc-canvas {
   background: transparent;
-  padding: 8px 0 40px;
+  padding: 20px 0 40px;
   overflow-x: hidden;
 }
 .doc-page {
@@ -140,6 +140,8 @@ body {
   min-height: 1056px;          /* 11in */
   padding: 58px;               /* 0.6in */
   background: #fff;
+  box-shadow: 0 1px 3px rgb(60 64 67 / 0.15), 0 4px 8px 3px rgb(60 64 67 / 0.08);
+  border-radius: 0;
   color: #111;
   font-family: "Times New Roman", Times, "Liberation Serif", serif;
   font-size: 14.67px;          /* 11pt */
@@ -160,19 +162,17 @@ body {
   border-radius: 2px; padding: 0 2px; margin: 0 -2px;
   line-height: inherit;
 }
-.doc-field:hover { background: rgb(0 0 0 / 0.035); }
-.doc-field:focus { background: rgb(0 0 0 / 0.05); }
+.doc-field:hover, .doc-field:focus { background: transparent; }
 .doc-field::placeholder { color: #b0b0aa; }
 .doc-entry:not(.is-active) .doc-field::placeholder,
 .doc-section .doc-field:not(:focus)::placeholder { color: transparent; }
-.doc-entry:not(.is-active) .doc-optional { display: none; }
 .doc-name { font-size: 22px; font-weight: 700; line-height: 1.2; }
 .doc-contact { font-size: 13.3px; margin-top: 2px; }
 .doc-section { margin-top: 4px; padding-top: 8px; }
 /* Selectable blocks (sections, entries): click blank space to select, then move/delete from the toolbar. */
 .doc-block { position: relative; border-radius: 3px; }
 .doc-block.doc-block.is-selected {
-  background: rgb(0 0 0 / 0.03);
+  background: rgb(26 115 232 / 0.06);
 }
 .doc-section-title {
   display: block; width: 100%;
@@ -180,7 +180,6 @@ body {
   border-bottom: 1px solid #111; border-radius: 0; padding-bottom: 1px; margin-bottom: 5px;
 }
 .doc-entry { margin-bottom: 6px; }
-.doc-entry.is-active { outline: 1px solid rgb(0 0 0 / 0.08); outline-offset: 4px; border-radius: 2px; }
 .doc-bullets { margin-top: 1px; padding-left: 10px; }
 .doc-bullets li + li { margin-top: 1px; }
 .doc-ui { font-family: var(--font-ui), system-ui, sans-serif; }
