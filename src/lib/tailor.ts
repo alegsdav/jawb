@@ -228,7 +228,12 @@ export function applyPull(copy: Resume, master: Resume): { resume: Resume } & Pu
     headerField(copy.header[field], base[key], master.header[field]) === "take" ? master.header[field] : copy.header[field];
   const resume: Resume = {
     ...copy,
-    header: { name: h("name", HEADER_NAME), contact: h("contact", HEADER_CONTACT) },
+    // Header styles stay with the copy (this function only takes text from the master).
+    header: {
+      name: h("name", HEADER_NAME),
+      contact: h("contact", HEADER_CONTACT),
+      ...(copy.header.styles ? { styles: copy.header.styles } : {}),
+    },
     sections: copy.sections.map((s) => ({
       ...s,
       items: s.items.map((it) => ({ ...it, bullets: it.bullets.map((b) => ({ ...b, text: take(b.id, b.text) })) })),

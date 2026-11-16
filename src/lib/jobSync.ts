@@ -287,15 +287,22 @@ export function baseFromBaseline(copy: Resume, master: Resume): Resume {
         location: mi?.location ?? it.location,
         dates: mi?.dates ?? it.dates,
         bullets: it.bullets.filter((b) => b.id in base).map((b) => ({ id: b.id, text: base[b.id] })),
+        // Styles are not text, so the baseline doesn't record them: keep the copy's styles (the item this is built from).
+        ...(it.styles ? { styles: it.styles } : {}),
       });
     }
     const inBase = structured ? SECTION_KEY + s.id in base : !!ms || items.length > 0;
     if (!inBase) continue;
-    sections.push({ id: s.id, title: base[SECTION_KEY + s.id] ?? ms?.title ?? s.title, items });
+    // Section style comes from the copy too (see the item note above).
+    sections.push({ id: s.id, title: base[SECTION_KEY + s.id] ?? ms?.title ?? s.title, items, ...(s.style ? { style: s.style } : {}) });
   }
   return {
     ...(master.version !== undefined ? { version: master.version } : {}),
-    header: { name: base[HEADER_NAME] ?? master.header.name, contact: base[HEADER_CONTACT] ?? master.header.contact },
+    header: {
+      name: base[HEADER_NAME] ?? master.header.name,
+      contact: base[HEADER_CONTACT] ?? master.header.contact,
+      ...(copy.header.styles ? { styles: copy.header.styles } : {}),
+    },
     sections,
   };
 }

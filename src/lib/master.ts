@@ -189,6 +189,7 @@ export function mergeResumes(base: Resume, local: Resume, server: Resume): Merge
     const name = short(l.title || s.title || l.subtitle || s.subtitle || "an entry");
     const field = (k: "title" | "subtitle" | "location" | "dates", label: string) =>
       mergeScalar(b?.[k], l[k], s[k], `${label} of "${name}"`, conflicts);
+    // `...l` also carries `styles` from the local side, the same side the rest of the object comes from.
     return {
       ...l,
       title: field("title", "Title"),
@@ -212,6 +213,8 @@ export function mergeResumes(base: Resume, local: Resume, server: Resume): Merge
     header: {
       name: mergeScalar(base.header.name, local.header.name, server.header.name, "Name", conflicts),
       contact: mergeScalar(base.header.contact, local.header.contact, server.header.contact, "Contact line", conflicts),
+      // Styles come from the local side, like `...local` above (no style conflict logic).
+      ...(local.header.styles ? { styles: local.header.styles } : {}),
     },
     sections: dedupeIds(sections, conflicts),
   };

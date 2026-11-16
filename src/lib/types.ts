@@ -1,6 +1,12 @@
 export type Bullet = { id: string; text: string };
 
 /**
+ * Bold / italic override for one non-bullet field. Each flag is optional: an absent flag means the
+ * Harvard default for that field (see textStyle.ts). Omitted from the data when it equals the default.
+ */
+export type TextStyle = { bold?: boolean; italic?: boolean };
+
+/**
  * One entry in a section, laid out Harvard-style:
  *   title (bold)              location
  *   subtitle (italic)         dates
@@ -14,14 +20,27 @@ export type Item = {
   location: string;
   dates: string;
   bullets: Bullet[];
+  /** Per-field bold/italic overrides. Omitted when every field uses its default. */
+  styles?: { title?: TextStyle; subtitle?: TextStyle; location?: TextStyle; dates?: TextStyle };
 };
 
-export type Section = { id: string; title: string; items: Item[] };
+export type Section = {
+  id: string;
+  title: string;
+  items: Item[];
+  /** Bold/italic override for the section title. Omitted when it uses the default. */
+  style?: TextStyle;
+};
 
 export type Resume = {
   /** 2 = title is the organization/school (line 1), subtitle is the role/degree (line 2). */
   version?: number;
-  header: { name: string; contact: string };
+  header: {
+    name: string;
+    contact: string;
+    /** Bold/italic overrides for the name and contact line. Omitted when they use the defaults. */
+    styles?: { name?: TextStyle; contact?: TextStyle };
+  };
   sections: Section[];
   /**
    * Legacy: the master's facts before they moved to the `facts` table (migration 0005 copied them).

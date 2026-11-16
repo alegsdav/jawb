@@ -1,4 +1,5 @@
-import type { Bullet, Item, Resume, Section } from "./types";
+import { cleanStyle } from "./textStyle";
+import type { Bullet, Item, Resume, Section, TextStyle } from "./types";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -22,37 +23,56 @@ export function isEmptyResume(r: Resume): boolean {
   return !r.sections.some((s) => s.items.some((it) => it.title || it.subtitle || it.bullets.some((b) => b.text.trim())));
 }
 
+/** Keep the valid style entries among `keys` of a raw styles object. Undefined when none are left. */
+function styleMap<K extends string>(raw: unknown, keys: readonly K[]): Partial<Record<K, TextStyle>> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Partial<Record<K, TextStyle>> = {};
+  for (const k of keys) {
+    const st = cleanStyle((raw as Record<string, unknown>)[k]);
+    if (st) out[k] = st;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** Make sure every section/item/bullet has an id (AI output or old data may lack them). */
 export function normalizeResume(raw: unknown): Resume {
   const r = (raw ?? {}) as Partial<Resume>;
   const legacy = (r.version ?? 1) < RESUME_VERSION;
+  const headerStyles = styleMap(r.header?.styles, ["name", "contact"] as const);
   return {
     version: RESUME_VERSION,
     header: {
       name: r.header?.name ?? "",
       contact: r.header?.contact ?? "",
+      ...(headerStyles ? { styles: headerStyles } : {}),
     },
     ...(Array.isArray(r.facts) ? { facts: r.facts.filter((f): f is string => typeof f === "string") } : {}),
-    sections: (r.sections ?? []).map((s) => ({
-      id: s.id || uid(),
-      title: s.title ?? "",
-      items: (s.items ?? []).map((it) => {
-        const title = it.title ?? "";
-        const subtitle = it.subtitle ?? "";
-        // v1 stored role in title and organization in subtitle; Harvard puts the organization first.
-        const swap = legacy && Boolean(it.dates || it.location) && Boolean(subtitle);
-        return {
-          id: it.id || uid(),
-          title: swap ? subtitle : title,
-          subtitle: swap ? title : subtitle,
-          location: it.location ?? "",
-          dates: it.dates ?? "",
-          bullets: (it.bullets ?? []).map((b) =>
-            typeof b === "string" ? { id: uid(), text: b } : { id: b.id || uid(), text: b.text ?? "" },
-          ),
-        };
-      }),
-    })),
+    sections: (r.sections ?? []).map((s) => {
+      const style = cleanStyle(s.style);
+      return {
+        id: s.id || uid(),
+        title: s.title ?? "",
+        ...(style ? { style } : {}),
+        items: (s.items ?? []).map((it) => {
+          const itemStyles = styleMap(it.styles, ["title", "subtitle", "location", "dates"] as const);
+          const title = it.title ?? "";
+          const subtitle = it.subtitle ?? "";
+          // v1 stored role in title and organization in subtitle; Harvard puts the organization first.
+          const swap = legacy && Boolean(it.dates || it.location) && Boolean(subtitle);
+          return {
+            id: it.id || uid(),
+            title: swap ? subtitle : title,
+            subtitle: swap ? title : subtitle,
+            location: it.location ?? "",
+            dates: it.dates ?? "",
+            bullets: (it.bullets ?? []).map((b) =>
+              typeof b === "string" ? { id: uid(), text: b } : { id: b.id || uid(), text: b.text ?? "" },
+            ),
+            ...(itemStyles ? { styles: itemStyles } : {}),
+          };
+        }),
+      };
+    }),
   };
 }
 
@@ -187,14 +207,18 @@ export function reconcileIds(prev: Resume, next: Resume): Resume {
       const pit = ps && im.has(ii) ? ps.items[im.get(ii)!] : undefined;
       const bm = pit ? matchBullets(it.bullets, pit.bullets) : new Map<number, number>();
       const bullets = it.bullets.map((b, bi) => take("bullet", b, pit && bm.has(bi) ? pit.bullets[bm.get(bi)!] : undefined));
-      return take("item", { ...it, bullets }, pit);
+      // Styles are formatting, not content: a matched entry keeps the previous version's styles.
+      const styles = pit?.styles && !it.styles ? { styles: pit.styles } : {};
+      return take("item", { ...it, bullets, ...styles }, pit);
     });
-    return take("section", { ...s, items }, ps);
+    const style = ps?.style && !s.style ? { style: ps.style } : {};
+    return take("section", { ...s, items, ...style }, ps);
   });
   // A new node whose id happens to equal a carried-over id would make two nodes share an id.
   for (const { kind, node } of fresh) if (carried[kind].has(node.id)) node.id = uid();
 
   const out: Resume = { ...next, version: next.version ?? prev.version ?? RESUME_VERSION, sections };
+  if (prev.header.styles && !next.header.styles) out.header = { ...out.header, styles: prev.header.styles };
   delete out.facts;
   if (prev.facts) out.facts = prev.facts;
   return out;
