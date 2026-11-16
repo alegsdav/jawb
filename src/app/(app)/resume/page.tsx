@@ -133,6 +133,23 @@ export default function MasterResumePage() {
   const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
   const [coachStart, setCoachStart] = useState<"questions" | undefined>(undefined);
   const [sideTab, setSideTab] = useState<"coach" | "facts">("coach");
+  const [tipsOpen, setTipsOpen] = useState(false);
+  const tipsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!tipsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!tipsRef.current?.contains(e.target as Node)) setTipsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTipsOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [tipsOpen]);
   /** Onboarding: "I don't have a resume yet" opens the builder. */
   const [building, setBuilding] = useState(false);
   /** Entry ids of a resume the builder just made (for "Go deeper"). */
@@ -315,9 +332,26 @@ export default function MasterResumePage() {
             <ImportIcon />
           </IconButton>
           <ResumeActions resume={resume} fileName={`${resume.header.name} Resume`} />
-          <IconButton label={EDIT_TIPS} onClick={() => {}}>
-            <HelpIcon />
-          </IconButton>
+          <div ref={tipsRef} className="relative">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={EDIT_TIPS}
+              title={EDIT_TIPS}
+              aria-expanded={tipsOpen}
+              aria-controls="edit-tips"
+              onClick={() => setTipsOpen((o) => !o)}
+            >
+              <HelpIcon />
+            </button>
+            <div
+              id="edit-tips"
+              hidden={!tipsOpen}
+              className="float-dark absolute right-0 top-full mt-1.5 z-40 w-72 whitespace-normal p-3 text-xs leading-relaxed"
+            >
+              {EDIT_TIPS}
+            </div>
+          </div>
           <a
             href="#side-panel"
             className="hidden rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg sm:inline-flex lg:hidden"
@@ -331,7 +365,7 @@ export default function MasterResumePage() {
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         {/* Document column: plain white, centred. Scrolls on its own on lg+. */}
         <div className="min-w-0 flex-1 lg:overflow-y-auto">
-          <div className="mx-auto max-w-[860px] space-y-3 px-4 pb-6 pt-10 sm:px-8">
+          <div className="mx-auto max-w-[860px] space-y-3 px-4 pb-6 pt-4 sm:px-8">
             {empty && !importOpen ? (
               building ? (
                 <Builder email={email} onBuilt={onBuilt} onCancel={() => setBuilding(false)} />

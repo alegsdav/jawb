@@ -48,7 +48,7 @@ export function JobHeader({
   return (
     <div className="space-y-2">
       <input
-        className="ghost-input w-full text-lg font-semibold tracking-tight"
+        className="ghost-input -mx-[5px] w-full text-lg font-semibold tracking-tight"
         value={job.title}
         placeholder="Job title"
         aria-label="Job title"
@@ -68,14 +68,15 @@ export function JobHeader({
 
       <div id="job-details" className={`${detailsOpen ? "block" : "hidden"} space-y-3 sm:block`}>
         <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[13px] text-muted">
-            <FitInput className="max-w-full" value={job.company} placeholder="Company" onChange={(v) => onPatch({ company: v })} />
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1 text-[13px] text-muted">
+            {/* -mx-[5px]: the inputs' padding and border sit outside the text, so the text lines up with the labels. */}
+            <FitInput className="max-w-full -mx-[5px]" value={job.company} placeholder="Company" onChange={(v) => onPatch({ company: v })} />
             <span aria-hidden>·</span>
-            <FitInput className="max-w-full" value={job.location} placeholder="Location" onChange={(v) => onPatch({ location: v })} />
+            <FitInput className="max-w-full -mx-[5px]" value={job.location} placeholder="Location" onChange={(v) => onPatch({ location: v })} />
           </div>
           {job.url && (
             // Not "Posting": that's also the name of a tab.
-            <a href={job.url} target="_blank" rel="noreferrer" className="inline-block px-1 py-0.5 text-[13px] text-muted underline underline-offset-2 hover:text-fg">
+            <a href={job.url} target="_blank" rel="noreferrer" className="-ml-1 inline-block px-1 py-0.5 text-[13px] text-muted underline underline-offset-2 hover:text-fg">
               Open posting ↗
             </a>
           )}
@@ -85,7 +86,8 @@ export function JobHeader({
           {!applied && (
             <>
               <span className="text-muted">Status</span>
-              <div className="justify-self-start">{statusSelect}</div>
+              {/* The select's dot sits 10px in; pull the wrapper back so the dot lines up with the other values. */}
+              <div className="justify-self-start -ml-2.5">{statusSelect}</div>
             </>
           )}
           <span className="text-muted">Saved</span>
@@ -94,12 +96,12 @@ export function JobHeader({
           </div>
           {!applied && followUp}
           {/* DeadlineField's own label sits in the same 84px column as the other labels. */}
-          <div className="col-span-2 [&_label]:gap-3 [&_label>span]:w-[84px] [&_label>span]:shrink-0">
+          <div className="col-span-2 [&_label]:gap-3 [&_label>span]:w-[84px] [&_label>span]:shrink-0 [&_label>span]:text-[13px] [&_input]:text-[13px] [&_input]:sm:-ml-[5px]">
             <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => onPatch({ deadline: v })} />
           </div>
         </div>
 
-        <button type="button" className="block text-xs text-muted hover:text-bad" onClick={onDelete}>
+        <button type="button" className="block text-[13px] text-muted hover:text-bad" onClick={onDelete}>
           Delete job
         </button>
       </div>
