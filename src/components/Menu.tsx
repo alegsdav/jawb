@@ -78,6 +78,7 @@ export function Menu({
       <button
         ref={button}
         type="button"
+        data-doc-keep-selection
         className={buttonClassName}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -92,6 +93,7 @@ export function Menu({
         <div
           ref={list}
           id={id}
+          data-doc-keep-selection
           role="menu"
           onKeyDown={onListKey}
           className={`float-dark absolute top-full z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] p-1 ${
@@ -204,6 +206,8 @@ export function MenuItem({
       type="button"
       role="menuitem"
       disabled={disabled}
+      // Keep focus where it is (the document field) while the mouse is pressed; keyboard activation is unaffected.
+      onMouseDown={(e) => e.preventDefault()}
       onClick={() => {
         close();
         onSelect();

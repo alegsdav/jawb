@@ -9,6 +9,11 @@ function fieldsIn(root: HTMLElement): DocField[] {
   );
 }
 
+/** Single-line fields: inputs, and textareas marked data-singleline (the name and contact lines). */
+function isSingleLine(el: DocField): boolean {
+  return el instanceof HTMLInputElement || el.hasAttribute("data-singleline");
+}
+
 /** Focus a field and put the caret at its start or end, scrolling it into view if needed. */
 export function focusField(el: DocField, pos: "start" | "end"): void {
   el.focus({ preventScroll: false });
@@ -101,7 +106,7 @@ export function handleDocArrowKeys(e: React.KeyboardEvent<HTMLElement>, root: HT
       return;
     case "ArrowUp":
       if (!collapsed) return;
-      if (target instanceof HTMLInputElement) {
+      if (isSingleLine(target)) {
         moveTo(prev, "end");
         return;
       }
@@ -110,7 +115,7 @@ export function handleDocArrowKeys(e: React.KeyboardEvent<HTMLElement>, root: HT
       return;
     case "ArrowDown":
       if (!collapsed) return;
-      if (target instanceof HTMLInputElement) {
+      if (isSingleLine(target)) {
         moveTo(next, "start");
         return;
       }
@@ -118,8 +123,11 @@ export function handleDocArrowKeys(e: React.KeyboardEvent<HTMLElement>, root: HT
       if (pos === len || caretLineTop(target, pos) >= caretLineTop(target, len)) moveTo(next, "start");
       return;
     case "Enter":
-      // Single-line fields: Enter goes to the next field. Textareas keep their newline behaviour.
-      if (target instanceof HTMLInputElement) moveTo(next, "start");
+      // Single-line fields: Enter goes to the next field and never adds a line. Other textareas keep their newline.
+      if (isSingleLine(target)) {
+        e.preventDefault();
+        if (next) focusField(next, "start");
+      }
       return;
     default:
       return;

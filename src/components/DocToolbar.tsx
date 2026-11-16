@@ -5,9 +5,79 @@ import type { Resume } from "@/lib/types";
 import { Menu, Popover } from "./Menu";
 import { RedoIcon, UndoIcon } from "./icons";
 
+type DocField = HTMLInputElement | HTMLTextAreaElement;
+const DOC_FIELD_SELECTOR = "input.doc-field, textarea.doc-field";
+
+/** The document field that had focus last. Menu clicks don't move focus (see MenuItem), so this stays valid. */
+let lastDocField: DocField | null = null;
+let docFieldTrackerRefs = 0;
+
+const onDocFocusIn = (e: FocusEvent) => {
+  const t = e.target;
+  if (t instanceof Element && t.matches(DOC_FIELD_SELECTOR)) lastDocField = t as DocField;
+};
+
+/**
+ * Remembers the last focused document field (`input.doc-field, textarea.doc-field`) so that menu
+ * commands like Cut/Copy/Paste/Select all can act on it. Installs one document listener, shared by all callers.
+ */
+export function useDocFieldTracker(): void {
+  useEffect(() => {
+    docFieldTrackerRefs += 1;
+    if (docFieldTrackerRefs === 1) document.addEventListener("focusin", onDocFocusIn);
+    return () => {
+      docFieldTrackerRefs -= 1;
+      if (docFieldTrackerRefs === 0) {
+        document.removeEventListener("focusin", onDocFocusIn);
+        lastDocField = null;
+      }
+    };
+  }, []);
+}
+
+/**
+ * Edit command for the remembered document field. Refocuses it without scrolling, then runs the command.
+ * Paste reads the clipboard and inserts through execCommand, so React's onChange fires as for typing.
+ */
+export async function docEdit(cmd: "cut" | "copy" | "paste" | "selectAll"): Promise<void> {
+  try {
+    const el = lastDocField;
+    if (!el || !el.isConnected) return;
+    el.focus({ preventScroll: true });
+    if (cmd === "selectAll") {
+      el.select();
+      return;
+    }
+    if (cmd === "paste") {
+      let text: string;
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        return;
+      }
+      document.execCommand("insertText", false, text);
+      return;
+    }
+    document.execCommand(cmd);
+  } catch {
+    // Command unavailable in this browser: nothing to do.
+  }
+}
+
+/** Helper text for a menu hint: the editing and print shortcuts of the document. */
+export const EDIT_SHORTCUTS =
+  "Enter: new bullet or next field · Backspace on an empty bullet: remove it · Alt+↑/↓: move bullet · " +
+  "Arrow keys: move between lines and fields · Ctrl/⌘+Z: undo · Ctrl/⌘+Shift+Z: redo · Ctrl/⌘+P: print · " +
+  "Ctrl/⌘+X/C/V: cut, copy, paste";
+
 /** Row of menu triggers (File, Edit, View...) for the top bar. */
 export function MenuBar({ children }: { children: React.ReactNode }) {
-  return <div className="flex items-center gap-0.5">{children}</div>;
+  useDocFieldTracker();
+  return (
+    <div data-doc-keep-selection className="flex items-center gap-0.5">
+      {children}
+    </div>
+  );
 }
 
 /** One menu in the MenuBar: a plain 13px text trigger with a `Menu` popup of `MenuItem`s. */
@@ -22,7 +92,7 @@ export function MenuBarMenu({ label, children }: { label: React.ReactNode; child
 /** Formatting-style toolbar row under the top bar. Fixed height, never changes width when content changes. */
 export function EditorToolbar({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-10 items-center gap-0.5 overflow-x-auto whitespace-nowrap border-b border-border bg-surface px-2 [scrollbar-width:none]">
+    <div data-doc-keep-selection className="flex h-10 items-center gap-0.5 overflow-x-auto whitespace-nowrap border-b border-border bg-surface px-2 [scrollbar-width:none]">
       {children}
     </div>
   );
@@ -73,7 +143,7 @@ export function StatusBar({
 }: {
   pages: number;
   words: number;
-  saveStatus: React.ReactNode;
+  saveStatus?: React.ReactNode;
   zoom: number;
   onZoom: (z: number) => void;
 }) {
@@ -82,7 +152,7 @@ export function StatusBar({
       <span className="whitespace-nowrap">
         Page 1 of {Math.max(1, pages)} · {words.toLocaleString()} {words === 1 ? "word" : "words"}
       </span>
-      <span className="min-w-0 truncate">{saveStatus}</span>
+      {saveStatus != null && <span className="min-w-0 truncate">{saveStatus}</span>}
       <div className="ml-auto shrink-0">
         <ZoomSelect value={zoom} onChange={onZoom} />
       </div>
