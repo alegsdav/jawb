@@ -418,15 +418,16 @@ export function ResumeDocument({
           <ContextBar slot={actionsSlot} label={activeBid ? "Bullet" : "Entry"}>
             {activeBid ? (
               <>
-                <ToolBtn label="↑" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, -1), true); focusNext.current = activeBid; }} />
-                <ToolBtn label="↓" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, 1), true); focusNext.current = activeBid; }} />
+                <ToolBtn label="Move bullet up" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, -1), true); focusNext.current = activeBid; }} />
+                <ToolBtn label="Move bullet down" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, 1), true); focusNext.current = activeBid; }} />
                 <ToolBtn label="Delete bullet" danger icon={<TrashIcon className="h-3.5 w-3.5" />} onClick={() => removeBullet(sid, item, activeBid)} />
-                <span className="mx-1 h-4 w-px bg-[#e2e2de]" />
+                <span className="mx-1 h-4 w-px bg-white/15" />
               </>
             ) : null}
             <ToolBtn label="+ Bullet" onClick={() => addBullet(sid, item, activeBi >= 0 ? activeBi : item.bullets.length - 1)} />
-            <ToolBtn label="Entry ↑" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, -1) }), true)} />
-            <ToolBtn label="Entry ↓" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, 1) }), true)} />
+            {activeBid && <span className="float-muted ml-1 px-1 text-[11px]">Entry</span>}
+            <ToolBtn label="Move entry up" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, -1) }), true)} />
+            <ToolBtn label="Move entry down" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, 1) }), true)} />
             <ToolBtn
               label="Delete entry"
               danger

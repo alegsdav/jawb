@@ -984,7 +984,7 @@ export default function JobPage() {
       <span className="text-muted">Follow up</span>
       <input
         type="date"
-        className="ghost-input justify-self-start text-[13px] border-border sm:border-transparent"
+        className="ghost-input justify-self-start text-[13px] border-border sm:border-transparent sm:-ml-[5px]"
         value={job.follow_up_date ?? ""}
         onChange={(e) => patch({ follow_up_date: e.target.value || null })}
       />
@@ -1062,10 +1062,11 @@ export default function JobPage() {
               </button>
             ) : null}
             {!quiet && <PlaceholderCount count={placeholderCount} onClick={goToPlaceholder} />}
-            {!quiet && (
-              <span className="hidden sm:inline-flex"><Toggle on={showFeedback} onChange={setShowFeedback} label="Feedback" /></span>
-            )}
-            <span className="hidden md:inline"><PageCount {...measure} /></span>
+            {/* Feedback toggle and page count share one flex row so their text sits on the same baseline. */}
+            <span className="hidden items-center gap-2 text-xs leading-none sm:flex">
+              {!quiet && <Toggle on={showFeedback} onChange={setShowFeedback} label="Feedback" />}
+              <span className="hidden md:inline-flex"><PageCount {...measure} /></span>
+            </span>
             <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
             <span className="hidden sm:inline-flex">
               <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
@@ -1118,13 +1119,14 @@ export default function JobPage() {
   );
 
   return (
-    <div className="flex flex-col lg:h-full lg:min-h-0">
+    // Phones: fill the viewport above the bottom tab bar (header + pb-16 in the app layout), so no grey band shows under the document.
+    <div className="flex flex-col min-h-[calc(100dvh-7rem)] sm:min-h-[calc(100dvh-7.5rem)] lg:h-full lg:min-h-0">
       {topBar}
 
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         {/* Document column: plain white, centred. Scrolls on its own on lg+. */}
         <div className={`min-w-0 flex-1 lg:overflow-y-auto ${tab === "analysis" ? "hidden lg:block" : ""}`}>
-          <div className="mx-auto max-w-[860px] space-y-4 px-4 pt-10 pb-6 sm:px-8">
+          <div className="mx-auto max-w-[860px] space-y-4 px-4 pt-4 pb-6 sm:px-8">
             {migrationHint && (
               <div role="status" className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-[13px]">
                 <span className="flex-1 text-muted">
