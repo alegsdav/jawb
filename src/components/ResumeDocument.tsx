@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Bullet, Item, Resume, Section } from "@/lib/types";
 import { emptyItem, isInlineItem, uid } from "@/lib/resume";
 import { PLACEHOLDER_RE } from "@/lib/facts";
 import type { BulletFeedback, Rating } from "@/lib/analysis";
 import { markPlaceholders } from "./PlaceholderTextarea";
-import { ArrowDownIcon, ArrowUpIcon, TrashIcon } from "./icons";
+import { handleDocArrowKeys } from "./docNav";
+import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, LineIcon, PlusIcon, TrashIcon } from "./icons";
 
 type Props = {
   value: Resume;
@@ -22,8 +24,17 @@ type Props = {
   onReject?: (bulletId: string) => void;
   /** Reports page count and roughly how many lines spill past page 1. */
   onMeasure?: (m: { pages: number; overflowLines: number }) => void;
-  /** Element in the page toolbar where contextual actions (move/delete) render. */
+  /**
+   * Element in the page toolbar where the one document action group renders (add bullet/entry/role line,
+   * move up/down, delete). Its buttons act on the active bullet, else entry, else section. With no slot,
+   * no action group renders.
+   */
   actionsSlot?: HTMLElement | null;
+  /**
+   * Element in the side panel where the selected bullet's comment card renders (a light Docs-style card).
+   * With no slot, the card renders as an absolute overlay under the bullet, so it never shifts the text.
+   */
+  commentSlot?: HTMLElement | null;
   /**
    * Select a bullet, scroll it into view and open its comment card. Pass a new object (e.g. with an
    * incrementing `n`) each time. Works on iOS too, where focusing a field outside a tap is ignored.
@@ -53,6 +64,12 @@ type Active =
   | { kind: "item"; sid: string; iid: string }
   | { kind: "bullet"; sid: string; iid: string; bid: string }
   | null;
+
+/** The block the document actions act on, resolved from the selection against the current value. */
+type Target =
+  | { kind: "section"; si: number; section: Section }
+  | { kind: "item"; si: number; section: Section; ii: number; item: Item }
+  | { kind: "bullet"; si: number; section: Section; ii: number; item: Item; bi: number; bullet: Bullet };
 
 // Letter page at 96dpi with 0.6in margins; matches the PDF export.
 const PAGE_H = 1056;
@@ -125,43 +142,44 @@ function AutoTextarea({ highlight, ...props }: React.TextareaHTMLAttributes<HTML
   );
 }
 
-/** `icon` renders an icon-only button; `label` then stays its aria-label and tooltip, so accessible names don't change. */
-function ToolBtn({ label, onClick, danger, icon }: { label: string; onClick: () => void; danger?: boolean; icon?: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      // Desktop: keep the caret where it is. (Mobile Safari never focuses buttons; selection survives because
-      // it's only cleared by taps outside the document, not by blur.)
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      aria-label={icon ? label : undefined}
-      title={icon ? label : undefined}
-      className="float-item min-h-9 whitespace-nowrap sm:min-h-0"
-      style={danger ? { color: "#ff8a8a" } : undefined}
-    >
-      {icon ?? label}
-    </button>
-  );
-}
+type ActionBtn = { title: string; icon: React.ReactNode; disabled?: boolean; onClick: () => void } | "sep";
 
 /**
- * Contextual move/delete actions for the selected section/entry/bullet: a small dark floating bar just above
- * the block (the block is `position: relative`, so this never shifts the layout). Shown only while selected.
- * `slot` is still accepted for compatibility; the bar no longer portals into the page toolbar.
+ * The one document action group, portaled into the page toolbar. Always the same buttons in the same order,
+ * so the toolbar never changes width; buttons only enable/disable with the selection. Mousedown is prevented
+ * so a click keeps the caret (and the selection) where it was.
  */
-function ContextBar({ label, children }: { slot?: HTMLElement | null; label: string; children: React.ReactNode }) {
-  return (
-    <div className="doc-ui float-dark pointer-events-auto absolute bottom-full right-0 left-auto z-20 mb-0 flex w-max max-w-[calc(100vw-3rem)] flex-row flex-wrap items-center gap-0.5 p-1 text-xs">
-      <span className="float-muted px-1.5 text-[11px]">{label}</span>
-      {children}
-    </div>
+function DocActions({ slot, buttons }: { slot: HTMLElement | null | undefined; buttons: ActionBtn[] }) {
+  if (!slot) return null;
+  return createPortal(
+    <div role="toolbar" aria-label="Document actions" className="flex shrink-0 items-center gap-0.5">
+      {buttons.map((b, i) =>
+        b === "sep" ? (
+          <span key={i} aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
+        ) : (
+          <button
+            key={i}
+            type="button"
+            className="icon-btn"
+            title={b.title}
+            aria-label={b.title}
+            disabled={b.disabled}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={b.onClick}
+          >
+            {b.icon}
+          </button>
+        ),
+      )}
+    </div>,
+    slot,
   );
 }
 
-const RATING: Record<Rating, { label: string; tint: string; dot: string; text: string }> = {
-  strong: { label: "Strong", tint: "bg-[#e9f6ee]", dot: "bg-[#1f8a4c]", text: "text-[#5fd08a]" },
-  ok: { label: "Okay", tint: "bg-[#fdf5e2]", dot: "bg-[#c98a12]", text: "text-[#f0b84a]" },
-  weak: { label: "Weak", tint: "bg-[#fdecec]", dot: "bg-[#c53030]", text: "text-[#ff8a8a]" },
+const RATING: Record<Rating, { label: string; tint: string; dot: string; text: string; light: string }> = {
+  strong: { label: "Strong", tint: "bg-[#e9f6ee]", dot: "bg-[#1f8a4c]", text: "text-[#5fd08a]", light: "text-[#188038]" },
+  ok: { label: "Okay", tint: "bg-[#fdf5e2]", dot: "bg-[#c98a12]", text: "text-[#f0b84a]", light: "text-[#b06000]" },
+  weak: { label: "Weak", tint: "bg-[#fdecec]", dot: "bg-[#c53030]", text: "text-[#ff8a8a]", light: "text-[#d93025]" },
 };
 
 const isField = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("input, textarea, button, select, a");
@@ -171,13 +189,30 @@ function locateBullet(r: Resume, bid: string): { sid: string; iid: string } | nu
   return null;
 }
 
+function resolveTarget(r: Resume, active: Active): Target | null {
+  if (!active) return null;
+  const si = r.sections.findIndex((s) => s.id === active.sid);
+  if (si < 0) return null;
+  const section = r.sections[si];
+  if (active.kind === "section") return { kind: "section", si, section };
+  const ii = section.items.findIndex((it) => it.id === active.iid);
+  if (ii < 0) return null;
+  const item = section.items[ii];
+  if (active.kind === "item") return { kind: "item", si, section, ii, item };
+  const bi = item.bullets.findIndex((b) => b.id === active.bid);
+  if (bi < 0) return null;
+  return { kind: "bullet", si, section, ii, item, bi, bullet: item.bullets[bi] };
+}
+
 // ---------- the document ----------
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
-  reveal, quiet = false, onSelectionChange,
+  commentSlot, reveal, quiet = false, onSelectionChange,
 }: Props) {
   const [active, setActive] = useState<Active>(null);
+  /** Entries whose role & dates line the user added (so it shows even while empty). */
+  const [roleLines, setRoleLines] = useState<Set<string>>(() => new Set());
   const selectionCb = useRef(onSelectionChange);
   selectionCb.current = onSelectionChange;
   const activeKey = active ? `${active.kind}:${active.sid}:${"iid" in active ? active.iid : ""}:${active.kind === "bullet" ? active.bid : ""}` : "";
@@ -192,6 +227,8 @@ export function ResumeDocument({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
   const focusNext = useRef<string | null>(null);
+  /** A CSS selector for a field to focus once it has rendered (e.g. a new entry's title). */
+  const focusSel = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   /** Whether the current press began on an input/button (see selectBlock). */
@@ -212,12 +249,13 @@ export function ResumeDocument({
     el?.focus({ preventScroll: true });
   }, [reveal]);
 
-  // Clear the selection only when the user taps/clicks or tabs outside the document and its toolbar slot.
-  // (Not on blur: iOS Safari never focuses buttons, so blur/relatedTarget can't tell a toolbar tap from leaving.)
+  // Clear the selection only when the user taps/clicks or tabs outside the document, its toolbar slot and the
+  // side-panel comment slot. (Not on blur: iOS Safari never focuses buttons, so blur/relatedTarget can't tell a
+  // toolbar tap from leaving.)
   useEffect(() => {
     const outside = (t: EventTarget | null) => {
       const n = t as Node | null;
-      return !!n && !canvasRef.current?.contains(n) && !actionsSlot?.contains(n);
+      return !!n && !canvasRef.current?.contains(n) && !actionsSlot?.contains(n) && !commentSlot?.contains(n);
     };
     const onDown = (e: PointerEvent) => outside(e.target) && setActive(null);
     const onFocus = (e: FocusEvent) => outside(e.target) && setActive(null);
@@ -227,7 +265,7 @@ export function ResumeDocument({
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("focusin", onFocus);
     };
-  }, [actionsSlot]);
+  }, [actionsSlot, commentSlot]);
 
   // Focus a bullet created/removed/moved by keyboard once it's rendered.
   useEffect(() => {
@@ -238,6 +276,16 @@ export function ResumeDocument({
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
     }
+  });
+
+  // Focus a field picked by a toolbar action (new entry's title, the role & dates line) once it has rendered.
+  useEffect(() => {
+    const sel = focusSel.current;
+    if (!sel) return;
+    focusSel.current = null;
+    const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(sel);
+    el?.focus({ preventScroll: true });
+    el?.scrollIntoView({ block: "nearest" });
   });
 
   // Page-length measurement.
@@ -279,6 +327,86 @@ export function ResumeDocument({
     setActive(prev ? { kind: "bullet", sid, iid: item.id, bid: prev.id } : { kind: "item", sid, iid: item.id });
   }
 
+  // ---- document actions (the toolbar group), all acting on the resolved target ----
+  const target = resolveTarget(value, active);
+  const entryTarget = target && target.kind !== "section" ? target : null;
+  const noun = target ? target.kind : "";
+  const label = (verb: string, dir = "") => [verb, noun, dir].filter(Boolean).join(" ");
+  const pos = target ? (target.kind === "bullet" ? target.bi : target.kind === "item" ? target.ii : target.si) : -1;
+  const count = target
+    ? target.kind === "bullet" ? target.item.bullets.length : target.kind === "item" ? target.section.items.length : value.sections.length
+    : 0;
+
+  function moveTarget(t: Target, dir: -1 | 1) {
+    if (t.kind === "bullet") {
+      setBullets(t.section.id, t.item.id, move(t.item.bullets, t.bi, dir), true);
+      focusNext.current = t.bullet.id;
+    } else if (t.kind === "item") {
+      updSection(t.section.id, (s) => ({ ...s, items: move(s.items, t.ii, dir) }), true);
+    } else {
+      setSections(move(value.sections, t.si, dir), true);
+    }
+  }
+
+  function deleteTarget(t: Target) {
+    if (t.kind === "bullet") return removeBullet(t.section.id, t.item, t.bullet.id);
+    if (t.kind === "item") {
+      const name = [t.item.title, t.item.subtitle].map((x) => x.trim()).filter(Boolean).join(" — ");
+      if (!confirm(name ? `Delete the "${name}" entry?` : "Delete this entry?")) return;
+      updSection(t.section.id, (s) => ({ ...s, items: s.items.filter((it) => it.id !== t.item.id) }), true);
+    } else {
+      if (!confirm(`Delete the "${t.section.title}" section?`)) return;
+      setSections(value.sections.filter((s) => s.id !== t.section.id), true);
+    }
+    setActive(null);
+  }
+
+  function addEntry(t: Target) {
+    const item = emptyItem();
+    updSection(t.section.id, (s) => ({ ...s, items: [...s.items, item] }), true);
+    focusSel.current = `[data-item="${item.id}"] .doc-field`;
+  }
+
+  function addRoleLine(item: Item) {
+    setRoleLines((prev) => new Set(prev).add(item.id));
+    focusSel.current = `[data-role-line="${item.id}"] input`;
+  }
+
+  const actions: ActionBtn[] = [
+    {
+      title: "Add bullet (Enter)",
+      icon: <PlusIcon className="h-4 w-4" />,
+      disabled: !entryTarget,
+      onClick: () => {
+        if (!entryTarget) return;
+        const after = entryTarget.kind === "bullet" ? entryTarget.bi : entryTarget.item.bullets.length - 1;
+        addBullet(entryTarget.section.id, entryTarget.item, after);
+      },
+    },
+    { title: "Add entry", icon: <LineIcon className="h-4 w-4" />, disabled: !target, onClick: () => target && addEntry(target) },
+    {
+      title: "Add role & dates line",
+      icon: <CalendarIcon className="h-4 w-4" />,
+      disabled: !entryTarget || isInlineItem(entryTarget.item),
+      onClick: () => entryTarget && addRoleLine(entryTarget.item),
+    },
+    "sep",
+    {
+      title: label("Move", "up"),
+      icon: <ArrowUpIcon className="h-4 w-4" />,
+      disabled: !target || pos <= 0,
+      onClick: () => target && moveTarget(target, -1),
+    },
+    {
+      title: label("Move", "down"),
+      icon: <ArrowDownIcon className="h-4 w-4" />,
+      disabled: !target || pos >= count - 1,
+      onClick: () => target && moveTarget(target, 1),
+    },
+    "sep",
+    { title: label("Delete"), icon: <TrashIcon className="h-4 w-4" />, disabled: !target, onClick: () => target && deleteTarget(target) },
+  ];
+
   function selectBlock(next: Active) {
     // A press that started in a field is typing, even if layout shifted and the click landed on the block.
     if (downOnField.current) return;
@@ -289,89 +417,80 @@ export function ResumeDocument({
   }
 
   return (
-    <div ref={canvasRef} className="doc-canvas" onPointerDownCapture={(e) => (downOnField.current = isField(e.target))}>
-      <div className="doc-page">
-        {/* Page-break guide (desktop only) */}
-        <div aria-hidden className="doc-pagebreak" style={{ top: PAGE_H }}>
-          <span>Page 2</span>
-        </div>
-
-        <div ref={contentRef} className="doc-content">
-          {/* Header */}
-          <div className="text-center" onFocus={() => setActive(null)}>
-            <AutoTextarea
-              className="doc-name text-center"
-              value={value.header.name}
-              placeholder="Your Name"
-              aria-label="Name"
-              onChange={(e) => onChange({ ...value, header: { ...value.header, name: e.target.value } })}
-            />
-            <AutoTextarea
-              className="doc-contact text-center"
-              value={value.header.contact}
-              placeholder="City, ST • email • phone • github.com/you"
-              aria-label="Contact line"
-              onChange={(e) => onChange({ ...value, header: { ...value.header, contact: e.target.value } })}
-            />
+    <>
+      <DocActions slot={actionsSlot} buttons={actions} />
+      <div
+        ref={canvasRef}
+        className="doc-canvas"
+        onPointerDownCapture={(e) => (downOnField.current = isField(e.target))}
+        onKeyDown={(e) => handleDocArrowKeys(e, canvasRef.current)}
+      >
+        <div className="doc-page">
+          {/* Page-break guide (desktop only) */}
+          <div aria-hidden className="doc-pagebreak" style={{ top: PAGE_H }}>
+            <span>Page 2</span>
           </div>
 
-          {value.sections.map((section, si) => {
-            const sectionActive = active?.kind === "section" && active.sid === section.id;
-            return (
-              <section
-                key={section.id}
-                className={`doc-section doc-block ${sectionActive ? "is-selected" : ""}`}
-                onClick={(e) => {
-                  if (!isField(e.target)) selectBlock({ kind: "section", sid: section.id });
-                }}
-              >
-                <div className="relative" onFocus={() => setActive({ kind: "section", sid: section.id })}>
-                  <input
-                    className="doc-field doc-section-title"
-                    value={section.title}
-                    placeholder="SECTION"
-                    aria-label="Section title"
-                    onChange={(e) => updSection(section.id, (s) => ({ ...s, title: e.target.value }))}
-                  />
-                  {sectionActive && (
-                    <ContextBar slot={actionsSlot} label="Section">
-                      <ToolBtn label="↑ Move" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => setSections(move(value.sections, si, -1), true)} />
-                      <ToolBtn label="↓ Move" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => setSections(move(value.sections, si, 1), true)} />
-                      <ToolBtn label="+ Entry" onClick={() => updSection(section.id, (s) => ({ ...s, items: [...s.items, emptyItem()] }), true)} />
-                      <ToolBtn
-                        label="Delete section"
-                        danger
-                        icon={<TrashIcon className="h-3.5 w-3.5" />}
-                        onClick={() => {
-                          if (confirm(`Delete the "${section.title}" section?`)) {
-                            setSections(value.sections.filter((s) => s.id !== section.id), true);
-                            setActive(null);
-                          }
-                        }}
-                      />
-                    </ContextBar>
-                  )}
-                </div>
+          <div ref={contentRef} className="doc-content">
+            {/* Header */}
+            <div className="text-center" onFocus={() => setActive(null)}>
+              <AutoTextarea
+                className="doc-name text-center"
+                value={value.header.name}
+                placeholder="Your Name"
+                aria-label="Name"
+                onChange={(e) => onChange({ ...value, header: { ...value.header, name: e.target.value } })}
+              />
+              <AutoTextarea
+                className="doc-contact text-center"
+                value={value.header.contact}
+                placeholder="City, ST • email • phone • github.com/you"
+                aria-label="Contact line"
+                onChange={(e) => onChange({ ...value, header: { ...value.header, contact: e.target.value } })}
+              />
+            </div>
 
-                {section.items.map((item, ii) => renderEntry(section, item, ii))}
-              </section>
-            );
-          })}
+            {value.sections.map((section) => {
+              const sectionActive = active?.kind === "section" && active.sid === section.id;
+              return (
+                <section
+                  key={section.id}
+                  className={`doc-section doc-block ${sectionActive ? "is-selected" : ""}`}
+                  onClick={(e) => {
+                    if (!isField(e.target)) selectBlock({ kind: "section", sid: section.id });
+                  }}
+                >
+                  <div className="relative" onFocus={() => setActive({ kind: "section", sid: section.id })}>
+                    <input
+                      className="doc-field doc-section-title"
+                      value={section.title}
+                      placeholder="SECTION"
+                      aria-label="Section title"
+                      onChange={(e) => updSection(section.id, (s) => ({ ...s, title: e.target.value }))}
+                    />
+                  </div>
+
+                  {section.items.map((item) => renderEntry(section, item))}
+                </section>
+              );
+            })}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 
-  function renderEntry(section: Section, item: Item, ii: number) {
+  function renderEntry(section: Section, item: Item) {
     const sid = section.id;
     const inline = isInlineItem(item);
     const itemActive = !!active && active.kind !== "section" && active.sid === sid && active.iid === item.id;
     const activeBid = itemActive && active?.kind === "bullet" ? active.bid : null;
-    const activeBi = activeBid ? item.bullets.findIndex((b) => b.id === activeBid) : -1;
+    const showRole = !!item.subtitle || !!item.dates || roleLines.has(item.id);
 
     return (
       <div
         key={item.id}
+        data-item={item.id}
         className={`doc-entry doc-block relative ${inline ? "doc-inline" : ""} ${itemActive ? "is-active" : ""} ${
           itemActive && !activeBid && active?.kind === "item" ? "is-selected" : ""
         }`}
@@ -403,43 +522,17 @@ export function ResumeDocument({
               <AutoInput className="font-bold" value={item.title} placeholder="Organization / School / Project" onChange={(v) => updItem(sid, item.id, { title: v })} />
               <AutoInput className="ml-auto" inputClass="text-right" value={item.location} placeholder="Location" onChange={(v) => updItem(sid, item.id, { location: v })} />
             </div>
-            <div className={`flex flex-wrap items-baseline gap-x-3 ${!item.subtitle && !item.dates ? "doc-optional" : ""}`}>
-              <AutoInput className="italic" value={item.subtitle} placeholder="Role / Degree / Tech" onChange={(v) => updItem(sid, item.id, { subtitle: v })} />
-              <AutoInput className="ml-auto" inputClass="text-right" value={item.dates} placeholder="Dates" onChange={(v) => updItem(sid, item.id, { dates: v })} />
-            </div>
+            {showRole && (
+              <div data-role-line={item.id} className="flex flex-wrap items-baseline gap-x-3">
+                <AutoInput className="italic" value={item.subtitle} placeholder="Role / Degree / Tech" onChange={(v) => updItem(sid, item.id, { subtitle: v })} />
+                <AutoInput className="ml-auto" inputClass="text-right" value={item.dates} placeholder="Dates" onChange={(v) => updItem(sid, item.id, { dates: v })} />
+              </div>
+            )}
           </>
         )}
 
         {item.bullets.length > 0 && (
           <ul className="doc-bullets">{item.bullets.map((b, bi) => renderBullet(sid, item, b, bi, activeBid === b.id))}</ul>
-        )}
-
-        {itemActive && (
-          <ContextBar slot={actionsSlot} label={activeBid ? "Bullet" : "Entry"}>
-            {activeBid ? (
-              <>
-                <ToolBtn label="Move bullet up" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, -1), true); focusNext.current = activeBid; }} />
-                <ToolBtn label="Move bullet down" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => { setBullets(sid, item.id, move(item.bullets, activeBi, 1), true); focusNext.current = activeBid; }} />
-                <ToolBtn label="Delete bullet" danger icon={<TrashIcon className="h-3.5 w-3.5" />} onClick={() => removeBullet(sid, item, activeBid)} />
-                <span className="mx-1 h-4 w-px bg-white/15" />
-              </>
-            ) : null}
-            <ToolBtn label="+ Bullet" onClick={() => addBullet(sid, item, activeBi >= 0 ? activeBi : item.bullets.length - 1)} />
-            {activeBid && <span className="float-muted ml-1 px-1 text-[11px]">Entry</span>}
-            <ToolBtn label="Move entry up" icon={<ArrowUpIcon className="h-3.5 w-3.5" />} onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, -1) }), true)} />
-            <ToolBtn label="Move entry down" icon={<ArrowDownIcon className="h-3.5 w-3.5" />} onClick={() => updSection(sid, (s) => ({ ...s, items: move(s.items, ii, 1) }), true)} />
-            <ToolBtn
-              label="Delete entry"
-              danger
-              icon={<TrashIcon className="h-3.5 w-3.5" />}
-              onClick={() => {
-                const name = [item.title, item.subtitle].map((x) => x.trim()).filter(Boolean).join(" — ");
-                if (!confirm(name ? `Delete the "${name}" entry?` : "Delete this entry?")) return;
-                updSection(sid, (s) => ({ ...s, items: s.items.filter((it) => it.id !== item.id) }), true);
-                setActive(null);
-              }}
-            />
-          </ContextBar>
         )}
       </div>
     );
@@ -463,6 +556,107 @@ export function ResumeDocument({
       el.focus({ preventScroll: true });
       el.setSelectionRange(p.start, p.start + p.text.length);
     };
+
+    // The comment card: a light Docs-style card in the side panel (commentSlot), or a dark overlay under the bullet.
+    const light = !!commentSlot;
+    const muted = light ? "text-muted" : "float-muted";
+    const rating = fb ? (light ? RATING[fb.rating].light : RATING[fb.rating].text) : "";
+    const card =
+      isActive && (view || changed || isNew || placeholder) ? (
+        <div
+          className={
+            light
+              ? "doc-ui rounded-lg border border-border bg-surface shadow-sm p-3 text-[13px] text-fg space-y-2"
+              : "doc-ui doc-comment absolute left-6 right-0 top-full z-30 mt-1"
+          }
+          // The card isn't part of the text: clicks and focus inside it must not re-select the entry.
+          onClick={(e) => e.stopPropagation()}
+          onFocus={(e) => e.stopPropagation()}
+        >
+          <p className={`line-clamp-2 text-xs ${muted}`}>{b.text.trim() || "Empty bullet"}</p>
+          {placeholder && (
+            <div className="rounded bg-[#fff6d6] px-2 py-1.5 text-[#5c4300]">
+              <p>Replace each [placeholder] with your real number, or reword the bullet, before you apply.</p>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {placeholders.map((p) => (
+                  <button
+                    key={p.start}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => selectPlaceholder(p)}
+                    className="min-h-8 rounded border border-[#d9a800] bg-[#ffd84d] px-2 text-xs font-medium text-[#3d2c00]"
+                    title="Select it so you can type over it"
+                  >
+                    {p.text}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {fb && (
+            <p>
+              <span className={`font-semibold ${rating}`}>{RATING[fb.rating].label}.</span> {fb.note}
+            </p>
+          )}
+          {view?.state === "updated" && (
+            <p>
+              <span className="font-semibold">Updated.</span>{" "}
+              <span className={muted}>You accepted the suggested edit. Re-analyze to rate the new wording.</span>
+            </p>
+          )}
+          {view?.state === "stale" && (
+            <p className={muted}>Edited since the last analysis, so its rating is hidden. Re-analyze for feedback on this wording.</p>
+          )}
+          {suggestion && (
+            <div className="space-y-1.5 pt-1">
+              <p className={`text-[11px] uppercase tracking-wide ${muted}`}>Suggested edit</p>
+              <p className={`line-through ${light ? "decoration-[#d93025]/60 text-muted" : "decoration-[#ff8a8a]/70 float-muted"}`}>{b.text}</p>
+              <p className={light ? "rounded bg-[#e6f4ea] px-1 -mx-1 text-[#137333]" : "text-[#bff0d2] bg-[#1f6b3f]/40 rounded px-1 -mx-1"}>
+                {suggestion}
+              </p>
+              <div className="flex gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  className="rounded-md bg-[#1a73e8] px-3 py-1 text-xs font-medium text-white"
+                  onClick={() => replace(suggestion)}
+                >
+                  ✓ Accept
+                </button>
+                {onReject && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    className={
+                      light
+                        ? "rounded-md px-3 py-1 text-xs text-muted hover:bg-surface-2"
+                        : "rounded-md border border-white/15 px-3 py-1.5 text-xs text-[#e9e9ea] hover:bg-white/10"
+                    }
+                    onClick={() => onReject(b.id)}
+                  >
+                    ✕ Reject
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {showChanges && changed && (
+            <div className={`border-t pt-2 ${light ? "border-border" : "border-white/10"}`}>
+              <p className={`text-[11px] uppercase tracking-wide ${muted}`}>Master resume version</p>
+              <p className={muted}>{original}</p>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                className="mt-1 min-h-8 text-xs text-[#1a73e8] underline underline-offset-2"
+                onClick={() => replace(original!)}
+              >
+                Revert to master resume
+              </button>
+            </div>
+          )}
+          {showChanges && isNew && !view && <p className={muted}>Added in this tailored copy (not in your master resume).</p>}
+        </div>
+      ) : null;
 
     return (
       <li key={b.id} className="relative">
@@ -511,88 +705,8 @@ export function ResumeDocument({
           />
         </div>
 
-        {/* Comment card for the selected bullet */}
-        {isActive && (view || changed || isNew || placeholder) && (
-          <div className="doc-ui doc-comment">
-            {placeholder && (
-              <div className="mb-2 rounded bg-[#fff6d6] px-2 py-1.5 text-[#5c4300]">
-                <p>Replace each [placeholder] with your real number, or reword the bullet, before you apply.</p>
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {placeholders.map((p) => (
-                    <button
-                      key={p.start}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => selectPlaceholder(p)}
-                      className="min-h-8 rounded border border-[#d9a800] bg-[#ffd84d] px-2 text-xs font-medium text-[#3d2c00]"
-                      title="Select it so you can type over it"
-                    >
-                      {p.text}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {fb && (
-              <p>
-                <span className={`font-semibold ${RATING[fb.rating].text}`}>{RATING[fb.rating].label}.</span> {fb.note}
-              </p>
-            )}
-            {view?.state === "updated" && (
-              <p>
-                <span className="font-semibold">Updated.</span>{" "}
-                <span className="float-muted">You accepted the suggested edit. Re-analyze to rate the new wording.</span>
-              </p>
-            )}
-            {view?.state === "stale" && (
-              <p className="float-muted">Edited since the last analysis, so its rating is hidden. Re-analyze for feedback on this wording.</p>
-            )}
-            {suggestion && (
-              <div className="mt-2 space-y-1.5">
-                <p className="text-[11px] uppercase tracking-wide float-muted">Suggested edit</p>
-                <p className="line-through decoration-[#ff8a8a]/70 float-muted">{b.text}</p>
-                <p className="text-[#bff0d2] bg-[#1f6b3f]/40 rounded px-1 -mx-1">{suggestion}</p>
-                <div className="flex gap-1.5 pt-1">
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    className="rounded-md bg-[#2f5bd3] px-3 py-1.5 text-xs font-medium text-white"
-                    onClick={() => replace(suggestion)}
-                  >
-                    ✓ Accept
-                  </button>
-                  {onReject && (
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-[#e9e9ea] hover:bg-white/10"
-                      onClick={() => onReject(b.id)}
-                    >
-                      ✕ Reject
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-            {showChanges && changed && (
-              <div className="mt-2 border-t border-white/10 pt-2">
-                <p className="text-[11px] uppercase tracking-wide float-muted">Master resume version</p>
-                <p className="float-muted">{original}</p>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  className="mt-1 min-h-8 text-xs text-[#8fb0ff] underline underline-offset-2"
-                  onClick={() => replace(original!)}
-                >
-                  Revert to master resume
-                </button>
-              </div>
-            )}
-            {showChanges && isNew && !view && (
-              <p className="float-muted">Added in this tailored copy (not in your master resume).</p>
-            )}
-          </div>
-        )}
+        {/* Comment card: in the side panel when commentSlot is given, otherwise overlaid (never in flow). */}
+        {card && (commentSlot ? createPortal(card, commentSlot) : card)}
       </li>
     );
   }

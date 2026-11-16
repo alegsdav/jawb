@@ -235,5 +235,7 @@ body {
   .zoom-frame { transform: none !important; }
   .doc-ui, .doc-pagebreak { display: none !important; }
   .doc-mirror mark { background: transparent !important; box-shadow: none !important; }
+  /* Layout-only copies (input width sizer, highlight mirror) must stay hidden, or they print on top of the text. */
+  .doc-page .invisible, .doc-page .doc-mirror { visibility: hidden !important; }
   ::placeholder { color: transparent !important; }
 }
