@@ -123,7 +123,7 @@ const styleCls = (s: Required<TextStyle>) => `${s.bold ? "font-bold" : "font-nor
 
 /** Copy of `obj` with `key` set to `val`, or the key removed when `val` is undefined. */
 function withKey<T extends object>(obj: T, key: string, val: unknown): T {
-  const out: Record<string, unknown> = { ...obj };
+  const out = { ...obj } as Record<string, unknown>;
   if (val === undefined) delete out[key];
   else out[key] = val;
   return out as T;
@@ -201,7 +201,9 @@ function AutoTextarea({ highlight, ...props }: React.TextareaHTMLAttributes<HTML
   );
 }
 
-type ActionBtn = { title: string; icon: React.ReactNode; disabled?: boolean; onClick: () => void } | "sep";
+type ActionBtn =
+  | { title: string; icon: React.ReactNode; disabled?: boolean; onClick: () => void; toggle?: boolean; pressed?: boolean }
+  | "sep";
 
 /**
  * The one document action group, portaled into the page toolbar. Always the same buttons in the same order,
@@ -219,9 +221,10 @@ function DocActions({ slot, buttons }: { slot: HTMLElement | null | undefined; b
           <button
             key={i}
             type="button"
-            className="icon-btn"
+            className={`icon-btn ${b.toggle ? "aria-pressed:bg-surface-2 aria-pressed:text-fg" : ""}`}
             title={b.title}
             aria-label={b.title}
+            aria-pressed={b.toggle ? !!b.pressed : undefined}
             disabled={b.disabled}
             onMouseDown={(e) => e.preventDefault()}
             onClick={b.onClick}
@@ -263,17 +266,34 @@ function resolveTarget(r: Resume, active: Active): Target | null {
   return { kind: "bullet", si, section, ii, item, bi, bullet: item.bullets[bi] };
 }
 
+/** Resolve a focused field against the current value (undefined when its section/entry is gone). */
+function resolveFormat(r: Resume, t: FormatTarget): ResolvedFormat | null {
+  if (t.field === "name") return { target: t, override: r.header.styles?.name, cur: effectiveStyle("name", r.header.styles?.name) };
+  if (t.field === "contact") return { target: t, override: r.header.styles?.contact, cur: effectiveStyle("contact", r.header.styles?.contact) };
+  const section = r.sections.find((s) => s.id === t.sid);
+  if (!section) return null;
+  if (t.field === "sectionTitle") return { target: t, override: section.style, cur: effectiveStyle("sectionTitle", section.style) };
+  const item = section.items.find((it) => it.id === t.iid);
+  if (!item) return null;
+  const override = item.styles?.[t.field];
+  return { target: t, override, item, cur: effectiveStyle(t.field, override, item) };
+}
+
 // ---------- the document ----------
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
-  commentSlot, reveal, quiet = false, onSelectionChange, commandsRef,
+  commentSlot, reveal, quiet = false, onSelectionChange, commandsRef, onFormatStateChange,
 }: Props) {
   const [active, setActive] = useState<Active>(null);
+  /** The styleable field that has focus (its bold/italic is what the toolbar and shortcuts change). */
+  const [formatTarget, setFormatTarget] = useState<FormatTarget | null>(null);
   /** Entries whose role & dates line the user added (so it shows even while empty). */
   const [roleLines, setRoleLines] = useState<Set<string>>(() => new Set());
   const selectionCb = useRef(onSelectionChange);
   selectionCb.current = onSelectionChange;
+  const formatCb = useRef(onFormatStateChange);
+  formatCb.current = onFormatStateChange;
   const activeKey = active ? `${active.kind}:${active.sid}:${"iid" in active ? active.iid : ""}:${active.kind === "bullet" ? active.bid : ""}` : "";
   // Report selection changes (by value, so re-renders with the same selection don't fire).
   useEffect(() => {
@@ -319,8 +339,12 @@ export function ResumeDocument({
       if (!n || (t as Element | null)?.closest?.("[data-doc-keep-selection]")) return false;
       return !canvasRef.current?.contains(n) && !actionsSlot?.contains(n) && !commentSlot?.contains(n);
     };
-    const onDown = (e: PointerEvent) => outside(e.target) && setActive(null);
-    const onFocus = (e: FocusEvent) => outside(e.target) && setActive(null);
+    const clear = () => {
+      setActive(null);
+      setFormatTarget(null);
+    };
+    const onDown = (e: PointerEvent) => outside(e.target) && clear();
+    const onFocus = (e: FocusEvent) => outside(e.target) && clear();
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("focusin", onFocus);
     return () => {
@@ -392,6 +416,35 @@ export function ResumeDocument({
     setActive(prev ? { kind: "bullet", sid, iid: item.id, bid: prev.id } : { kind: "item", sid, iid: item.id });
   }
 
+  // ---- bold / italic on the focused field (bullets have none) ----
+  const fmt = formatTarget ? resolveFormat(value, formatTarget) : null;
+  /** Write a field's override (undefined = back to the default) as its own undo step. */
+  function setFormatStyle(f: ResolvedFormat, next: TextStyle | undefined) {
+    const t = f.target;
+    if (t.field === "name" || t.field === "contact") {
+      onChange({ ...value, header: withKey(value.header, "styles", putStyle(value.header.styles, t.field, next)) }, true);
+    } else if (t.field === "sectionTitle") {
+      updSection(t.sid!, (s) => withKey(s, "style", next), true);
+    } else {
+      const styles = (it: Item) => withKey(it, "styles", putStyle(it.styles, t.field, next));
+      updSection(t.sid!, (s) => ({ ...s, items: s.items.map((it) => (it.id === t.iid ? styles(it) : it)) }), true);
+    }
+  }
+  function toggleFormat(key: "bold" | "italic") {
+    if (!fmt) return;
+    setFormatStyle(fmt, toggleStyle(fmt.target.field, fmt.override, key, fmt.item));
+  }
+  const canFormat = !!fmt;
+  const fmtKey = fmt ? `${fmt.target.field}:${fmt.target.sid ?? ""}:${fmt.target.iid ?? ""}` : "";
+  const fmtBold = fmt ? fmt.cur.bold : false;
+  const fmtItalic = fmt ? fmt.cur.italic : false;
+  // Tell the page what the focused field's style is (its toolbar state).
+  useEffect(() => {
+    formatCb.current?.({ canFormat, bold: fmtBold, italic: fmtItalic });
+  }, [canFormat, fmtKey, fmtBold, fmtItalic]);
+  /** Focus handler for a styleable field: it becomes the format target. */
+  const focusFormat = (field: StyleField, sid?: string, iid?: string) => () => setFormatTarget({ field, sid, iid });
+
   // ---- document actions (the toolbar group), all acting on the resolved target ----
   const target = resolveTarget(value, active);
   const entryTarget = target && target.kind !== "section" ? target : null;
@@ -460,6 +513,9 @@ export function ResumeDocument({
       addEntry: () => target && addEntry(target),
       addRoleLine: addRoleLineToTarget,
       addSection: addSectionNamed,
+      toggleBold: () => toggleFormat("bold"),
+      toggleItalic: () => toggleFormat("italic"),
+      resetFormat: () => fmt && setFormatStyle(fmt, undefined),
     };
   });
   useEffect(() => {
@@ -470,6 +526,23 @@ export function ResumeDocument({
   }, [commandsRef]);
 
   const actions: ActionBtn[] = [
+    {
+      title: "Bold (Ctrl+B)",
+      icon: <span className="text-[14px] leading-none font-bold">B</span>,
+      disabled: !fmt,
+      toggle: true,
+      pressed: !!fmt && fmt.cur.bold,
+      onClick: () => toggleFormat("bold"),
+    },
+    {
+      title: "Italic (Ctrl+I)",
+      icon: <span className="font-serif text-[16px] leading-none italic">I</span>,
+      disabled: !fmt,
+      toggle: true,
+      pressed: !!fmt && fmt.cur.italic,
+      onClick: () => toggleFormat("italic"),
+    },
+    "sep",
     {
       title: "Add bullet (Enter)",
       icon: <PlusIcon className="h-4 w-4" />,
@@ -506,6 +579,7 @@ export function ResumeDocument({
     // Selecting a whole block (not typing): drop the caret so the box selection is obvious.
     const el = document.activeElement as HTMLElement | null;
     if (el && canvasRef.current?.contains(el)) el.blur();
+    setFormatTarget(null);
     setActive(next);
   }
 
@@ -513,6 +587,7 @@ export function ResumeDocument({
   function clearSelection() {
     const el = document.activeElement as HTMLElement | null;
     if (el && canvasRef.current?.contains(el)) el.blur();
+    setFormatTarget(null);
     setActive(null);
   }
 
@@ -539,6 +614,15 @@ export function ResumeDocument({
         onPointerDownCapture={(e) => (downOnField.current = isField(e.target))}
         onKeyDown={(e) => {
           handleDocArrowKeys(e, canvasRef.current);
+          // Ctrl/Cmd+B and Ctrl/Cmd+I: bold/italic the focused field. Bullets have no formatting, so they swallow it.
+          if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !e.defaultPrevented && (e.key === "b" || e.key === "i")) {
+            const inBullet = (e.target as HTMLElement).dataset?.bullet !== undefined;
+            if (inBullet) e.preventDefault();
+            else if (fmt) {
+              e.preventDefault();
+              toggleFormat(e.key === "b" ? "bold" : "italic");
+            }
+          }
           // Escape clears the selection, unless a menu or popover inside the canvas already handled it.
           if (e.key === "Escape" && !e.defaultPrevented && !e.nativeEvent.isComposing) clearSelection();
         }}
@@ -553,19 +637,21 @@ export function ResumeDocument({
             {/* Header */}
             <div className="text-center" onFocus={() => setActive(null)}>
               <AutoTextarea
-                className="doc-name text-center"
+                className={`doc-name text-center ${styleCls(effectiveStyle("name", value.header.styles?.name))}`}
                 value={value.header.name}
                 placeholder="Your Name"
                 data-singleline
                 aria-label="Name"
+                onFocus={focusFormat("name")}
                 onChange={(e) => onChange({ ...value, header: { ...value.header, name: e.target.value.replace(/\n+/g, " ") } })}
               />
               <AutoTextarea
-                className="doc-contact text-center"
+                className={`doc-contact text-center ${styleCls(effectiveStyle("contact", value.header.styles?.contact))}`}
                 value={value.header.contact}
                 placeholder="City, ST • email • phone • github.com/you"
                 data-singleline
                 aria-label="Contact line"
+                onFocus={focusFormat("contact")}
                 onChange={(e) => onChange({ ...value, header: { ...value.header, contact: e.target.value.replace(/\n+/g, " ") } })}
               />
             </div>
@@ -583,10 +669,11 @@ export function ResumeDocument({
                 >
                   <div className="relative" onFocus={() => setActive({ kind: "section", sid: section.id })}>
                     <input
-                      className="doc-field doc-section-title"
+                      className={`doc-field doc-section-title ${styleCls(effectiveStyle("sectionTitle", section.style))}`}
                       value={section.title}
                       placeholder="SECTION"
                       aria-label="Section title"
+                      onFocus={focusFormat("sectionTitle", section.id)}
                       onChange={(e) => updSection(section.id, (s) => ({ ...s, title: e.target.value }))}
                     />
                   </div>
@@ -607,6 +694,8 @@ export function ResumeDocument({
     const itemActive = !!active && active.kind !== "section" && active.sid === sid && active.iid === item.id;
     const activeBid = itemActive && active?.kind === "bullet" ? active.bid : null;
     const showRole = !!item.subtitle || !!item.dates || roleLines.has(item.id);
+    const st = (f: "title" | "subtitle" | "location" | "dates") => styleCls(effectiveStyle(f, item.styles?.[f], item));
+    const focus = (f: "title" | "subtitle" | "location" | "dates") => focusFormat(f, sid, item.id);
 
     return (
       <div
@@ -628,25 +717,72 @@ export function ResumeDocument({
           <div className="flex items-baseline">
             {item.subtitle ? (
               <>
-                <AutoInput className="font-bold shrink-0" value={item.title} placeholder="Label" onChange={(v) => updItem(sid, item.id, { title: v })} />
+                <AutoInput
+                  className="shrink-0"
+                  textClass={st("title")}
+                  onFocus={focus("title")}
+                  value={item.title}
+                  placeholder="Label"
+                  onChange={(v) => updItem(sid, item.id, { title: v })}
+                />
                 {/* The label's sizing box is 4px wider than its text (field padding); pull the colon back against it. */}
                 <span className="shrink-0 -ml-[4px] relative">:&nbsp;</span>
-                <AutoTextarea value={item.subtitle} placeholder="Details" onChange={(e) => updItem(sid, item.id, { subtitle: e.target.value })} />
+                <AutoTextarea
+                  className={st("subtitle")}
+                  onFocus={focus("subtitle")}
+                  value={item.subtitle}
+                  placeholder="Details"
+                  onChange={(e) => updItem(sid, item.id, { subtitle: e.target.value })}
+                />
               </>
             ) : (
-              <AutoTextarea value={item.title} placeholder="Text" onChange={(e) => updItem(sid, item.id, { title: e.target.value })} />
+              <AutoTextarea
+                className={st("title")}
+                onFocus={focus("title")}
+                value={item.title}
+                placeholder="Text"
+                onChange={(e) => updItem(sid, item.id, { title: e.target.value })}
+              />
             )}
           </div>
         ) : (
           <>
             <div className="flex flex-wrap items-baseline gap-x-3">
-              <AutoInput className="font-bold" value={item.title} placeholder="Organization / School / Project" onChange={(v) => updItem(sid, item.id, { title: v })} />
-              <AutoInput className="ml-auto" inputClass="text-right" value={item.location} placeholder="Location" onChange={(v) => updItem(sid, item.id, { location: v })} />
+              <AutoInput
+                textClass={st("title")}
+                onFocus={focus("title")}
+                value={item.title}
+                placeholder="Organization / School / Project"
+                onChange={(v) => updItem(sid, item.id, { title: v })}
+              />
+              <AutoInput
+                className="ml-auto"
+                inputClass="text-right"
+                textClass={st("location")}
+                onFocus={focus("location")}
+                value={item.location}
+                placeholder="Location"
+                onChange={(v) => updItem(sid, item.id, { location: v })}
+              />
             </div>
             {showRole && (
               <div data-role-line={item.id} className="flex flex-wrap items-baseline gap-x-3">
-                <AutoInput className="italic" value={item.subtitle} placeholder="Role / Degree / Tech" onChange={(v) => updItem(sid, item.id, { subtitle: v })} />
-                <AutoInput className="ml-auto" inputClass="text-right" value={item.dates} placeholder="Dates" onChange={(v) => updItem(sid, item.id, { dates: v })} />
+                <AutoInput
+                  textClass={st("subtitle")}
+                  onFocus={focus("subtitle")}
+                  value={item.subtitle}
+                  placeholder="Role / Degree / Tech"
+                  onChange={(v) => updItem(sid, item.id, { subtitle: v })}
+                />
+                <AutoInput
+                  className="ml-auto"
+                  inputClass="text-right"
+                  textClass={st("dates")}
+                  onFocus={focus("dates")}
+                  value={item.dates}
+                  placeholder="Dates"
+                  onChange={(v) => updItem(sid, item.id, { dates: v })}
+                />
               </div>
             )}
           </>
@@ -820,6 +956,7 @@ export function ResumeDocument({
             placeholder="Accomplishment: verb + what + measurable impact"
             onFocus={(e) => {
               e.stopPropagation();
+              setFormatTarget(null); // bullets have no bold/italic
               setActive({ kind: "bullet", sid, iid: item.id, bid: b.id });
             }}
             onChange={(e) => setBullets(sid, item.id, item.bullets.map((x) => (x.id === b.id ? { ...x, text: e.target.value } : x)))}
@@ -855,33 +992,36 @@ export function ResumeView({ value }: { value: Resume }) {
       <div className="doc-page doc-readonly">
         <div className="doc-content">
           <div className="text-center">
-            {value.header.name && <div className="doc-name">{value.header.name}</div>}
-            {value.header.contact && <div className="doc-contact">{value.header.contact}</div>}
+            {value.header.name && <div className={`doc-name ${styleCls(effectiveStyle("name", value.header.styles?.name))}`}>{value.header.name}</div>}
+            {value.header.contact && (
+              <div className={`doc-contact ${styleCls(effectiveStyle("contact", value.header.styles?.contact))}`}>{value.header.contact}</div>
+            )}
           </div>
           {value.sections.map((section) => (
             <section key={section.id} className="doc-section">
-              <h3 className="doc-section-title">{section.title}</h3>
-              {section.items.map((it) =>
-                isInlineItem(it) ? (
+              <h3 className={`doc-section-title ${styleCls(effectiveStyle("sectionTitle", section.style))}`}>{section.title}</h3>
+              {section.items.map((it) => {
+                const st = (f: "title" | "subtitle" | "location" | "dates") => styleCls(effectiveStyle(f, it.styles?.[f], it));
+                return isInlineItem(it) ? (
                   <div key={it.id} className="doc-entry">
                     {it.subtitle ? (
                       <>
-                        <span className="font-bold">{it.title}:</span> {it.subtitle}
+                        <span className={st("title")}>{it.title}:</span> <span className={st("subtitle")}>{it.subtitle}</span>
                       </>
                     ) : (
-                      it.title
+                      <span className={st("title")}>{it.title}</span>
                     )}
                   </div>
                 ) : (
                   <div key={it.id} className="doc-entry">
                     <div className="flex flex-wrap items-baseline gap-x-3">
-                      <span className="font-bold">{it.title}</span>
-                      <span className="ml-auto">{it.location}</span>
+                      <span className={st("title")}>{it.title}</span>
+                      <span className={`ml-auto ${st("location")}`}>{it.location}</span>
                     </div>
                     {(it.subtitle || it.dates) && (
                       <div className="flex flex-wrap items-baseline gap-x-3">
-                        <span className="italic">{it.subtitle}</span>
-                        <span className="ml-auto">{it.dates}</span>
+                        <span className={st("subtitle")}>{it.subtitle}</span>
+                        <span className={`ml-auto ${st("dates")}`}>{it.dates}</span>
                       </div>
                     )}
                     {it.bullets.some((b) => b.text.trim()) && (
@@ -897,8 +1037,8 @@ export function ResumeView({ value }: { value: Resume }) {
                       </ul>
                     )}
                   </div>
-                ),
-              )}
+                );
+              })}
             </section>
           ))}
         </div>

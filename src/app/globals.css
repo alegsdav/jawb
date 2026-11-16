@@ -166,7 +166,7 @@ body {
 .doc-field::placeholder { color: #b0b0aa; }
 .doc-entry:not(.is-active) .doc-field::placeholder,
 .doc-section .doc-field:not(:focus)::placeholder { color: transparent; }
-.doc-name { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.doc-name { font-size: 22px; line-height: 1.2; } /* weight comes from the field's bold/italic style */
 .doc-contact { font-size: 13.3px; margin-top: 2px; }
 .doc-section { margin-top: 4px; padding-top: 8px; }
 /* Selectable blocks (sections, entries): click blank space to select, then move/delete from the toolbar. */
@@ -176,7 +176,7 @@ body {
 }
 .doc-section-title {
   display: block; width: 100%;
-  font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  text-transform: uppercase; letter-spacing: 0.04em;
   border-bottom: 1px solid #111; border-radius: 0; padding-bottom: 1px; margin-bottom: 5px;
 }
 .doc-entry { margin-bottom: 6px; }
