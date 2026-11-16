@@ -1,43 +1,58 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Bullet, Item, Resume, Section, TextStyle } from "@/lib/types";
-import { emptyItem, emptySection, isInlineItem, uid } from "@/lib/resume";
-import { effectiveStyle, toggleStyle, type StyleField } from "@/lib/textStyle";
-import { PLACEHOLDER_RE } from "@/lib/facts";
-import type { BulletFeedback, Rating } from "@/lib/analysis";
-import { markPlaceholders } from "./PlaceholderTextarea";
-import { handleDocArrowKeys } from "./docNav";
-import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, LineIcon, PlusIcon, TrashIcon } from "./icons";
+import { EditorState, Plugin, TextSelection, type Command, type Transaction } from "prosemirror-state";
+import type { DecorationSet } from "prosemirror-view";
+import { EditorView } from "prosemirror-view";
+import type { Node as PMNode } from "prosemirror-model";
+import type { BulletFeedback } from "@/lib/analysis";
+import type { Resume, TextStyle } from "@/lib/types";
+import { effectiveStyle } from "@/lib/textStyle";
+import { isInlineItem } from "@/lib/resume";
+import type { LineKind, LinePart } from "@/lib/docLineTypes";
+import { linesToResume, lineEffectiveStyle, resumeToLines } from "@/lib/docLines";
+import { docToLines, linesToDoc, nodeToLine } from "@/lib/pmSchema";
+import {
+  caretInfo,
+  editorKeymap,
+  headerGuard,
+  pasteTextParser,
+  replaceLineTextCommand,
+  resetStyleCommand,
+  setLineKindCommand,
+  stripPastedIds,
+  toggleStyleCommand,
+} from "@/lib/docEditing";
+import { buildDecorations, bulletInfo, type DecorationOptions } from "./docDecorations";
+import { BulletCommentCard } from "./BulletCommentCard";
+import { LINE_KIND_LABELS, type DocCommands, type DocSelection, type FormatState } from "./editorTypes";
+import { ListIcon } from "./icons";
+
+export type { DocCommands, DocSelection, FormatState } from "./editorTypes";
 
 type Props = {
   value: Resume;
-  /** commit=true for structural edits so they become their own undo step. */
+  /** commit=true for structural edits (paragraph style, line count) so they become their own undo step. */
   onChange: (r: Resume, commit?: boolean) => void;
   /** AI feedback per bullet id, already checked against the current text (see bulletFeedback). */
   feedback?: Record<string, BulletFeedback>;
+  /** Draw the AI's rating tints and dots over the text. Default true. */
   showHighlights?: boolean;
   /** Bullet texts the copy is compared against ("changed from master"): the copy's baseline or the master. */
   baseline?: Map<string, string> | null;
+  /** Draw the change bar next to bullets that differ from the baseline. Default true. */
   showChanges?: boolean;
   /** Reject a bullet's pending suggestion. */
   onReject?: (bulletId: string) => void;
   /** Reports page count and roughly how many lines spill past page 1. */
   onMeasure?: (m: { pages: number; overflowLines: number }) => void;
-  /**
-   * Element in the page toolbar where the one document action group renders (add bullet/entry/role line,
-   * move up/down, delete). Its buttons act on the active bullet, else entry, else section. With no slot,
-   * no action group renders.
-   */
+  /** Element in the page toolbar where the formatting controls render. With no slot, none render. */
   actionsSlot?: HTMLElement | null;
-  /**
-   * Element in the side panel where the selected bullet's comment card renders (a light Docs-style card).
-   * With no slot, the card renders as an absolute overlay under the bullet, so it never shifts the text.
-   */
+  /** Element in the side panel where the caret bullet's comment card renders. With no slot, no card renders. */
   commentSlot?: HTMLElement | null;
   /**
-   * Select a bullet, scroll it into view and open its comment card. Pass a new object (e.g. with an
+   * Put the caret at the end of a bullet, scroll to it and show its card. Pass a new object (e.g. with an
    * incrementing `n`) each time. Works on iOS too, where focusing a field outside a tap is ignored.
    */
   reveal?: { id: string; n: number } | null;
@@ -46,292 +61,250 @@ type Props = {
    * card). Suggestions are hidden by passing no `feedback`.
    */
   quiet?: boolean;
-  /**
-   * Called whenever the selection changes (a section, an entry or a bullet; null when nothing is
-   * selected, e.g. after a tap outside the document). The coaching panel follows it.
-   */
+  /** Called when the selection changes (null when nothing is selected). The coaching panel follows it. */
   onSelectionChange?: (selection: DocSelection | null) => void;
-  /**
-   * Filled with the document commands (add bullet/entry/role line, add section) on every render, so a page's
-   * Insert menu can run them. They act on the current selection, like the toolbar buttons do.
-   */
+  /** Filled with the document commands (bold, italic, reset, paragraph style) on every render. */
   commandsRef?: React.RefObject<DocCommands | null>;
-  /**
-   * Called when the focused (styleable) field or its bold/italic state changes. canFormat is false when no
-   * styleable field is focused (bullets have no formatting).
-   */
+  /** Called when the caret line's formatting state changes. */
   onFormatStateChange?: (s: FormatState) => void;
 };
 
-/** Imperative document commands for the page's Insert menu and format shortcuts. */
-export type DocCommands = {
-  addBullet(): void;
-  addEntry(): void;
-  addRoleLine(): void;
-  addSection(title: string): void;
-  /** Toggle bold / italic on the focused field (a no-op when none is focused). */
-  toggleBold(): void;
-  toggleItalic(): void;
-  /** Remove the bold/italic override on the focused field, back to its default. */
-  resetFormat(): void;
-};
+/** Transaction metas. EXTERNAL: the change came from the page (undo, side panel), not the user typing. */
+const EXTERNAL = "docExternal";
+/** COMMIT: this change is its own undo step. */
+const COMMIT = "docCommit";
+/** REDECORATE: nothing changed in the doc, only the decoration options. */
+const REDECORATE = "docRedecorate";
 
-export type FormatState = { canFormat: boolean; bold: boolean; italic: boolean };
-
-/** The styleable field that has focus. sid/iid locate it (absent for the header). */
-type FormatTarget = { field: StyleField; sid?: string; iid?: string };
-
-/** A focused field resolved against the current value. */
-type ResolvedFormat = { target: FormatTarget; override: TextStyle | undefined; item?: Item; cur: Required<TextStyle> };
-
-/** What's selected in the document, by id. */
-export type DocSelection =
-  | { kind: "section"; sectionId: string }
-  | { kind: "entry"; sectionId: string; entryId: string }
-  | { kind: "bullet"; sectionId: string; entryId: string; bulletId: string };
-
-/** What's selected, by id (indexes go stale after a move). */
-type Active =
-  | { kind: "section"; sid: string }
-  | { kind: "item"; sid: string; iid: string }
-  | { kind: "bullet"; sid: string; iid: string; bid: string }
-  | null;
-
-/** The block the document actions act on, resolved from the selection against the current value. */
-type Target =
-  | { kind: "section"; si: number; section: Section }
-  | { kind: "item"; si: number; section: Section; ii: number; item: Item }
-  | { kind: "bullet"; si: number; section: Section; ii: number; item: Item; bi: number; bullet: Bullet };
-
-// Letter page at 96dpi with 0.6in margins; matches the PDF export.
 const PAGE_H = 1056;
 const MARGIN = 58;
 const LINE = 18;
 
-// ---------- small building blocks ----------
-
-function move<T>(arr: T[], i: number, dir: -1 | 1): T[] {
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= arr.length) return arr;
-  const next = [...arr];
-  [next[i], next[j]] = [next[j], next[i]];
-  return next;
-}
-
-/** Tailwind classes for an effective bold/italic style. The one place the Harvard defaults become CSS. */
 const styleCls = (s: Required<TextStyle>) => `${s.bold ? "font-bold" : "font-normal"} ${s.italic ? "italic" : "not-italic"}`;
 
-/** Copy of `obj` with `key` set to `val`, or the key removed when `val` is undefined. */
-function withKey<T extends object>(obj: T, key: string, val: unknown): T {
-  const out = { ...obj } as Record<string, unknown>;
-  if (val === undefined) delete out[key];
-  else out[key] = val;
-  return out as T;
-}
-
-/** Copy of a styles map with one flag set (or removed); undefined when no flags are left. */
-function putStyle(
-  obj: Record<string, TextStyle | undefined> | undefined,
-  key: string,
-  next: TextStyle | undefined,
-): Record<string, TextStyle> | undefined {
-  const out: Record<string, TextStyle> = {};
-  for (const [k, v] of Object.entries(obj ?? {})) if (k !== key && v) out[k] = v;
-  if (next) out[key] = next;
-  return Object.keys(out).length ? out : undefined;
-}
-
-/** Text input that grows with its content (for right-aligned dates/locations and inline labels). */
-function AutoInput({
-  value, onChange, placeholder, className = "", inputClass = "", textClass = "", onFocus,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  className?: string;
-  inputClass?: string;
-  /** Bold/italic classes (styleCls) for the text and its sizing box. */
-  textClass?: string;
-  onFocus?: () => void;
-}) {
-  return (
-    <span className={`inline-grid max-w-full ${className}`}>
-      <span aria-hidden className={`invisible whitespace-pre col-start-1 row-start-1 px-[2px] ${textClass}`}>
-        {value || placeholder}
-      </span>
-      <input
-        size={1}
-        className={`doc-field col-start-1 row-start-1 w-full min-w-[1ch] ${textClass} ${inputClass}`}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={onFocus}
-        aria-label={placeholder}
-      />
-    </span>
-  );
-}
-
-/**
- * Textarea that grows with its content. With `highlight`, a mirror of the text sits in the same grid
- * cell behind it and paints a highlight under every [placeholder]. The structure is the same whether
- * or not there are placeholders, so typing a "]" never remounts the field (and drops the keyboard).
- */
-function AutoTextarea({ highlight, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { highlight?: boolean }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${el.scrollHeight}px`;
-  });
-  const cls = `doc-field block w-full ${props.className ?? ""}`;
-  const field = (
-    <textarea ref={ref} rows={1} {...props} className={`${cls} resize-none overflow-hidden ${highlight ? "relative col-start-1 row-start-1" : ""}`} />
-  );
-  if (!highlight) return field;
-  return (
-    <div className="grid w-full min-w-0">
-      <div aria-hidden className={`doc-mirror col-start-1 row-start-1 ${cls}`}>
-        {markPlaceholders(String(props.value ?? ""))}
-        {"​"}
-      </div>
-      {field}
-    </div>
-  );
-}
-
-type ActionBtn =
-  | { title: string; icon: React.ReactNode; disabled?: boolean; onClick: () => void; toggle?: boolean; pressed?: boolean }
-  | "sep";
-
-/**
- * The one document action group, portaled into the page toolbar. Always the same buttons in the same order,
- * so the toolbar never changes width; buttons only enable/disable with the selection. Mousedown is prevented
- * so a click keeps the caret (and the selection) where it was.
- */
-function DocActions({ slot, buttons }: { slot: HTMLElement | null | undefined; buttons: ActionBtn[] }) {
-  if (!slot) return null;
-  return createPortal(
-    <div role="toolbar" aria-label="Document actions" className="flex shrink-0 items-center gap-0.5">
-      {buttons.map((b, i) =>
-        b === "sep" ? (
-          <span key={i} aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
-        ) : (
-          <button
-            key={i}
-            type="button"
-            className={`icon-btn ${b.toggle ? "aria-pressed:bg-surface-2 aria-pressed:text-fg" : ""}`}
-            title={b.title}
-            aria-label={b.title}
-            aria-pressed={b.toggle ? !!b.pressed : undefined}
-            disabled={b.disabled}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={b.onClick}
-          >
-            {b.icon}
-          </button>
-        ),
-      )}
-    </div>,
-    slot,
-  );
-}
-
-const RATING: Record<Rating, { label: string; tint: string; dot: string; text: string; light: string }> = {
-  strong: { label: "Strong", tint: "bg-[#e9f6ee]", dot: "bg-[#1f8a4c]", text: "text-[#5fd08a]", light: "text-[#188038]" },
-  ok: { label: "Okay", tint: "bg-[#fdf5e2]", dot: "bg-[#c98a12]", text: "text-[#f0b84a]", light: "text-[#b06000]" },
-  weak: { label: "Weak", tint: "bg-[#fdecec]", dot: "bg-[#c53030]", text: "text-[#ff8a8a]", light: "text-[#d93025]" },
+/** What the caret is in, as plain values (stored in React state for the toolbar, the card and the selection). */
+type CaretSummary = {
+  /** Index of the caret's line in the document. */
+  index: number;
+  /** Start position of the caret's line in the document. */
+  pos: number;
+  kind: LineKind;
+  sid: string | null;
+  iid: string | null;
+  bid: string | null;
+  /** Which part of the line the caret is in (null for bullets). */
+  part: LinePart | null;
+  text: string;
+  bold: boolean;
+  italic: boolean;
 };
 
-const isField = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("input, textarea, button, select, a");
+function summarize(state: EditorState): CaretSummary {
+  const c = caretInfo(state);
+  const attrs = c.line.attrs;
+  const st = c.part ? lineEffectiveStyle(nodeToLine(c.line), c.part) : null;
+  return {
+    index: c.index,
+    pos: c.pos,
+    kind: c.kind,
+    sid: attrs.sid ?? null,
+    iid: attrs.iid ?? null,
+    bid: attrs.bid ?? null,
+    part: c.part,
+    text: c.line.textContent,
+    bold: st?.bold ?? false,
+    italic: st?.italic ?? false,
+  };
+}
 
-function locateBullet(r: Resume, bid: string): { sid: string; iid: string } | null {
-  for (const s of r.sections) for (const it of s.items) if (it.bullets.some((b) => b.id === bid)) return { sid: s.id, iid: it.id };
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+const sameStyle = (a: TextStyle | undefined, b: TextStyle | undefined) => a?.bold === b?.bold && a?.italic === b?.italic;
+
+function selectionOf(c: CaretSummary): DocSelection | null {
+  if (c.kind === "bullet") {
+    return c.sid && c.iid && c.bid ? { kind: "bullet", sectionId: c.sid, entryId: c.iid, bulletId: c.bid } : null;
+  }
+  if (c.sid && c.iid && (c.kind === "entry" || c.kind === "role" || c.kind === "text")) {
+    return { kind: "entry", sectionId: c.sid, entryId: c.iid };
+  }
+  if (c.sid && c.kind === "heading") return { kind: "section", sectionId: c.sid };
   return null;
 }
 
-function resolveTarget(r: Resume, active: Active): Target | null {
-  if (!active) return null;
-  const si = r.sections.findIndex((s) => s.id === active.sid);
-  if (si < 0) return null;
-  const section = r.sections[si];
-  if (active.kind === "section") return { kind: "section", si, section };
-  const ii = section.items.findIndex((it) => it.id === active.iid);
-  if (ii < 0) return null;
-  const item = section.items[ii];
-  if (active.kind === "item") return { kind: "item", si, section, ii, item };
-  const bi = item.bullets.findIndex((b) => b.id === active.bid);
-  if (bi < 0) return null;
-  return { kind: "bullet", si, section, ii, item, bi, bullet: item.bullets[bi] };
+/** Run a command on the editor's current state, then give the editor focus back. */
+function runOn(view: EditorView | null, cmd: Command) {
+  if (!view) return;
+  cmd(view.state, (tr) => view.dispatch(tr));
+  view.focus();
 }
-
-/** Resolve a focused field against the current value (undefined when its section/entry is gone). */
-function resolveFormat(r: Resume, t: FormatTarget): ResolvedFormat | null {
-  if (t.field === "name") return { target: t, override: r.header.styles?.name, cur: effectiveStyle("name", r.header.styles?.name) };
-  if (t.field === "contact") return { target: t, override: r.header.styles?.contact, cur: effectiveStyle("contact", r.header.styles?.contact) };
-  const section = r.sections.find((s) => s.id === t.sid);
-  if (!section) return null;
-  if (t.field === "sectionTitle") return { target: t, override: section.style, cur: effectiveStyle("sectionTitle", section.style) };
-  const item = section.items.find((it) => it.id === t.iid);
-  if (!item) return null;
-  const override = item.styles?.[t.field];
-  return { target: t, override, item, cur: effectiveStyle(t.field, override, item) };
-}
-
-// ---------- the document ----------
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
   commentSlot, reveal, quiet = false, onSelectionChange, commandsRef, onFormatStateChange,
 }: Props) {
-  const [active, setActive] = useState<Active>(null);
-  /** The styleable field that has focus (its bold/italic is what the toolbar and shortcuts change). */
-  const [formatTarget, setFormatTarget] = useState<FormatTarget | null>(null);
-  /** Entries whose role & dates line the user added (so it shows even while empty). */
-  const [roleLines, setRoleLines] = useState<Set<string>>(() => new Set());
-  const selectionCb = useRef(onSelectionChange);
-  selectionCb.current = onSelectionChange;
-  const formatCb = useRef(onFormatStateChange);
-  formatCb.current = onFormatStateChange;
-  const activeKey = active ? `${active.kind}:${active.sid}:${"iid" in active ? active.iid : ""}:${active.kind === "bullet" ? active.bid : ""}` : "";
-  // Report selection changes (by value, so re-renders with the same selection don't fire).
-  useEffect(() => {
-    const cb = selectionCb.current;
-    if (!cb) return;
-    if (!active) return cb(null);
-    if (active.kind === "section") return cb({ kind: "section", sectionId: active.sid });
-    if (active.kind === "item") return cb({ kind: "entry", sectionId: active.sid, entryId: active.iid });
-    cb({ kind: "bullet", sectionId: active.sid, entryId: active.iid, bulletId: active.bid });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKey]);
-  const focusNext = useRef<string | null>(null);
-  /** A CSS selector for a field to focus once it has rendered (e.g. a new entry's title). */
-  const focusSel = useRef<string | null>(null);
-  /** Also select the text of the field focusSel picks (a new section's title). */
-  const focusSelectAll = useRef(false);
+  // Whether the editor's selection counts as selected: on while the editor or the toolbar/card is in use.
+  const [selActive, setSelActiveState] = useState(false);
+  const [caret, setCaret] = useState<CaretSummary | null>(null);
+
+  const mountRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  /** Whether the current press began on an input/button (see selectBlock). */
-  const downOnField = useRef(false);
+  const viewRef = useRef<EditorView | null>(null);
+  /** The latest value prop (or the last Resume this editor emitted). */
+  const valueRef = useRef<Resume>(value);
+  /** The last Resume this editor emitted or synced; a value prop equal to it is our own echo. */
+  const lastEmitted = useRef<Resume | null>(null);
+  const caretRef = useRef<CaretSummary | null>(null);
+  const selActiveRef = useRef(false);
+  const propsRef = useRef<{
+    onChange: Props["onChange"];
+    onReject: Props["onReject"];
+    onSelectionChange: Props["onSelectionChange"];
+    onFormatStateChange: Props["onFormatStateChange"];
+    decoOpts: Omit<DecorationOptions, "caretLine">;
+  } | null>(null);
 
-  // A reveal request selects its bullet right away (during render, so the comment card shows on the same paint).
-  const [revealed, setRevealed] = useState(reveal);
-  if (reveal !== revealed) {
-    setRevealed(reveal);
-    const loc = reveal ? locateBullet(value, reveal.id) : null;
-    if (reveal && loc) setActive({ kind: "bullet", ...loc, bid: reveal.id });
-  }
+  const decoOpts = useMemo<Omit<DecorationOptions, "caretLine">>(
+    () => ({ feedback, showHighlights, baseline, showChanges, quiet }),
+    [feedback, showHighlights, baseline, showChanges, quiet],
+  );
+
+  // Latest callbacks and options for the editor's event handlers and plugins (read there, never during render).
+  selActiveRef.current = selActive;
+  propsRef.current = { onChange, onReject, onSelectionChange, onFormatStateChange, decoOpts };
+
+  // Create the editor once. Strict mode mounts twice, so the cleanup destroys the first view.
   useEffect(() => {
-    if (!reveal) return;
-    const el = document.querySelector<HTMLTextAreaElement>(`[data-bullet="${reveal.id}"]`);
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
-    // Desktop gets the caret too. iOS ignores this outside a tap; the selection above still shows the card.
-    el?.focus({ preventScroll: true });
-  }, [reveal]);
+    const mount = mountRef.current;
+    if (!mount) return;
 
-  // Clear the selection only when the user taps/clicks or tabs outside the document, its toolbar slot and the
-  // side-panel comment slot. Menus and toolbars marked data-doc-keep-selection don't count as outside.
+    const syncCaret = (state: EditorState) => {
+      const summary = summarize(state);
+      caretRef.current = summary;
+      setCaret((prev) => (prev && sameJson(prev, summary) ? prev : summary));
+    };
+
+    // Decorations depend on the doc, the options and the caret line; cache on those.
+    let deco: { doc: PMNode; opts: unknown; caretLine: number; set: DecorationSet } | null = null;
+    const decorationsFor = (s: EditorState): DecorationSet => {
+      const opts = propsRef.current?.decoOpts;
+      if (!opts) return buildDecorations(s.doc, { showHighlights: false, showChanges: false, quiet: false, caretLine: -1 });
+      const caretLine = selActiveRef.current ? caretInfo(s).index : -1;
+      if (deco && deco.doc === s.doc && deco.opts === opts && deco.caretLine === caretLine) return deco.set;
+      const set = buildDecorations(s.doc, { ...opts, caretLine });
+      deco = { doc: s.doc, opts, caretLine, set };
+      return set;
+    };
+    const decorationsPlugin = new Plugin({ props: { decorations: (s) => decorationsFor(s) } });
+
+    // Write the resolved ids back onto the lines, then tell the page.
+    const emit = (view: EditorView, before: EditorState, next: EditorState, forced: boolean) => {
+      const lines = docToLines(next.doc);
+      const { resume, ids } = linesToResume(lines, valueRef.current);
+
+      const tr2 = view.state.tr;
+      view.state.doc.forEach((node, offset, index) => {
+        const want = ids[index];
+        const a = node.attrs;
+        if ((a.sid ?? null) !== (want.sid ?? null) || (a.iid ?? null) !== (want.iid ?? null) || (a.bid ?? null) !== (want.bid ?? null)) {
+          tr2.setNodeMarkup(offset, undefined, { ...node.attrs, sid: want.sid ?? null, iid: want.iid ?? null, bid: want.bid ?? null });
+        }
+      });
+      if (tr2.docChanged) {
+        tr2.setMeta(EXTERNAL, true).setMeta("addToHistory", false);
+        view.updateState(view.state.apply(tr2));
+      }
+
+      const prev = docToLines(before.doc);
+      const commit =
+        forced ||
+        lines.length !== prev.length ||
+        lines.some((l, i) => l.kind !== prev[i].kind || !sameStyle(l.style, prev[i].style) || !sameStyle(l.style2, prev[i].style2));
+
+      lastEmitted.current = resume;
+      valueRef.current = resume;
+      propsRef.current?.onChange(resume, commit);
+    };
+
+    const dispatchTransaction = (tr: Transaction) => {
+      const view = viewRef.current;
+      if (!view) return;
+      const before = view.state;
+      const next = before.apply(tr); // includes headerGuard's appended fixes
+      view.updateState(next);
+      if (next.doc !== before.doc && !tr.getMeta(EXTERNAL)) emit(view, before, next, !!tr.getMeta(COMMIT));
+      syncCaret(view.state);
+    };
+
+    const view = new EditorView(mount, {
+      state: EditorState.create({
+        doc: linesToDoc(resumeToLines(valueRef.current)),
+        plugins: [headerGuard, ...editorKeymap(), decorationsPlugin],
+      }),
+      dispatchTransaction,
+      attributes: { class: "doc-editor", spellcheck: "true", role: "textbox", "aria-multiline": "true", "aria-label": "Resume" },
+      clipboardTextParser: (text) => pasteTextParser(text),
+      transformPasted: (slice) => stripPastedIds(slice),
+      handleDOMEvents: {
+        // Native undo would corrupt the doc; the app's history owns undo.
+        beforeinput: (_v, e) => {
+          const t = (e as InputEvent).inputType;
+          if (t === "historyUndo" || t === "historyRedo") {
+            e.preventDefault();
+            return true;
+          }
+          return false;
+        },
+        focus: () => {
+          setSelActiveState(true);
+          return false;
+        },
+      },
+    });
+    viewRef.current = view;
+    lastEmitted.current = valueRef.current;
+    syncCaret(view.state);
+
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+  }, []);
+
+  // External changes (undo/redo, side-panel accept, coaching inserts, merges): rebuild the doc, keep the caret line.
+  useEffect(() => {
+    valueRef.current = value;
+    if (value === lastEmitted.current) return;
+    lastEmitted.current = value;
+    const view = viewRef.current;
+    if (!view) return;
+
+    const state = view.state;
+    const newDoc = linesToDoc(resumeToLines(value));
+    if (newDoc.eq(state.doc)) return;
+
+    const c = caretInfo(state);
+    const lineIndex = Math.min(c.index, newDoc.childCount - 1);
+    let lineStart = 0;
+    for (let i = 0; i < lineIndex; i++) lineStart += newDoc.child(i).nodeSize;
+    const lineNode = newDoc.child(lineIndex);
+    const offset = Math.min(c.offset, lineNode.content.size);
+
+    const tr = state.tr.replaceWith(0, state.doc.content.size, newDoc.content);
+    tr.setSelection(TextSelection.create(tr.doc, lineStart + 1 + offset));
+    tr.setMeta(EXTERNAL, true);
+    view.dispatch(tr);
+  }, [value]);
+
+  // Decoration options (or selection state, which moves the placeholders) changed: redraw without a doc change.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (view) view.dispatch(view.state.tr.setMeta(REDECORATE, true));
+  }, [decoOpts, selActive]);
+
+  // Selection is cleared by a pointer or focus outside the document, its toolbar and the comment card.
+  // Menus and toolbars marked data-doc-keep-selection don't count as outside.
   // (Not on blur: iOS Safari never focuses buttons, so blur/relatedTarget can't tell a toolbar tap from leaving.)
   useEffect(() => {
     const outside = (t: EventTarget | null) => {
@@ -339,12 +312,12 @@ export function ResumeDocument({
       if (!n || (t as Element | null)?.closest?.("[data-doc-keep-selection]")) return false;
       return !canvasRef.current?.contains(n) && !actionsSlot?.contains(n) && !commentSlot?.contains(n);
     };
-    const clear = () => {
-      setActive(null);
-      setFormatTarget(null);
+    const onDown = (e: PointerEvent) => {
+      if (outside(e.target)) setSelActiveState(false);
     };
-    const onDown = (e: PointerEvent) => outside(e.target) && clear();
-    const onFocus = (e: FocusEvent) => outside(e.target) && clear();
+    const onFocus = (e: FocusEvent) => {
+      if (outside(e.target)) setSelActiveState(false);
+    };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("focusin", onFocus);
     return () => {
@@ -353,29 +326,30 @@ export function ResumeDocument({
     };
   }, [actionsSlot, commentSlot]);
 
-  // Focus a bullet created/removed/moved by keyboard once it's rendered.
+  // A reveal request puts the caret at the end of its bullet, shows its card and scrolls to it.
   useEffect(() => {
-    if (!focusNext.current) return;
-    const el = document.querySelector<HTMLTextAreaElement>(`[data-bullet="${focusNext.current}"]`);
-    focusNext.current = null;
-    if (el) {
-      el.focus();
-      el.setSelectionRange(el.value.length, el.value.length);
+    if (!reveal) return;
+    const view = viewRef.current;
+    if (!view) return;
+    const doc = view.state.doc;
+    let pos = 0;
+    let hit = -1;
+    for (let i = 0; i < doc.childCount; i++) {
+      const node = doc.child(i);
+      if (node.attrs.bid === reveal.id) {
+        hit = pos;
+        break;
+      }
+      pos += node.nodeSize;
     }
-  });
-
-  // Focus a field picked by a toolbar or menu action (new entry's title, the role & dates line, a new section's
-  // title) once it has rendered.
-  useEffect(() => {
-    const sel = focusSel.current;
-    if (!sel) return;
-    focusSel.current = null;
-    const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(sel);
-    el?.focus({ preventScroll: true });
-    if (focusSelectAll.current && el) el.select();
-    focusSelectAll.current = false;
-    el?.scrollIntoView({ block: "nearest" });
-  });
+    if (hit < 0) return;
+    const node = doc.nodeAt(hit);
+    if (!node) return;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, hit + node.nodeSize - 1)));
+    setSelActiveState(true);
+    view.focus();
+    (view.nodeDOM(hit) as HTMLElement | null)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [reveal]);
 
   // Page-length measurement.
   useEffect(() => {
@@ -391,131 +365,43 @@ export function ResumeDocument({
     return () => ro.disconnect();
   }, [onMeasure]);
 
-  // ---- immutable update helpers (by id) ----
-  const setSections = (sections: Section[], commit = false) => onChange({ ...value, sections }, commit);
-  const updSection = (sid: string, fn: (s: Section) => Section, commit = false) =>
-    setSections(value.sections.map((s) => (s.id === sid ? fn(s) : s)), commit);
-  const updItem = (sid: string, iid: string, patch: Partial<Item>, commit = false) =>
-    updSection(sid, (s) => ({ ...s, items: s.items.map((it) => (it.id === iid ? { ...it, ...patch } : it)) }), commit);
-  const setBullets = (sid: string, iid: string, bullets: Bullet[], commit = false) => updItem(sid, iid, { bullets }, commit);
+  // ---- derived state: the caret, only while the document counts as selected ----
+  const caretOn = selActive ? caret : null;
+  const sel = useMemo(() => (selActive && caret ? selectionOf(caret) : null), [selActive, caret]);
+  const fmtState = useMemo<FormatState>(
+    () => ({
+      lineKind: selActive && caret ? caret.kind : null,
+      canFormat: selActive && !!caret && caret.part !== null,
+      bold: selActive && !!caret?.bold,
+      italic: selActive && !!caret?.italic,
+    }),
+    [selActive, caret],
+  );
 
-  function addBullet(sid: string, item: Item, afterIndex: number) {
-    const b = { id: uid(), text: "" };
-    const next = [...item.bullets];
-    next.splice(afterIndex + 1, 0, b);
-    focusNext.current = b.id;
-    setBullets(sid, item.id, next, true);
-    setActive({ kind: "bullet", sid, iid: item.id, bid: b.id });
-  }
-
-  function removeBullet(sid: string, item: Item, bid: string) {
-    const bi = item.bullets.findIndex((b) => b.id === bid);
-    const prev = item.bullets[bi - 1];
-    if (prev) focusNext.current = prev.id;
-    setBullets(sid, item.id, item.bullets.filter((b) => b.id !== bid), true);
-    setActive(prev ? { kind: "bullet", sid, iid: item.id, bid: prev.id } : { kind: "item", sid, iid: item.id });
-  }
-
-  // ---- bold / italic on the focused field (bullets have none) ----
-  const fmt = formatTarget ? resolveFormat(value, formatTarget) : null;
-  /** Write a field's override (undefined = back to the default) as its own undo step. */
-  function setFormatStyle(f: ResolvedFormat, next: TextStyle | undefined) {
-    const t = f.target;
-    if (t.field === "name" || t.field === "contact") {
-      onChange({ ...value, header: withKey(value.header, "styles", putStyle(value.header.styles, t.field, next)) }, true);
-    } else if (t.field === "sectionTitle") {
-      updSection(t.sid!, (s) => withKey(s, "style", next), true);
-    } else {
-      const styles = (it: Item) => withKey(it, "styles", putStyle(it.styles, t.field, next));
-      updSection(t.sid!, (s) => ({ ...s, items: s.items.map((it) => (it.id === t.iid ? styles(it) : it)) }), true);
-    }
-  }
-  function toggleFormat(key: "bold" | "italic") {
-    if (!fmt) return;
-    setFormatStyle(fmt, toggleStyle(fmt.target.field, fmt.override, key, fmt.item));
-  }
-  const canFormat = !!fmt;
-  const fmtKey = fmt ? `${fmt.target.field}:${fmt.target.sid ?? ""}:${fmt.target.iid ?? ""}` : "";
-  const fmtBold = fmt ? fmt.cur.bold : false;
-  const fmtItalic = fmt ? fmt.cur.italic : false;
-  // Tell the page what the focused field's style is (its toolbar state).
+  // Report selection and formatting changes by value, so re-renders with the same state don't fire.
+  const lastSel = useRef<string | undefined>(undefined);
   useEffect(() => {
-    formatCb.current?.({ canFormat, bold: fmtBold, italic: fmtItalic });
-  }, [canFormat, fmtKey, fmtBold, fmtItalic]);
-  /** Focus handler for a styleable field: it becomes the format target. */
-  const focusFormat = (field: StyleField, sid?: string, iid?: string) => () => setFormatTarget({ field, sid, iid });
+    const json = JSON.stringify(sel);
+    if (lastSel.current === json) return;
+    lastSel.current = json;
+    propsRef.current?.onSelectionChange?.(sel);
+  }, [sel]);
+  const lastFmt = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const json = JSON.stringify(fmtState);
+    if (lastFmt.current === json) return;
+    lastFmt.current = json;
+    propsRef.current?.onFormatStateChange?.(fmtState);
+  }, [fmtState]);
 
-  // ---- document actions (the toolbar group), all acting on the resolved target ----
-  const target = resolveTarget(value, active);
-  const entryTarget = target && target.kind !== "section" ? target : null;
-  const noun = target ? target.kind : "";
-  const label = (verb: string, dir = "") => [verb, noun, dir].filter(Boolean).join(" ");
-  const pos = target ? (target.kind === "bullet" ? target.bi : target.kind === "item" ? target.ii : target.si) : -1;
-  const count = target
-    ? target.kind === "bullet" ? target.item.bullets.length : target.kind === "item" ? target.section.items.length : value.sections.length
-    : 0;
-
-  function moveTarget(t: Target, dir: -1 | 1) {
-    if (t.kind === "bullet") {
-      setBullets(t.section.id, t.item.id, move(t.item.bullets, t.bi, dir), true);
-      focusNext.current = t.bullet.id;
-    } else if (t.kind === "item") {
-      updSection(t.section.id, (s) => ({ ...s, items: move(s.items, t.ii, dir) }), true);
-    } else {
-      setSections(move(value.sections, t.si, dir), true);
-    }
-  }
-
-  function deleteTarget(t: Target) {
-    if (t.kind === "bullet") return removeBullet(t.section.id, t.item, t.bullet.id);
-    if (t.kind === "item") {
-      const name = [t.item.title, t.item.subtitle].map((x) => x.trim()).filter(Boolean).join(" — ");
-      if (!confirm(name ? `Delete the "${name}" entry?` : "Delete this entry?")) return;
-      updSection(t.section.id, (s) => ({ ...s, items: s.items.filter((it) => it.id !== t.item.id) }), true);
-    } else {
-      if (!confirm(`Delete the "${t.section.title}" section?`)) return;
-      setSections(value.sections.filter((s) => s.id !== t.section.id), true);
-    }
-    setActive(null);
-  }
-
-  function addEntry(t: Target) {
-    const item = emptyItem();
-    updSection(t.section.id, (s) => ({ ...s, items: [...s.items, item] }), true);
-    focusSel.current = `[data-item="${item.id}"] .doc-field`;
-  }
-
-  function addRoleLine(item: Item) {
-    setRoleLines((prev) => new Set(prev).add(item.id));
-    focusSel.current = `[data-role-line="${item.id}"] input`;
-  }
-
-  // The same commands the action group runs, also exposed to the page's Insert menu through commandsRef.
-  function addBulletToTarget() {
-    if (!entryTarget) return;
-    const after = entryTarget.kind === "bullet" ? entryTarget.bi : entryTarget.item.bullets.length - 1;
-    addBullet(entryTarget.section.id, entryTarget.item, after);
-  }
-  function addRoleLineToTarget() {
-    if (entryTarget && !isInlineItem(entryTarget.item)) addRoleLine(entryTarget.item);
-  }
-  function addSectionNamed(title: string) {
-    const section = emptySection(title);
-    focusSel.current = `[data-section="${section.id}"] .doc-section-title`;
-    focusSelectAll.current = true;
-    setSections([...value.sections, section], true);
-  }
-
+  // The document commands, for the page's Format menu and shortcuts. They act on the caret's line.
   useEffect(() => {
     if (!commandsRef) return;
     commandsRef.current = {
-      addBullet: addBulletToTarget,
-      addEntry: () => target && addEntry(target),
-      addRoleLine: addRoleLineToTarget,
-      addSection: addSectionNamed,
-      toggleBold: () => toggleFormat("bold"),
-      toggleItalic: () => toggleFormat("italic"),
-      resetFormat: () => fmt && setFormatStyle(fmt, undefined),
+      toggleBold: () => runOn(viewRef.current, toggleStyleCommand("bold")),
+      toggleItalic: () => runOn(viewRef.current, toggleStyleCommand("italic")),
+      resetFormat: () => runOn(viewRef.current, resetStyleCommand),
+      setLineKind: (kind) => runOn(viewRef.current, setLineKindCommand(kind)),
     };
   });
   useEffect(() => {
@@ -525,106 +411,114 @@ export function ResumeDocument({
     };
   }, [commandsRef]);
 
-  const actions: ActionBtn[] = [
-    {
-      title: "Bold (Ctrl+B)",
-      icon: <span className="text-[14px] leading-none font-bold">B</span>,
-      disabled: !fmt,
-      toggle: true,
-      pressed: !!fmt && fmt.cur.bold,
-      onClick: () => toggleFormat("bold"),
-    },
-    {
-      title: "Italic (Ctrl+I)",
-      icon: <span className="font-serif text-[16px] leading-none italic">I</span>,
-      disabled: !fmt,
-      toggle: true,
-      pressed: !!fmt && fmt.cur.italic,
-      onClick: () => toggleFormat("italic"),
-    },
-    "sep",
-    {
-      title: "Add bullet (Enter)",
-      icon: <PlusIcon className="h-4 w-4" />,
-      disabled: !entryTarget,
-      onClick: addBulletToTarget,
-    },
-    { title: "Add entry", icon: <LineIcon className="h-4 w-4" />, disabled: !target, onClick: () => target && addEntry(target) },
-    {
-      title: "Add role & dates line",
-      icon: <CalendarIcon className="h-4 w-4" />,
-      disabled: !entryTarget || isInlineItem(entryTarget.item),
-      onClick: addRoleLineToTarget,
-    },
-    "sep",
-    {
-      title: label("Move", "up"),
-      icon: <ArrowUpIcon className="h-4 w-4" />,
-      disabled: !target || pos <= 0,
-      onClick: () => target && moveTarget(target, -1),
-    },
-    {
-      title: label("Move", "down"),
-      icon: <ArrowDownIcon className="h-4 w-4" />,
-      disabled: !target || pos >= count - 1,
-      onClick: () => target && moveTarget(target, 1),
-    },
-    "sep",
-    { title: label("Delete"), icon: <TrashIcon className="h-4 w-4" />, disabled: !target, onClick: () => target && deleteTarget(target) },
-  ];
-
-  function selectBlock(next: Active) {
-    // A press that started in a field is typing, even if layout shifted and the click landed on the block.
-    if (downOnField.current) return;
-    // Selecting a whole block (not typing): drop the caret so the box selection is obvious.
-    const el = document.activeElement as HTMLElement | null;
-    if (el && canvasRef.current?.contains(el)) el.blur();
-    setFormatTarget(null);
-    setActive(next);
-  }
-
-  /** Clear the selection (closes the comment card) and drop the caret from the document. */
-  function clearSelection() {
-    const el = document.activeElement as HTMLElement | null;
-    if (el && canvasRef.current?.contains(el)) el.blur();
-    setFormatTarget(null);
-    setActive(null);
-  }
-
   // On narrow screens the comment card is a bottom sheet that can cover the bullet being edited. Once the
-  // card has rendered, scroll the bullet into view; the field's scroll-margin (globals.css) keeps it clear of the sheet.
+  // card has rendered, scroll the bullet's line into view; the line's scroll-margin (globals.css) keeps it clear.
   // Desktop never scrolls on selection.
-  const activeBid = active?.kind === "bullet" ? active.bid : null;
+  const cardBid = caretOn && caretOn.kind === "bullet" ? caretOn.bid : null;
   useEffect(() => {
-    if (!activeBid || window.innerWidth >= 1024) return;
+    if (!cardBid || window.innerWidth >= 1024) return;
     const frame = requestAnimationFrame(() => {
-      const card = document.querySelector(`[data-comment-for="${activeBid}"]`);
-      if (!card) return;
-      document.querySelector<HTMLTextAreaElement>(`textarea[data-bullet="${activeBid}"]`)?.scrollIntoView({ block: "nearest" });
+      if (!document.querySelector(`[data-comment-for="${cardBid}"]`)) return;
+      const view = viewRef.current;
+      const pos = caretRef.current?.pos;
+      if (!view || pos === undefined) return;
+      (view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView({ block: "nearest" });
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeKey, activeBid]);
+  }, [cardBid]);
+
+  // ---- toolbar: paragraph style, bold, italic, bulleted list ----
+  const headerLine = caretOn?.kind === "name" || caretOn?.kind === "contact";
+  const kindOn = caretOn?.kind ?? null;
+  const toolbar = actionsSlot ? (
+    createPortal(
+      <div role="toolbar" aria-label="Formatting" className="flex shrink-0 items-center gap-1">
+        <select
+          aria-label="Paragraph style"
+          className="h-8 rounded-md border border-border bg-surface px-2 text-sm text-fg"
+          disabled={!caretOn || headerLine}
+          value={kindOn ?? ""}
+          onChange={(e) => runOn(viewRef.current, setLineKindCommand(e.target.value as LineKind))}
+        >
+          {!caretOn && <option value="" disabled>Paragraph style</option>}
+          {headerLine && kindOn && <option value={kindOn} disabled>{kindOn === "name" ? "Name" : "Contact line"}</option>}
+          {caretOn && !headerLine && LINE_KIND_LABELS.map((k) => (
+            <option key={k.kind} value={k.kind}>{k.label}</option>
+          ))}
+        </select>
+        <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
+        <button
+          type="button"
+          className="icon-btn aria-pressed:bg-surface-2 aria-pressed:text-fg"
+          title="Bold (Ctrl+B)"
+          aria-label="Bold (Ctrl+B)"
+          aria-pressed={fmtState.bold}
+          disabled={!fmtState.canFormat}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => runOn(viewRef.current, toggleStyleCommand("bold"))}
+        >
+          <span className="text-[14px] leading-none font-bold">B</span>
+        </button>
+        <button
+          type="button"
+          className="icon-btn aria-pressed:bg-surface-2 aria-pressed:text-fg"
+          title="Italic (Ctrl+I)"
+          aria-label="Italic (Ctrl+I)"
+          aria-pressed={fmtState.italic}
+          disabled={!fmtState.canFormat}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => runOn(viewRef.current, toggleStyleCommand("italic"))}
+        >
+          <span className="font-serif text-[16px] leading-none italic">I</span>
+        </button>
+        <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
+        <button
+          type="button"
+          className="icon-btn aria-pressed:bg-surface-2 aria-pressed:text-fg"
+          title="Bulleted list"
+          aria-label="Bulleted list"
+          aria-pressed={kindOn === "bullet"}
+          disabled={!caretOn || headerLine}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => runOn(viewRef.current, setLineKindCommand(kindOn === "bullet" ? "text" : "bullet"))}
+        >
+          <ListIcon className="h-4 w-4" />
+        </button>
+      </div>,
+      actionsSlot,
+    )
+  ) : null;
+
+  // ---- comment card for the caret's bullet ----
+  const card =
+    commentSlot && caretOn && cardBid
+      ? createPortal(
+          <BulletCommentCard
+            bulletId={cardBid}
+            text={caretOn.text}
+            info={bulletInfo(cardBid, caretOn.text, decoOpts)}
+            showChanges={showChanges}
+            quiet={quiet}
+            onAccept={(text) => replaceBulletText(cardBid, text)}
+            onRevert={(text) => replaceBulletText(cardBid, text)}
+            onReject={onReject}
+            onClose={() => setSelActiveState(false)}
+            onSelectPlaceholder={(start, length) => selectInLine(caretOn.pos, start, length)}
+          />,
+          commentSlot,
+        )
+      : null;
 
   return (
     <>
-      <DocActions slot={actionsSlot} buttons={actions} />
+      {toolbar}
       <div
         ref={canvasRef}
         className="doc-canvas"
-        onPointerDownCapture={(e) => (downOnField.current = isField(e.target))}
+        onPointerDownCapture={() => setSelActiveState(true)}
         onKeyDown={(e) => {
-          handleDocArrowKeys(e, canvasRef.current);
-          // Ctrl/Cmd+B and Ctrl/Cmd+I: bold/italic the focused field. Bullets have no formatting, so they swallow it.
-          if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !e.defaultPrevented && (e.key === "b" || e.key === "i")) {
-            const inBullet = (e.target as HTMLElement).dataset?.bullet !== undefined;
-            if (inBullet) e.preventDefault();
-            else if (fmt) {
-              e.preventDefault();
-              toggleFormat(e.key === "b" ? "bold" : "italic");
-            }
-          }
           // Escape clears the selection, unless a menu or popover inside the canvas already handled it.
-          if (e.key === "Escape" && !e.defaultPrevented && !e.nativeEvent.isComposing) clearSelection();
+          if (e.key === "Escape" && !e.defaultPrevented && !e.nativeEvent.isComposing) setSelActiveState(false);
         }}
       >
         <div className="doc-page">
@@ -632,354 +526,30 @@ export function ResumeDocument({
           <div aria-hidden className="doc-pagebreak" style={{ top: PAGE_H }}>
             <span>Page 2</span>
           </div>
-
           <div ref={contentRef} className="doc-content">
-            {/* Header */}
-            <div className="text-center" onFocus={() => setActive(null)}>
-              <AutoTextarea
-                className={`doc-name text-center ${styleCls(effectiveStyle("name", value.header.styles?.name))}`}
-                value={value.header.name}
-                placeholder="Your Name"
-                data-singleline
-                aria-label="Name"
-                onFocus={focusFormat("name")}
-                onChange={(e) => onChange({ ...value, header: { ...value.header, name: e.target.value.replace(/\n+/g, " ") } })}
-              />
-              <AutoTextarea
-                className={`doc-contact text-center ${styleCls(effectiveStyle("contact", value.header.styles?.contact))}`}
-                value={value.header.contact}
-                placeholder="City, ST • email • phone • github.com/you"
-                data-singleline
-                aria-label="Contact line"
-                onFocus={focusFormat("contact")}
-                onChange={(e) => onChange({ ...value, header: { ...value.header, contact: e.target.value.replace(/\n+/g, " ") } })}
-              />
-            </div>
-
-            {value.sections.map((section) => {
-              const sectionActive = active?.kind === "section" && active.sid === section.id;
-              return (
-                <section
-                  key={section.id}
-                  data-section={section.id}
-                  className={`doc-section doc-block ${sectionActive ? "is-selected" : ""}`}
-                  onClick={(e) => {
-                    if (!isField(e.target)) selectBlock({ kind: "section", sid: section.id });
-                  }}
-                >
-                  <div className="relative" onFocus={() => setActive({ kind: "section", sid: section.id })}>
-                    <input
-                      className={`doc-field doc-section-title ${styleCls(effectiveStyle("sectionTitle", section.style))}`}
-                      value={section.title}
-                      placeholder="SECTION"
-                      aria-label="Section title"
-                      onFocus={focusFormat("sectionTitle", section.id)}
-                      onChange={(e) => updSection(section.id, (s) => ({ ...s, title: e.target.value }))}
-                    />
-                  </div>
-
-                  {section.items.map((item) => renderEntry(section, item))}
-                </section>
-              );
-            })}
+            <div ref={mountRef} />
           </div>
         </div>
       </div>
+      {card}
     </>
   );
 
-  function renderEntry(section: Section, item: Item) {
-    const sid = section.id;
-    const inline = isInlineItem(item);
-    const itemActive = !!active && active.kind !== "section" && active.sid === sid && active.iid === item.id;
-    const activeBid = itemActive && active?.kind === "bullet" ? active.bid : null;
-    const showRole = !!item.subtitle || !!item.dates || roleLines.has(item.id);
-    const st = (f: "title" | "subtitle" | "location" | "dates") => styleCls(effectiveStyle(f, item.styles?.[f], item));
-    const focus = (f: "title" | "subtitle" | "location" | "dates") => focusFormat(f, sid, item.id);
-
-    return (
-      <div
-        key={item.id}
-        data-item={item.id}
-        className={`doc-entry doc-block relative ${inline ? "doc-inline" : ""} ${itemActive ? "is-active" : ""} ${
-          itemActive && !activeBid && active?.kind === "item" ? "is-selected" : ""
-        }`}
-        onClick={(e) => {
-          e.stopPropagation(); // don't also select the section
-          if (!isField(e.target)) selectBlock({ kind: "item", sid, iid: item.id });
-        }}
-        onFocus={(e) => {
-          e.stopPropagation();
-          if (!(e.target as HTMLElement).dataset.bullet) setActive({ kind: "item", sid, iid: item.id });
-        }}
-      >
-        {inline ? (
-          <div className="flex items-baseline">
-            {item.subtitle ? (
-              <>
-                <AutoInput
-                  className="shrink-0"
-                  textClass={st("title")}
-                  onFocus={focus("title")}
-                  value={item.title}
-                  placeholder="Label"
-                  onChange={(v) => updItem(sid, item.id, { title: v })}
-                />
-                {/* The label's sizing box is 4px wider than its text (field padding); pull the colon back against it. */}
-                <span className="shrink-0 -ml-[4px] relative">:&nbsp;</span>
-                <AutoTextarea
-                  className={st("subtitle")}
-                  onFocus={focus("subtitle")}
-                  value={item.subtitle}
-                  placeholder="Details"
-                  onChange={(e) => updItem(sid, item.id, { subtitle: e.target.value })}
-                />
-              </>
-            ) : (
-              <AutoTextarea
-                className={st("title")}
-                onFocus={focus("title")}
-                value={item.title}
-                placeholder="Text"
-                onChange={(e) => updItem(sid, item.id, { title: e.target.value })}
-              />
-            )}
-          </div>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-baseline gap-x-3">
-              <AutoInput
-                textClass={st("title")}
-                onFocus={focus("title")}
-                value={item.title}
-                placeholder="Organization / School / Project"
-                onChange={(v) => updItem(sid, item.id, { title: v })}
-              />
-              <AutoInput
-                className="ml-auto"
-                inputClass="text-right"
-                textClass={st("location")}
-                onFocus={focus("location")}
-                value={item.location}
-                placeholder="Location"
-                onChange={(v) => updItem(sid, item.id, { location: v })}
-              />
-            </div>
-            {showRole && (
-              <div data-role-line={item.id} className="flex flex-wrap items-baseline gap-x-3">
-                <AutoInput
-                  textClass={st("subtitle")}
-                  onFocus={focus("subtitle")}
-                  value={item.subtitle}
-                  placeholder="Role / Degree / Tech"
-                  onChange={(v) => updItem(sid, item.id, { subtitle: v })}
-                />
-                <AutoInput
-                  className="ml-auto"
-                  inputClass="text-right"
-                  textClass={st("dates")}
-                  onFocus={focus("dates")}
-                  value={item.dates}
-                  placeholder="Dates"
-                  onChange={(v) => updItem(sid, item.id, { dates: v })}
-                />
-              </div>
-            )}
-          </>
-        )}
-
-        {item.bullets.length > 0 && (
-          <ul className="doc-bullets">{item.bullets.map((b, bi) => renderBullet(sid, item, b, bi, activeBid === b.id))}</ul>
-        )}
-      </div>
-    );
+  /** Replace the caret bullet's text as its own undo step (Accept, Revert). */
+  function replaceBulletText(bid: string, text: string) {
+    const view = viewRef.current;
+    if (!view) return;
+    replaceLineTextCommand(bid, text)(view.state, (tr) => view.dispatch(tr.setMeta(COMMIT, true)));
+    view.focus();
   }
 
-  function renderBullet(sid: string, item: Item, b: Bullet, bi: number, isActive: boolean) {
-    const view = feedback?.[b.id];
-    const fb = view?.state === "current" ? view : null; // rating/note only while the bullet reads as rated
-    const original = baseline?.get(b.id);
-    const isNew = !!baseline && original === undefined;
-    const changed = !!baseline && original !== undefined && original !== b.text;
-    const suggestion = fb?.suggestion ?? "";
-    const placeholders = [...b.text.matchAll(PLACEHOLDER_RE)].map((m) => ({ text: m[0], start: m.index! }));
-    const placeholder = !quiet && placeholders.length > 0;
-    // Placeholders win over the rating tint: they must be impossible to miss before applying.
-    const tint = placeholder ? "bg-[#fff6d6]" : showHighlights && fb ? RATING[fb.rating].tint : "";
-    const replace = (text: string) => setBullets(sid, item.id, item.bullets.map((x) => (x.id === b.id ? { ...x, text } : x)), true);
-    const selectPlaceholder = (p: { text: string; start: number }) => {
-      const el = document.querySelector<HTMLTextAreaElement>(`textarea[data-bullet="${b.id}"]`);
-      if (!el) return;
-      el.focus({ preventScroll: true });
-      el.setSelectionRange(p.start, p.start + p.text.length);
-    };
-
-    // The comment card: a light Docs-style card in the side panel (commentSlot), or a dark overlay under the bullet.
-    const light = !!commentSlot;
-    const muted = light ? "text-muted" : "float-muted";
-    const rating = fb ? (light ? RATING[fb.rating].light : RATING[fb.rating].text) : "";
-    const card =
-      isActive && (view || changed || isNew || placeholder) ? (
-        <div
-          data-comment-for={b.id}
-          className={
-            light
-              ? "doc-ui rounded-lg border border-border bg-surface shadow-sm p-3 text-[13px] text-fg space-y-2"
-              : "doc-ui doc-comment absolute left-6 right-0 top-full z-30 mt-1"
-          }
-          // The card isn't part of the text: clicks and focus inside it must not re-select the entry.
-          onClick={(e) => e.stopPropagation()}
-          onFocus={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-start gap-2">
-            <p className={`line-clamp-2 min-w-0 flex-1 text-xs ${muted}`}>{b.text.trim() || "Empty bullet"}</p>
-            <button
-              type="button"
-              aria-label="Close comment"
-              title="Close comment"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={clearSelection}
-              className={`icon-btn -mr-1 -mt-1 shrink-0 ${light ? "" : "text-[#e9e9ea] hover:bg-white/10"}`}
-            >
-              <span aria-hidden className="text-base leading-none">×</span>
-            </button>
-          </div>
-          {placeholder && (
-            <div className="rounded bg-[#fff6d6] px-2 py-1.5 text-[#5c4300]">
-              <p>Replace each [placeholder] with your real number, or reword the bullet, before you apply.</p>
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {placeholders.map((p) => (
-                  <button
-                    key={p.start}
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => selectPlaceholder(p)}
-                    className="min-h-8 rounded border border-[#d9a800] bg-[#ffd84d] px-2 text-xs font-medium text-[#3d2c00]"
-                    title="Select it so you can type over it"
-                  >
-                    {p.text}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {fb && (
-            <p>
-              <span className={`font-semibold ${rating}`}>{RATING[fb.rating].label}.</span> {fb.note}
-            </p>
-          )}
-          {view?.state === "updated" && (
-            <p>
-              <span className="font-semibold">Updated.</span>{" "}
-              <span className={muted}>You accepted the suggested edit. Re-analyze to rate the new wording.</span>
-            </p>
-          )}
-          {view?.state === "stale" && (
-            <p className={muted}>Edited since the last analysis, so its rating is hidden. Re-analyze for feedback on this wording.</p>
-          )}
-          {suggestion && (
-            <div className="space-y-1.5 pt-1">
-              <p className={`text-[11px] uppercase tracking-wide ${muted}`}>Suggested edit</p>
-              <p className={`line-through ${light ? "decoration-[#d93025]/60 text-muted" : "decoration-[#ff8a8a]/70 float-muted"}`}>{b.text}</p>
-              <p className={light ? "rounded bg-[#e6f4ea] px-1 -mx-1 text-[#137333]" : "text-[#bff0d2] bg-[#1f6b3f]/40 rounded px-1 -mx-1"}>
-                {suggestion}
-              </p>
-              <div className="flex gap-1.5 pt-1">
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  className="rounded-md bg-[#1a73e8] px-3 py-1 text-xs font-medium text-white"
-                  onClick={() => replace(suggestion)}
-                >
-                  ✓ Accept
-                </button>
-                {onReject && (
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    className={
-                      light
-                        ? "rounded-md px-3 py-1 text-xs text-muted hover:bg-surface-2"
-                        : "rounded-md border border-white/15 px-3 py-1.5 text-xs text-[#e9e9ea] hover:bg-white/10"
-                    }
-                    onClick={() => onReject(b.id)}
-                  >
-                    ✕ Reject
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-          {showChanges && changed && (
-            <div className={`border-t pt-2 ${light ? "border-border" : "border-white/10"}`}>
-              <p className={`text-[11px] uppercase tracking-wide ${muted}`}>Master resume version</p>
-              <p className={muted}>{original}</p>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                className="mt-1 min-h-8 text-xs text-[#1a73e8] underline underline-offset-2"
-                onClick={() => replace(original!)}
-              >
-                Revert to master resume
-              </button>
-            </div>
-          )}
-          {showChanges && isNew && !view && <p className={muted}>Added in this tailored copy (not in your master resume).</p>}
-        </div>
-      ) : null;
-
-    return (
-      <li key={b.id} className="relative">
-        {showHighlights && view && view.state !== "stale" && (
-          <span
-            aria-hidden
-            title={fb ? RATING[fb.rating].label : "Updated"}
-            className={`doc-ui doc-dot absolute top-[7px] h-2 w-2 rounded-full ${fb ? RATING[fb.rating].dot : "bg-[#9a9a95]"} ${
-              suggestion ? "ring-2 ring-offset-1 ring-[#2f5bd3]/50" : ""
-            }`}
-          />
-        )}
-        {showChanges && (changed || isNew) && (
-          <span
-            aria-hidden
-            className="doc-ui doc-changebar absolute top-[2px] bottom-[2px] w-[3px] rounded bg-[#2f5bd3]"
-            title={isNew ? "Added in this tailored copy" : "Changed from master resume"}
-          />
-        )}
-        <div className={`flex rounded-sm ${tint}`}>
-          <span aria-hidden className="select-none pr-2 pl-1">•</span>
-          <AutoTextarea
-            highlight={!quiet}
-            data-bullet={b.id}
-            aria-label={`Bullet ${bi + 1} of ${item.title || "entry"}`}
-            value={b.text}
-            placeholder="Accomplishment: verb + what + measurable impact"
-            onFocus={(e) => {
-              e.stopPropagation();
-              setFormatTarget(null); // bullets have no bold/italic
-              setActive({ kind: "bullet", sid, iid: item.id, bid: b.id });
-            }}
-            onChange={(e) => setBullets(sid, item.id, item.bullets.map((x) => (x.id === b.id ? { ...x, text: e.target.value } : x)))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                addBullet(sid, item, bi);
-              } else if (e.key === "Backspace" && b.text === "") {
-                e.preventDefault();
-                removeBullet(sid, item, b.id);
-              } else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-                e.preventDefault();
-                focusNext.current = b.id;
-                setBullets(sid, item.id, move(item.bullets, bi, e.key === "ArrowUp" ? -1 : 1), true);
-              }
-            }}
-          />
-        </div>
-
-        {/* Comment card: in the side panel when commentSlot is given, otherwise overlaid (never in flow). */}
-        {card && (commentSlot ? createPortal(card, commentSlot) : card)}
-      </li>
-    );
+  /** Select a [placeholder] inside the caret's line (char offsets within the line's text). */
+  function selectInLine(linePos: number, start: number, length: number) {
+    const view = viewRef.current;
+    if (!view) return;
+    const from = linePos + 1 + start;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, from + length)));
+    view.focus();
   }
 }
 

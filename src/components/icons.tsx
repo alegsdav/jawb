@@ -82,6 +82,9 @@ export const ArrowDownIcon = ({ className }: P) => (
 export const SettingsIcon = ({ className }: P) => (
   <svg {...base} className={className}><circle cx="12" cy="12" r="3" /><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4 18 18M6 18l1.6-1.6M16.4 7.6 18 6" /></svg>
 );
+export const ListIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="M9.5 6.5h10M9.5 12h10M9.5 17.5h10" /><circle cx="5" cy="6.5" r=".9" fill="currentColor" /><circle cx="5" cy="12" r=".9" fill="currentColor" /><circle cx="5" cy="17.5" r=".9" fill="currentColor" /></svg>
+);
 export const LineIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M5 8h14M5 12h14M5 16h9" /></svg>
 );

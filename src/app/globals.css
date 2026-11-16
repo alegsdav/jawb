@@ -101,7 +101,7 @@ body {
 
 /* iOS zooms into any field under 16px on focus; keep fields at 16px on phones. */
 @media (max-width: 639px) {
-  input:not(.doc-field), textarea:not(.doc-field), select { font-size: 16px !important; }
+  input, textarea, select { font-size: 16px !important; }
 }
 
 /* Document toolbar: comfortable tap targets on phones. */
@@ -157,23 +157,9 @@ body {
   position: absolute; right: 8px; top: 4px;
   font: 11px/1 var(--font-ui), system-ui, sans-serif; color: #9a9a95;
 }
-.doc-field {
-  background: transparent; color: inherit; outline: none;
-  border-radius: 2px; padding: 0 2px; margin: 0 -2px;
-  line-height: inherit;
-}
-.doc-field:hover, .doc-field:focus { background: transparent; }
-.doc-field::placeholder { color: #b0b0aa; }
-.doc-entry:not(.is-active) .doc-field::placeholder,
-.doc-section .doc-field:not(:focus)::placeholder { color: transparent; }
-.doc-name { font-size: 22px; line-height: 1.2; } /* weight comes from the field's bold/italic style */
+.doc-name { font-size: 22px; line-height: 1.2; text-align: center; } /* weight comes from the line's bold/italic style */
 .doc-contact { font-size: 13.3px; margin-top: 2px; }
 .doc-section { margin-top: 4px; padding-top: 8px; }
-/* Selectable blocks (sections, entries): click blank space to select, then move/delete from the toolbar. */
-.doc-block { position: relative; border-radius: 3px; }
-.doc-block.doc-block.is-selected {
-  background: rgb(26 115 232 / 0.06);
-}
 .doc-section-title {
   display: block; width: 100%;
   text-transform: uppercase; letter-spacing: 0.04em;
@@ -185,26 +171,26 @@ body {
 .doc-ui { font-family: var(--font-ui), system-ui, sans-serif; }
 /* Read-only page (submitted snapshot) */
 .doc-readonly .doc-contact, .doc-readonly .doc-entry { white-space: pre-wrap; overflow-wrap: anywhere; }
-/* Per-bullet feedback card: the same dark floating look as the contextual popovers (.float-dark). */
-.doc-comment {
-  margin: 6px 0 8px 18px; padding: 10px 12px;
-  font-size: 12px; line-height: 1.45; color: #e9e9ea;
-  background: rgb(44 44 46 / 0.94); border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 12px; box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.35), 0 2px 6px rgb(0 0 0 / 0.15);
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+
+/* The editor: one continuous contentEditable document (ProseMirror). Each line is a block with its paragraph style. */
+.doc-editor { outline: none; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; caret-color: #111; }
+.doc-line { position: relative; min-height: 1.25em; }
+.doc-line-name { font-size: 22px; line-height: 1.2; text-align: center; }
+.doc-line-contact { font-size: 13.3px; margin-top: 2px; text-align: center; }
+.doc-line-heading {
+  text-transform: uppercase; letter-spacing: 0.04em;
+  border-bottom: 1px solid #111; padding-bottom: 1px; margin-top: 12px; margin-bottom: 5px;
 }
-/* [placeholder] highlight: a copy of the bullet's text laid out exactly like the textarea on top of it
-   (same box, font and wrapping), invisible except for the marked spans. The textarea's own text stays
-   the visible, editable text; its background is transparent, so the marks show through. */
-.doc-mirror {
-  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
-  color: transparent; pointer-events: none; user-select: none; -webkit-user-select: none;
-}
-.doc-mirror mark {
-  color: transparent; background: #ffd84d; border-radius: 2px;
-  box-shadow: 0 0 0 1px #d9a800;
-}
-.doc-dot { left: -26px; }
+.doc-line-entry, .doc-line-role { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
+.doc-line-entry { margin-top: 6px; }
+.doc-line-heading + .doc-line-entry, .doc-line-heading + .doc-line-text { margin-top: 0; }
+.doc-tab { flex: 1 1 auto; min-width: 12px; align-self: stretch; }
+.doc-line-bullet { padding-left: 24px; margin-top: 1px; border-radius: 2px; }
+.doc-line-bullet::before { content: "•"; position: absolute; left: 11px; user-select: none; -webkit-user-select: none; }
+.doc-placeholder { color: #b0b0aa; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.doc-ph { background: #ffd84d; border-radius: 2px; box-shadow: 0 0 0 1px #d9a800; }
+/* The rating dot and the change bar sit in the page margin, beside the line. */
+.doc-dot { left: -14px; }
 .doc-changebar { right: -22px; }
 @media (max-width: 900px) {
   .doc-pagebreak { display: none; }
@@ -213,21 +199,21 @@ body {
   /* Phones get a reflowed page, like Google Docs' mobile view. */
   .doc-canvas { padding: 0 0 24px; background: #fff; min-height: calc(100dvh - 12rem); }
   .doc-page { min-height: 0; padding: 20px 16px; font-size: 16px; box-shadow: none; }
-  .doc-name { font-size: 24px; }
+  .doc-name, .doc-line-name { font-size: 24px; }
   .doc-contact { font-size: 16px; } /* >= 16px so iOS doesn't zoom when it's focused */
+  .doc-line-contact { font-size: 16px; }
   .doc-bullets { padding-left: 2px; }
-  .doc-comment { margin-left: 0; }
+  .doc-line-bullet { padding-left: 14px; }
+  .doc-line-bullet::before { left: 2px; }
   .doc-dot { left: -12px; }
   .doc-changebar { right: -10px; }
 }
-/* Below lg the comment card is a bottom sheet (45dvh). Keep a focused or scrolled-to field clear of it. */
+/* Below lg the comment card is a bottom sheet (45dvh). Keep a focused or scrolled-to line clear of it. */
 @media (max-width: 1023px) {
-  .doc-page .doc-field { scroll-margin-bottom: 50dvh; }
+  .doc-editor .doc-line { scroll-margin-bottom: 50dvh; }
 }
 
 }
-/* Unlayered on purpose: the global :focus-visible outline (top of this file) is unlayered and would win otherwise. */
-.doc-page :is(input, textarea):focus-visible { outline: none; }
 
 /* Print: only the resume sheet(s), no app chrome, no zoom scaling, no placeholders or highlights. */
 @media print {
@@ -238,8 +224,6 @@ body {
   .doc-page { position: absolute; left: 0; top: 0; box-shadow: none !important; margin: 0 !important; }
   .zoom-frame { transform: none !important; }
   .doc-ui, .doc-pagebreak { display: none !important; }
-  .doc-mirror mark { background: transparent !important; box-shadow: none !important; }
-  /* Layout-only copies (input width sizer, highlight mirror) must stay hidden, or they print on top of the text. */
-  .doc-page .invisible, .doc-page .doc-mirror { visibility: hidden !important; }
+  .doc-ph { background: transparent !important; box-shadow: none !important; }
   ::placeholder { color: transparent !important; }
 }
