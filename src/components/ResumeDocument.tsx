@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Bullet, Item, Resume, Section } from "@/lib/types";
-import { emptyItem, isInlineItem, uid } from "@/lib/resume";
+import { emptyItem, emptySection, isInlineItem, uid } from "@/lib/resume";
 import { PLACEHOLDER_RE } from "@/lib/facts";
 import type { BulletFeedback, Rating } from "@/lib/analysis";
 import { markPlaceholders } from "./PlaceholderTextarea";
@@ -50,6 +50,19 @@ type Props = {
    * selected, e.g. after a tap outside the document). The coaching panel follows it.
    */
   onSelectionChange?: (selection: DocSelection | null) => void;
+  /**
+   * Filled with the document commands (add bullet/entry/role line, add section) on every render, so a page's
+   * Insert menu can run them. They act on the current selection, like the toolbar buttons do.
+   */
+  commandsRef?: React.RefObject<DocCommands | null>;
+};
+
+/** Imperative document commands for the page's Insert menu. */
+export type DocCommands = {
+  addBullet(): void;
+  addEntry(): void;
+  addRoleLine(): void;
+  addSection(title: string): void;
 };
 
 /** What's selected in the document, by id. */
@@ -208,7 +221,7 @@ function resolveTarget(r: Resume, active: Active): Target | null {
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
-  commentSlot, reveal, quiet = false, onSelectionChange,
+  commentSlot, reveal, quiet = false, onSelectionChange, commandsRef,
 }: Props) {
   const [active, setActive] = useState<Active>(null);
   /** Entries whose role & dates line the user added (so it shows even while empty). */
@@ -229,6 +242,8 @@ export function ResumeDocument({
   const focusNext = useRef<string | null>(null);
   /** A CSS selector for a field to focus once it has rendered (e.g. a new entry's title). */
   const focusSel = useRef<string | null>(null);
+  /** Also select the text of the field focusSel picks (a new section's title). */
+  const focusSelectAll = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   /** Whether the current press began on an input/button (see selectBlock). */
@@ -250,12 +265,13 @@ export function ResumeDocument({
   }, [reveal]);
 
   // Clear the selection only when the user taps/clicks or tabs outside the document, its toolbar slot and the
-  // side-panel comment slot. (Not on blur: iOS Safari never focuses buttons, so blur/relatedTarget can't tell a
-  // toolbar tap from leaving.)
+  // side-panel comment slot. Menus and toolbars marked data-doc-keep-selection don't count as outside.
+  // (Not on blur: iOS Safari never focuses buttons, so blur/relatedTarget can't tell a toolbar tap from leaving.)
   useEffect(() => {
     const outside = (t: EventTarget | null) => {
       const n = t as Node | null;
-      return !!n && !canvasRef.current?.contains(n) && !actionsSlot?.contains(n) && !commentSlot?.contains(n);
+      if (!n || (t as Element | null)?.closest?.("[data-doc-keep-selection]")) return false;
+      return !canvasRef.current?.contains(n) && !actionsSlot?.contains(n) && !commentSlot?.contains(n);
     };
     const onDown = (e: PointerEvent) => outside(e.target) && setActive(null);
     const onFocus = (e: FocusEvent) => outside(e.target) && setActive(null);
@@ -278,13 +294,16 @@ export function ResumeDocument({
     }
   });
 
-  // Focus a field picked by a toolbar action (new entry's title, the role & dates line) once it has rendered.
+  // Focus a field picked by a toolbar or menu action (new entry's title, the role & dates line, a new section's
+  // title) once it has rendered.
   useEffect(() => {
     const sel = focusSel.current;
     if (!sel) return;
     focusSel.current = null;
     const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(sel);
     el?.focus({ preventScroll: true });
+    if (focusSelectAll.current && el) el.select();
+    focusSelectAll.current = false;
     el?.scrollIntoView({ block: "nearest" });
   });
 
@@ -372,23 +391,51 @@ export function ResumeDocument({
     focusSel.current = `[data-role-line="${item.id}"] input`;
   }
 
+  // The same commands the action group runs, also exposed to the page's Insert menu through commandsRef.
+  function addBulletToTarget() {
+    if (!entryTarget) return;
+    const after = entryTarget.kind === "bullet" ? entryTarget.bi : entryTarget.item.bullets.length - 1;
+    addBullet(entryTarget.section.id, entryTarget.item, after);
+  }
+  function addRoleLineToTarget() {
+    if (entryTarget && !isInlineItem(entryTarget.item)) addRoleLine(entryTarget.item);
+  }
+  function addSectionNamed(title: string) {
+    const section = emptySection(title);
+    focusSel.current = `[data-section="${section.id}"] .doc-section-title`;
+    focusSelectAll.current = true;
+    setSections([...value.sections, section], true);
+  }
+
+  useEffect(() => {
+    if (!commandsRef) return;
+    commandsRef.current = {
+      addBullet: addBulletToTarget,
+      addEntry: () => target && addEntry(target),
+      addRoleLine: addRoleLineToTarget,
+      addSection: addSectionNamed,
+    };
+  });
+  useEffect(() => {
+    if (!commandsRef) return;
+    return () => {
+      commandsRef.current = null;
+    };
+  }, [commandsRef]);
+
   const actions: ActionBtn[] = [
     {
       title: "Add bullet (Enter)",
       icon: <PlusIcon className="h-4 w-4" />,
       disabled: !entryTarget,
-      onClick: () => {
-        if (!entryTarget) return;
-        const after = entryTarget.kind === "bullet" ? entryTarget.bi : entryTarget.item.bullets.length - 1;
-        addBullet(entryTarget.section.id, entryTarget.item, after);
-      },
+      onClick: addBulletToTarget,
     },
     { title: "Add entry", icon: <LineIcon className="h-4 w-4" />, disabled: !target, onClick: () => target && addEntry(target) },
     {
       title: "Add role & dates line",
       icon: <CalendarIcon className="h-4 w-4" />,
       disabled: !entryTarget || isInlineItem(entryTarget.item),
-      onClick: () => entryTarget && addRoleLine(entryTarget.item),
+      onClick: addRoleLineToTarget,
     },
     "sep",
     {
@@ -438,15 +485,17 @@ export function ResumeDocument({
                 className="doc-name text-center"
                 value={value.header.name}
                 placeholder="Your Name"
+                data-singleline
                 aria-label="Name"
-                onChange={(e) => onChange({ ...value, header: { ...value.header, name: e.target.value } })}
+                onChange={(e) => onChange({ ...value, header: { ...value.header, name: e.target.value.replace(/\n+/g, " ") } })}
               />
               <AutoTextarea
                 className="doc-contact text-center"
                 value={value.header.contact}
                 placeholder="City, ST • email • phone • github.com/you"
+                data-singleline
                 aria-label="Contact line"
-                onChange={(e) => onChange({ ...value, header: { ...value.header, contact: e.target.value } })}
+                onChange={(e) => onChange({ ...value, header: { ...value.header, contact: e.target.value.replace(/\n+/g, " ") } })}
               />
             </div>
 
@@ -455,6 +504,7 @@ export function ResumeDocument({
               return (
                 <section
                   key={section.id}
+                  data-section={section.id}
                   className={`doc-section doc-block ${sectionActive ? "is-selected" : ""}`}
                   onClick={(e) => {
                     if (!isField(e.target)) selectBlock({ kind: "section", sid: section.id });
@@ -681,9 +731,9 @@ export function ResumeDocument({
           <AutoTextarea
             highlight={!quiet}
             data-bullet={b.id}
+            aria-label={`Bullet ${bi + 1} of ${item.title || "entry"}`}
             value={b.text}
             placeholder="Accomplishment: verb + what + measurable impact"
-            aria-label="Bullet"
             onFocus={(e) => {
               e.stopPropagation();
               setActive({ kind: "bullet", sid, iid: item.id, bid: b.id });

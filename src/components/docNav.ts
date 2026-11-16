@@ -106,7 +106,7 @@ export function handleDocArrowKeys(e: React.KeyboardEvent<HTMLElement>, root: HT
       return;
     case "ArrowUp":
       if (!collapsed) return;
-      if (isSingleLine(target)) {
+      if (isSingleLine(target) || !(target instanceof HTMLTextAreaElement)) {
         moveTo(prev, "end");
         return;
       }
@@ -115,7 +115,7 @@ export function handleDocArrowKeys(e: React.KeyboardEvent<HTMLElement>, root: HT
       return;
     case "ArrowDown":
       if (!collapsed) return;
-      if (isSingleLine(target)) {
+      if (isSingleLine(target) || !(target instanceof HTMLTextAreaElement)) {
         moveTo(next, "start");
         return;
       }

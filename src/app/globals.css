@@ -211,7 +211,7 @@ body {
 }
 @media (max-width: 639px) {
   /* Phones get a reflowed page, like Google Docs' mobile view. */
-  .doc-canvas { padding: 0 0 24px; background: transparent; }
+  .doc-canvas { padding: 0 0 24px; background: #fff; min-height: calc(100dvh - 12rem); }
   .doc-page { min-height: 0; padding: 20px 16px; font-size: 16px; box-shadow: none; }
   .doc-name { font-size: 24px; }
   .doc-contact { font-size: 16px; } /* >= 16px so iOS doesn't zoom when it's focused */
