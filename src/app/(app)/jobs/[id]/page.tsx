@@ -1095,8 +1095,8 @@ export default function JobPage() {
     </div>
   );
   /** Fixed width: "Saved" / "Saving…" / "Unsaved changes" never resize the row beside it. */
-  const saveBox = (className: string) => (
-    <div className={`w-[112px] shrink-0 items-center justify-end ${className}`}>
+  const saveBox = (className: string, width = "w-[112px]") => (
+    <div className={`${width} shrink-0 items-center justify-end ${className}`}>
       <SaveStatus status={saveState} />
     </div>
   );
@@ -1105,7 +1105,7 @@ export default function JobPage() {
     <DocToolbar>
       <Link
         href="/"
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-normal text-muted hover:text-fg"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-2 py-1 text-xs font-normal text-muted hover:text-fg sm:px-2.5"
       >
         <BriefcaseIcon className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Jobs</span>
@@ -1119,6 +1119,9 @@ export default function JobPage() {
       </span>
       <span className="mx-2 hidden h-4 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
 
+      {/* Phones: the top bar is nowrap, and the menus would inherit that and stretch to fit their hints off-screen.
+          Wrapping them at phone width keeps each popup about 224px wide, inside the screen. */}
+      <div className="whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-44 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
       <MenuBar>
         <MenuBarMenu label="File">
           <MenuItem onSelect={downloadPdf} disabled={pdfBusy}>
@@ -1205,6 +1208,7 @@ export default function JobPage() {
           </MenuItem>
         </MenuBarMenu>
       </MenuBar>
+      </div>
 
       {tabList("ml-2 hidden h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto sm:flex [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
       {saveBox("ml-auto hidden pl-2 sm:flex")}
@@ -1218,8 +1222,8 @@ export default function JobPage() {
       <div className="sticky top-0 z-10 shrink-0">
         {topBar}
         <div className="flex h-10 items-center gap-2 border-b border-border bg-surface px-3 sm:hidden">
-          {tabList("flex h-full min-w-0 flex-1 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
-          {saveBox("flex")}
+          {tabList("flex h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
+          {saveBox("flex text-[11px] [&_*]:text-[11px]", "w-[84px]")}
         </div>
       </div>
 
