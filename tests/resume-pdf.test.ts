@@ -1,4 +1,4 @@
-import { renderToBuffer } from "@react-pdf/renderer";
+import { renderToBuffer, Text } from "@react-pdf/renderer";
 import { describe, expect, it } from "vitest";
 import { ResumePdf } from "@/components/ResumePdf";
 import type { Resume } from "@/lib/types";
@@ -119,5 +119,73 @@ describe("ResumePdf", () => {
     const buffer = await renderToBuffer(ResumePdf({ resume: big }));
     expect(buffer.subarray(0, 4).toString("latin1")).toBe("%PDF");
     expect(buffer.length).toBeGreaterThan(1000);
+  });
+});
+
+/** Every React element under `node`, depth first (ResumePdf returns an element tree, not a rendered page). */
+function elementsIn(node: unknown, out: { type: unknown; props: Record<string, unknown> }[] = []) {
+  if (Array.isArray(node)) node.forEach((n) => elementsIn(n, out));
+  else if (node && typeof node === "object" && "props" in node) {
+    const el = node as { type: unknown; props: Record<string, unknown> };
+    out.push(el);
+    elementsIn(el.props.children, out);
+  }
+  return out;
+}
+
+function bulletResume(align?: "center" | "right"): Resume {
+  return {
+    version: 3,
+    header: { name: "Alan Turing", contact: "Cambridge" },
+    sections: [
+      {
+        id: "s",
+        title: "Work",
+        items: [
+          {
+            id: "i",
+            title: "",
+            subtitle: "",
+            location: "",
+            dates: "",
+            bullets: [{ id: "b", text: "Broke the cipher.", marks: [{ from: 0, to: 5, size: 14 }], para: align ? { align } : undefined }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe("ResumePdf bullet alignment", () => {
+  it("keeps a left bullet as a dot column with an 11pt dot", () => {
+    const els = elementsIn(ResumePdf({ resume: bulletResume() }));
+    const dot = els.find((e) => e.type === Text && e.props.children === "•");
+    expect(dot?.props.style).toMatchObject({ fontSize: 11, lineHeight: 1.15 });
+  });
+
+  it("puts a center bullet's marker inline, balanced by an invisible copy, so the text is centered", () => {
+    const els = elementsIn(ResumePdf({ resume: bulletResume("center") }));
+    const markers = els.filter((e) => e.type === Text && e.props.children === "• ");
+    expect(markers).toHaveLength(2);
+    expect(markers.map((m) => (m.props.style as { color?: string }).color ?? null)).toEqual([null, "#ffffff"]);
+    // The paragraph starts with the marker, ends with the balancing copy, and is itself centered.
+    const para = els.find((e) => {
+      const kids = e.props.children;
+      return e.type === Text && Array.isArray(kids) && kids[0] === markers[0] && kids.at(-1) === markers[1];
+    });
+    expect(para?.props.style).toMatchObject({ textAlign: "center" });
+  });
+
+  it("puts a right bullet's marker inline before the text, with no balancing copy", () => {
+    const els = elementsIn(ResumePdf({ resume: bulletResume("right") }));
+    expect(els.filter((e) => e.type === Text && e.props.children === "• ")).toHaveLength(1);
+    expect(els.some((e) => e.type === Text && e.props.children === "•")).toBe(false);
+  });
+
+  it("still renders aligned bullets to a PDF", async () => {
+    for (const align of ["center", "right"] as const) {
+      const buffer = await renderToBuffer(ResumePdf({ resume: bulletResume(align) }));
+      expect(buffer.subarray(0, 4).toString("latin1")).toBe("%PDF");
+    }
   });
 });

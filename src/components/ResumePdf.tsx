@@ -23,7 +23,8 @@ const s = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between" },
   rowLeft: { flexShrink: 1 },
   bullet: { flexDirection: "row", paddingLeft: 8 },
-  bulletDot: { width: 10 },
+  // The dot has its own size, so a bigger run in the line does not enlarge or raise it.
+  bulletDot: { width: 10, fontSize: DEFAULT_SIZE, lineHeight: 1.15 },
   bulletText: { flex: 1, lineHeight: 1.15 },
 });
 
@@ -61,6 +62,19 @@ function pdfLine(line: DocLine, key: number): ReactElement {
     ...(para?.rule ? s.rule : {}),
   };
   const textStyle = { textAlign, lineHeight: 1.15, ...(caps ? { textTransform: "uppercase" as const } : {}) };
+
+  if (line.kind === "bullet" && (textAlign === "right" || textAlign === "center")) {
+    // Right/center: one paragraph, marker "• " inline before the text, so it moves with the text. The editor and
+    // view hang the marker the same way. For center, an invisible copy of the marker at the end balances it, so the
+    // text (not text + marker) is centered on the page.
+    const marker = (k: string, color?: string) =>
+      h(Text, { key: k, style: { fontSize: DEFAULT_SIZE, lineHeight: 1.15, ...(color ? { color } : {}) } }, "• ");
+    const nodes = runNodes(line.text, line.marks, caps);
+    const children = textAlign === "center"
+      ? [marker("m"), ...nodes, marker("s", "#ffffff")]
+      : [marker("m"), ...nodes];
+    return h(View, { key, style: viewStyle }, h(Text, { style: textStyle }, ...children));
+  }
 
   if (line.kind === "bullet") {
     return h(

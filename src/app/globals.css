@@ -173,6 +173,13 @@ body {
    hanging indent puts the marker 6pt from the margin and the text at 18pt (phones: 2pt and 14pt). */
 .doc-line-bullet { padding-left: 18pt; text-indent: -12pt; }
 .doc-line-bullet::before { content: "•"; display: inline-block; width: 12pt; text-indent: 0; user-select: none; -webkit-user-select: none; }
+/* Right and center bullets have no hanging indent: the text uses the whole line, so a centered text is centered
+   on the page. The marker is "• " in a zero-width box whose RTL text overflows to the left, so it hangs just before
+   the first line's text and moves with it, without taking any width (the PDF marker is inline, see ResumePdf). */
+.doc-line-bullet.doc-align-right, .doc-line-bullet.doc-align-center { padding-left: 0; text-indent: 0; }
+.doc-line-bullet.doc-align-right::before, .doc-line-bullet.doc-align-center::before {
+  content: "• "; width: 0; direction: rtl; text-align: start; white-space: pre;
+}
 .doc-align-center { text-align: center; }
 .doc-align-right { text-align: right; }
 .doc-align-justify { text-align: justify; }
