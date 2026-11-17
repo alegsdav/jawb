@@ -1,35 +1,38 @@
 import { describe, expect, it } from "vitest";
 import type { DocLine } from "@/lib/docLineTypes";
-import {
-  joinInlineText,
-  lineEffectiveStyle,
-  linesToResume,
-  nextKind,
-  partField,
-  resetLineStyle,
-  resumeToLines,
-  splitInlineText,
-  toggleLineStyle,
-} from "@/lib/docLines";
-import type { Resume } from "@/lib/types";
+import { linesToResume, nextKind, resumeToLines } from "@/lib/docLines";
+import type { Item, Resume } from "@/lib/types";
 
-const resume: Resume = {
-  version: 2,
+/** A realistic version 3 resume with formatting everywhere (no legacy subtitle on inline items). */
+const v3: Resume = {
+  version: 3,
   header: {
     name: "Ada Lovelace",
     contact: "London • ada@example.com",
-    styles: { name: { bold: true, italic: true }, contact: { bold: true } },
+    marks: { name: [{ from: 0, to: 12, bold: true, size: 16 }] },
+    para: { name: { align: "center" }, contact: { align: "center" } },
   },
   sections: [
     {
       id: "edu",
       title: "EDUCATION",
-      items: [{ id: "e1", title: "University of Cambridge", subtitle: "BA Mathematics", location: "", dates: "1835 – 1837", bullets: [] }],
+      marks: [{ from: 0, to: 9, bold: true }],
+      para: { rule: true, caps: true, spaceBefore: 6 },
+      items: [
+        {
+          id: "e1",
+          title: "University of Cambridge",
+          subtitle: "BA Mathematics",
+          location: "",
+          dates: "1835 – 1837",
+          bullets: [],
+          marks: { title: [{ from: 0, to: 23, bold: true }], subtitle: [{ from: 0, to: 14, italic: true }] },
+        },
+      ],
     },
     {
       id: "exp",
       title: "EXPERIENCE",
-      style: { italic: true },
       items: [
         {
           id: "x1",
@@ -37,8 +40,12 @@ const resume: Resume = {
           subtitle: "Engineer",
           location: "London",
           dates: "1843 – 1845",
-          bullets: [{ id: "b1", text: "Wrote the first program" }, { id: "b2", text: "" }],
-          styles: { title: { bold: false }, dates: { italic: true } },
+          bullets: [
+            { id: "b1", text: "Wrote the first program", marks: [{ from: 10, to: 15, bold: true }] },
+            { id: "b2", text: "" },
+          ],
+          marks: { title: [{ from: 0, to: 21, bold: true }], subtitle: [{ from: 0, to: 8, italic: true }] },
+          para: { entry: { spaceBefore: 4 } },
         },
         {
           id: "x2",
@@ -54,8 +61,39 @@ const resume: Resume = {
       id: "skills",
       title: "SKILLS",
       items: [
-        { id: "k1", title: "Languages", subtitle: "Python", location: "", dates: "", bullets: [], styles: { subtitle: { italic: true } } },
+        {
+          id: "k1",
+          title: "Languages: Python",
+          subtitle: "",
+          location: "",
+          dates: "",
+          bullets: [],
+          marks: { title: [{ from: 0, to: 10, bold: true }] },
+        },
         { id: "k2", title: "Dean's List", subtitle: "", location: "", dates: "", bullets: [] },
+      ],
+    },
+  ],
+};
+
+/** Version 2 data: an inline item with the legacy "title: subtitle" split, bold label and italic value. */
+const legacy: Resume = {
+  version: 2,
+  header: { name: "Ada", contact: "" },
+  sections: [
+    {
+      id: "skills",
+      title: "SKILLS",
+      items: [
+        {
+          id: "k1",
+          title: "Languages",
+          subtitle: "Python",
+          location: "",
+          dates: "",
+          bullets: [],
+          marks: { title: [{ from: 0, to: 9, bold: true }], subtitle: [{ from: 0, to: 6, italic: true }] },
+        },
       ],
     },
   ],
@@ -67,44 +105,157 @@ const line = (l: Partial<DocLine> & Pick<DocLine, "kind" | "text">): DocLine => 
 const head = [line({ kind: "name", text: "Ada" }), line({ kind: "contact", text: "" })];
 
 describe("resumeToLines", () => {
-  it("emits the header, sections, entries, roles, bullets and inline lines in order", () => {
-    expect(resumeToLines(resume)).toStrictEqual<DocLine[]>([
-      { kind: "name", text: "Ada Lovelace", style: { bold: true, italic: true } },
-      { kind: "contact", text: "London • ada@example.com", style: { bold: true } },
-      { kind: "heading", text: "EDUCATION", sid: "edu" },
-      { kind: "entry", text: "University of Cambridge", right: "", sid: "edu", iid: "e1" },
-      { kind: "role", text: "BA Mathematics", right: "1835 – 1837", sid: "edu", iid: "e1" },
-      { kind: "heading", text: "EXPERIENCE", sid: "exp", style: { italic: true } },
-      { kind: "entry", text: "Analytical Engine Co.", right: "London", sid: "exp", iid: "x1", style: { bold: false } },
-      { kind: "role", text: "Engineer", right: "1843 – 1845", sid: "exp", iid: "x1", style2: { italic: true } },
-      { kind: "bullet", text: "Wrote the first program", sid: "exp", iid: "x1", bid: "b1" },
+  it("emits explicit marks and para on the lines that carry them", () => {
+    expect(resumeToLines(v3)).toStrictEqual<DocLine[]>([
+      {
+        kind: "name",
+        text: "Ada Lovelace",
+        marks: [{ from: 0, to: 12, bold: true, size: 16 }],
+        para: { align: "center" },
+      },
+      { kind: "contact", text: "London • ada@example.com", para: { align: "center" } },
+      {
+        kind: "heading",
+        text: "EDUCATION",
+        sid: "edu",
+        marks: [{ from: 0, to: 9, bold: true }],
+        para: { rule: true, caps: true, spaceBefore: 6 },
+      },
+      {
+        kind: "entry",
+        text: "University of Cambridge",
+        right: "",
+        sid: "edu",
+        iid: "e1",
+        marks: [{ from: 0, to: 23, bold: true }],
+      },
+      {
+        kind: "role",
+        text: "BA Mathematics",
+        right: "1835 – 1837",
+        sid: "edu",
+        iid: "e1",
+        marks: [{ from: 0, to: 14, italic: true }],
+      },
+      { kind: "heading", text: "EXPERIENCE", sid: "exp" },
+      {
+        kind: "entry",
+        text: "Analytical Engine Co.",
+        right: "London",
+        sid: "exp",
+        iid: "x1",
+        marks: [{ from: 0, to: 21, bold: true }],
+        para: { spaceBefore: 4 },
+      },
+      {
+        kind: "role",
+        text: "Engineer",
+        right: "1843 – 1845",
+        sid: "exp",
+        iid: "x1",
+        marks: [{ from: 0, to: 8, italic: true }],
+      },
+      {
+        kind: "bullet",
+        text: "Wrote the first program",
+        sid: "exp",
+        iid: "x1",
+        bid: "b1",
+        marks: [{ from: 10, to: 15, bold: true }],
+      },
       { kind: "bullet", text: "", sid: "exp", iid: "x1", bid: "b2" },
       { kind: "entry", text: "Freelance Translator", right: "Remote", sid: "exp", iid: "x2" },
       { kind: "bullet", text: "Translated papers", sid: "exp", iid: "x2", bid: "b3" },
       { kind: "heading", text: "SKILLS", sid: "skills" },
-      { kind: "text", text: "Languages: Python", sid: "skills", iid: "k1", style2: { italic: true } },
+      { kind: "text", text: "Languages: Python", sid: "skills", iid: "k1", marks: [{ from: 0, to: 10, bold: true }] },
       { kind: "text", text: "Dean's List", sid: "skills", iid: "k2" },
     ]);
   });
 
-  it("always emits the header lines and an empty heading", () => {
+  it("emits no marks, para or right keys when nothing is formatted", () => {
+    const plain: Resume = {
+      header: { name: "Ada", contact: "c" },
+      sections: [
+        {
+          id: "s",
+          title: "S",
+          items: [{ id: "i", title: "A", subtitle: "", location: "L", dates: "", bullets: [{ id: "b", text: "x" }] }],
+        },
+      ],
+    };
+    expect(resumeToLines(plain)).toStrictEqual<DocLine[]>([
+      { kind: "name", text: "Ada" },
+      { kind: "contact", text: "c" },
+      { kind: "heading", text: "S", sid: "s" },
+      { kind: "entry", text: "A", right: "L", sid: "s", iid: "i" },
+      { kind: "bullet", text: "x", sid: "s", iid: "i", bid: "b" },
+    ]);
+  });
+
+  it("writes a legacy subtitle as one line, the separator taking the title's last-character format", () => {
+    const lines = resumeToLines(legacy);
+    expect(lines[2]).toStrictEqual<DocLine>({
+      kind: "text",
+      text: "Languages: Python",
+      sid: "skills",
+      iid: "k1",
+      marks: [
+        { from: 0, to: 11, bold: true },
+        { from: 11, to: 17, italic: true },
+      ],
+    });
+  });
+
+  it("gives the separator no format when the title is unformatted at its last character", () => {
+    const item: Item = {
+      id: "k",
+      title: "Languages",
+      subtitle: "Python",
+      location: "",
+      dates: "",
+      bullets: [],
+      marks: { title: [{ from: 0, to: 5, bold: true }] },
+    };
+    const r: Resume = { header: { name: "", contact: "" }, sections: [{ id: "s", title: "S", items: [item] }] };
+    // No header lines (empty name and contact, with sections): heading, then the text line.
+    expect(resumeToLines(r)[1]).toStrictEqual<DocLine>({
+      kind: "text",
+      text: "Languages: Python",
+      sid: "s",
+      iid: "k",
+      marks: [{ from: 0, to: 5, bold: true }],
+    });
+  });
+
+  it("always emits the empty heading of a section with no title", () => {
     expect(resumeToLines({ header: { name: "", contact: "" }, sections: [{ id: "s", title: "", items: [] }] })).toStrictEqual([
+      { kind: "heading", text: "", sid: "s" },
+    ]);
+  });
+
+  it("emits both empty header lines only for a completely blank resume", () => {
+    expect(resumeToLines({ header: { name: "", contact: "" }, sections: [] })).toStrictEqual([
       { kind: "name", text: "" },
       { kind: "contact", text: "" },
-      { kind: "heading", text: "", sid: "s" },
+    ]);
+  });
+
+  it("omits an empty name or contact line when the resume has content", () => {
+    expect(resumeToLines({ header: { name: "", contact: "c" }, sections: [] })).toStrictEqual([
+      { kind: "contact", text: "c" },
     ]);
   });
 });
 
 describe("linesToResume", () => {
-  it("round-trips a resume", () => {
-    const { resume: back } = linesToResume(resumeToLines(resume), resume);
-    expect(back).toEqual(resume);
+  it("round-trips a version 3 resume exactly", () => {
+    const { resume: back } = linesToResume(resumeToLines(v3), v3);
+    expect(back).toStrictEqual(v3);
   });
 
   it("returns one id entry per line, matching the original ids on a round trip", () => {
-    const lines = resumeToLines(resume);
-    const { ids } = linesToResume(lines, resume);
+    const lines = resumeToLines(v3);
+    const { ids } = linesToResume(lines, v3);
     expect(ids).toHaveLength(lines.length);
     expect(ids[0]).toEqual({});
     expect(ids[1]).toEqual({});
@@ -123,7 +274,7 @@ describe("linesToResume", () => {
       line({ kind: "bullet", text: "x", sid: "s", iid: "i", bid: "b" }),
       line({ kind: "bullet", text: "y", sid: "s", iid: "i", bid: "b" }),
     ];
-    const { resume: r, ids } = linesToResume(lines, resume);
+    const { resume: r, ids } = linesToResume(lines, v3);
     expect(ids[2].bid).toBeUndefined();
     expect(ids[4].bid).toBe("b");
     expect(ids[5].bid).toBeTruthy();
@@ -138,7 +289,7 @@ describe("linesToResume", () => {
       line({ kind: "entry", text: "A", right: "X", sid: "s", iid: "i" }),
       line({ kind: "entry", text: "B", right: "Y", sid: "s", iid: "i" }),
     ];
-    const { resume: r, ids } = linesToResume(lines, resume);
+    const { resume: r, ids } = linesToResume(lines, v3);
     expect(ids[3].iid).toBe("i");
     expect(ids[4].iid).toBeTruthy();
     expect(ids[4].iid).not.toBe("i");
@@ -146,9 +297,13 @@ describe("linesToResume", () => {
   });
 
   it("makes a bullet right after a heading an untitled item", () => {
-    const lines = [...head, line({ kind: "heading", text: "S", sid: "s" }), line({ kind: "bullet", text: "Did it", sid: "s", iid: "i", bid: "b" })];
-    const { resume: r } = linesToResume(lines, resume);
-    expect(r.sections[0].items).toEqual([
+    const lines = [
+      ...head,
+      line({ kind: "heading", text: "S", sid: "s" }),
+      line({ kind: "bullet", text: "Did it", sid: "s", iid: "i", bid: "b" }),
+    ];
+    const { resume: r } = linesToResume(lines, v3);
+    expect(r.sections[0].items).toStrictEqual([
       { id: "i", title: "", subtitle: "", location: "", dates: "", bullets: [{ id: "b", text: "Did it" }] },
     ]);
   });
@@ -160,29 +315,35 @@ describe("linesToResume", () => {
       line({ kind: "text", text: "Languages: Python", sid: "s", iid: "k" }),
       line({ kind: "bullet", text: "Oops", sid: "s", iid: "k", bid: "b" }),
     ];
-    const { resume: r, ids } = linesToResume(lines, resume);
+    const { resume: r, ids } = linesToResume(lines, v3);
     const items = r.sections[0].items;
     expect(items).toHaveLength(2);
-    expect(items[0]).toEqual({ id: "k", title: "Languages", subtitle: "Python", location: "", dates: "", bullets: [] });
+    expect(items[0]).toStrictEqual({ id: "k", title: "Languages: Python", subtitle: "", location: "", dates: "", bullets: [] });
     expect(items[1].title).toBe("");
     expect(items[1].bullets).toEqual([{ id: "b", text: "Oops" }]);
     expect(ids[4].iid).toBe(items[1].id);
   });
 
   it("makes a role line with no preceding entry an item with an empty title", () => {
-    const lines = [...head, line({ kind: "heading", text: "S", sid: "s" }), line({ kind: "role", text: "Engineer", right: "2020", sid: "s", iid: "i" })];
-    const { resume: r } = linesToResume(lines, resume);
-    expect(r.sections[0].items).toEqual([
+    const lines = [
+      ...head,
+      line({ kind: "heading", text: "S", sid: "s" }),
+      line({ kind: "role", text: "Engineer", right: "2020", sid: "s", iid: "i" }),
+    ];
+    const { resume: r } = linesToResume(lines, v3);
+    expect(r.sections[0].items).toStrictEqual([
       { id: "i", title: "", subtitle: "Engineer", location: "", dates: "2020", bullets: [] },
     ]);
   });
 
   it("puts lines before any heading into an implicit section with an empty title", () => {
     const lines = [...head, line({ kind: "text", text: "Languages: Python", sid: "s", iid: "k" })];
-    const { resume: r, ids } = linesToResume(lines, resume);
+    const { resume: r, ids } = linesToResume(lines, v3);
     expect(r.sections).toHaveLength(1);
     expect(r.sections[0].title).toBe("");
-    expect(r.sections[0].items).toEqual([{ id: "k", title: "Languages", subtitle: "Python", location: "", dates: "", bullets: [] }]);
+    expect(r.sections[0].items).toStrictEqual([
+      { id: "k", title: "Languages: Python", subtitle: "", location: "", dates: "", bullets: [] },
+    ]);
     expect(ids[2]).toEqual({ sid: r.sections[0].id, iid: "k" });
   });
 
@@ -193,40 +354,158 @@ describe("linesToResume", () => {
       line({ kind: "heading", text: "S", sid: "s" }),
       line({ kind: "name", text: "Foo: bar", sid: "s", iid: "n" }),
     ];
-    const { resume: r, ids } = linesToResume(lines, resume);
+    const { resume: r, ids } = linesToResume(lines, v3);
     expect(r.header.name).toBe("Ada");
-    expect(r.sections[0].items).toEqual([{ id: "n", title: "Foo", subtitle: "bar", location: "", dates: "", bullets: [] }]);
+    expect(r.sections[0].items).toStrictEqual([
+      { id: "n", title: "Foo: bar", subtitle: "", location: "", dates: "", bullets: [] },
+    ]);
     expect(ids[3]).toEqual({ sid: "s", iid: "n" });
   });
 
-  it("fixes up an entry title that became inline so it keeps its bold", () => {
-    const lines = [...head, line({ kind: "heading", text: "S", sid: "s" }), line({ kind: "entry", text: "Google", right: "", sid: "s", iid: "g" }), line({ kind: "heading", text: "T", sid: "t" })];
-    const { resume: r } = linesToResume(lines, resume);
-    expect(r.sections[0].items).toEqual([
-      { id: "g", title: "Google", subtitle: "", location: "", dates: "", bullets: [], styles: { title: { bold: true, italic: false } } },
+  it("takes the header from the first name and contact lines even after a heading", () => {
+    const lines = [
+      line({ kind: "heading", text: "S", sid: "s" }),
+      line({ kind: "name", text: "Ada" }),
+      line({ kind: "contact", text: "ada@example.com" }),
+      line({ kind: "name", text: "Second" }),
+    ];
+    const { resume: r, ids } = linesToResume(lines, v3);
+    expect(r.header.name).toBe("Ada");
+    expect(r.header.contact).toBe("ada@example.com");
+    expect(r.sections[0].items).toHaveLength(1);
+    expect(r.sections[0].items[0].title).toBe("Second");
+    expect(ids[0]).toEqual({ sid: "s" });
+    expect(ids[1]).toEqual({});
+    expect(ids[2]).toEqual({});
+    expect(ids[3]).toEqual({ sid: "s", iid: r.sections[0].items[0].id });
+  });
+
+  it("drops marks that are out of range or empty", () => {
+    const lines = [
+      ...head,
+      line({ kind: "heading", text: "S", sid: "s" }),
+      line({
+        kind: "bullet",
+        text: "Hi",
+        sid: "s",
+        iid: "i",
+        bid: "b",
+        marks: [
+          { from: -5, to: 1, bold: true },
+          { from: 1, to: 9, italic: true },
+          { from: 1, to: 1, bold: true },
+        ],
+      }),
+    ];
+    const { resume: r } = linesToResume(lines, v3);
+    expect(r.sections[0].items[0].bullets[0].marks).toStrictEqual([
+      { from: 0, to: 1, bold: true },
+      { from: 1, to: 2, italic: true },
     ]);
   });
 
+  it("cleans entry marks against the length of each field", () => {
+    const lines = [
+      ...head,
+      line({ kind: "heading", text: "S", sid: "s" }),
+      line({
+        kind: "entry",
+        text: "Acme",
+        right: "NYC",
+        sid: "s",
+        iid: "i",
+        marks: [{ from: 0, to: 100, bold: true }],
+        rightMarks: [{ from: 1, to: 3, italic: true }],
+      }),
+    ];
+    const { resume: r } = linesToResume(lines, v3);
+    expect(r.sections[0].items[0].marks).toStrictEqual({
+      title: [{ from: 0, to: 4, bold: true }],
+      location: [{ from: 1, to: 3, italic: true }],
+    });
+  });
+
+  it("maps para on every kind to the matching field", () => {
+    const lines = [
+      line({ kind: "name", text: "Ada", para: { align: "center" } }),
+      line({ kind: "contact", text: "c", para: { align: "center" } }),
+      line({ kind: "heading", text: "S", sid: "s", para: { rule: true } }),
+      line({ kind: "entry", text: "A", right: "X", sid: "s", iid: "i", para: { spaceBefore: 4 } }),
+      line({ kind: "role", text: "R", right: "2020", sid: "s", iid: "i", para: { align: "right" } }),
+      line({ kind: "bullet", text: "b", sid: "s", iid: "i", bid: "b", para: { caps: true } }),
+      line({ kind: "text", text: "T", sid: "s", iid: "t", para: { align: "justify" } }),
+    ];
+    const { resume: r } = linesToResume(lines, v3);
+    expect(r.header.para).toStrictEqual({ name: { align: "center" }, contact: { align: "center" } });
+    expect(r.sections[0].para).toStrictEqual({ rule: true });
+    expect(r.sections[0].items[0].para).toStrictEqual({ entry: { spaceBefore: 4 }, role: { align: "right" } });
+    expect(r.sections[0].items[0].bullets[0].para).toStrictEqual({ caps: true });
+    expect(r.sections[0].items[1]).toStrictEqual({
+      id: "t",
+      title: "T",
+      subtitle: "",
+      location: "",
+      dates: "",
+      bullets: [],
+      para: { entry: { align: "justify" } },
+    });
+  });
+
+  it("maps a legacy-style text line to one title with its whole marks", () => {
+    const { resume: r } = linesToResume(resumeToLines(legacy), legacy);
+    expect(r.sections[0].items[0]).toStrictEqual({
+      id: "k1",
+      title: "Languages: Python",
+      subtitle: "",
+      location: "",
+      dates: "",
+      bullets: [],
+      marks: {
+        title: [
+          { from: 0, to: 11, bold: true },
+          { from: 11, to: 17, italic: true },
+        ],
+      },
+    });
+  });
+
+  it("keeps marks on a text line as the title's marks", () => {
+    const lines = [
+      ...head,
+      line({ kind: "heading", text: "S", sid: "s" }),
+      line({ kind: "text", text: "Languages: Python", sid: "s", iid: "k", marks: [{ from: 0, to: 10, bold: true }] }),
+    ];
+    const { resume: r } = linesToResume(lines, v3);
+    expect(r.sections[0].items[0]).toStrictEqual({
+      id: "k",
+      title: "Languages: Python",
+      subtitle: "",
+      location: "",
+      dates: "",
+      bullets: [],
+      marks: { title: [{ from: 0, to: 10, bold: true }] },
+    });
+  });
+
+  it("removes legacy styles keys from prev", () => {
+    const prev = {
+      ...v3,
+      styles: { title: { bold: true } },
+      style: { italic: true },
+      header: { ...v3.header, styles: { name: { bold: true } } },
+    } as unknown as Resume;
+    const { resume: r } = linesToResume(resumeToLines(v3), prev);
+    expect(r).not.toHaveProperty("styles");
+    expect(r).not.toHaveProperty("style");
+    expect(r.header).not.toHaveProperty("styles");
+  });
+
   it("keeps the other keys of prev", () => {
-    const prev: Resume = { ...resume, baseline: { b1: "old" }, facts: ["f"] };
-    const { resume: r } = linesToResume(resumeToLines(resume), prev);
+    const prev: Resume = { ...v3, baseline: { b1: "old" }, facts: ["f"] };
+    const { resume: r } = linesToResume(resumeToLines(v3), prev);
     expect(r.baseline).toEqual({ b1: "old" });
     expect(r.facts).toEqual(["f"]);
-    expect(r.version).toBe(2);
-  });
-});
-
-describe("splitInlineText / joinInlineText", () => {
-  it("splits at the first colon-space and does not trim", () => {
-    expect(splitInlineText("Languages: Python, SQL")).toEqual({ title: "Languages", subtitle: "Python, SQL" });
-    expect(splitInlineText(": x")).toEqual({ title: "", subtitle: "x" });
-    expect(splitInlineText("Dean's List")).toEqual({ title: "Dean's List", subtitle: "" });
-    expect(splitInlineText("A: b: c")).toEqual({ title: "A", subtitle: "b: c" });
-  });
-
-  it("joins with a colon-space only when there is a subtitle", () => {
-    expect(joinInlineText("Languages", "Python, SQL")).toBe("Languages: Python, SQL");
-    expect(joinInlineText("Dean's List", "")).toBe("Dean's List");
+    expect(r.version).toBe(3);
   });
 });
 
@@ -239,63 +518,5 @@ describe("nextKind", () => {
     expect(nextKind("role")).toBe("bullet");
     expect(nextKind("bullet")).toBe("bullet");
     expect(nextKind("text")).toBe("text");
-  });
-});
-
-describe("partField", () => {
-  it("maps each kind and part to its style field", () => {
-    expect(partField("name", 1)).toBe("name");
-    expect(partField("name", 2)).toBeNull();
-    expect(partField("contact", 1)).toBe("contact");
-    expect(partField("contact", 2)).toBeNull();
-    expect(partField("heading", 1)).toBe("sectionTitle");
-    expect(partField("heading", 2)).toBeNull();
-    expect(partField("entry", 1)).toBe("title");
-    expect(partField("entry", 2)).toBe("location");
-    expect(partField("role", 1)).toBe("subtitle");
-    expect(partField("role", 2)).toBe("dates");
-    expect(partField("text", 1)).toBe("title");
-    expect(partField("text", 2)).toBe("subtitle");
-    expect(partField("bullet", 1)).toBeNull();
-    expect(partField("bullet", 2)).toBeNull();
-  });
-});
-
-describe("lineEffectiveStyle", () => {
-  it("shows the defaults for each line kind", () => {
-    expect(lineEffectiveStyle(line({ kind: "entry", text: "Acme", right: "" }), 1)).toEqual({ bold: true, italic: false });
-    expect(lineEffectiveStyle(line({ kind: "role", text: "Engineer", right: "" }), 1)).toEqual({ bold: false, italic: true });
-    expect(lineEffectiveStyle(line({ kind: "text", text: "Languages: Python" }), 1)).toEqual({ bold: true, italic: false });
-    expect(lineEffectiveStyle(line({ kind: "text", text: "Dean's List" }), 1)).toEqual({ bold: false, italic: false });
-    expect(lineEffectiveStyle(line({ kind: "bullet", text: "x", bid: "b" }), 1)).toBeNull();
-  });
-});
-
-describe("toggleLineStyle / resetLineStyle", () => {
-  const entry = line({ kind: "entry", text: "Acme", right: "" });
-
-  it("returns to no style key after toggling bold twice", () => {
-    const once = toggleLineStyle(entry, 1, "bold");
-    expect(once.style).toEqual({ bold: false, italic: false });
-    const twice = toggleLineStyle(once, 1, "bold");
-    expect(twice).not.toHaveProperty("style");
-  });
-
-  it("returns the same object for a bullet", () => {
-    const bullet = line({ kind: "bullet", text: "x", bid: "b" });
-    expect(toggleLineStyle(bullet, 1, "bold")).toBe(bullet);
-    expect(resetLineStyle(bullet, 2)).toBe(bullet);
-  });
-
-  it("writes part 2 to style2 and resets it", () => {
-    const toggled = toggleLineStyle(entry, 2, "italic");
-    expect(toggled.style2).toEqual({ bold: false, italic: true });
-    expect(toggled).not.toHaveProperty("style");
-    expect(resetLineStyle(toggled, 2)).not.toHaveProperty("style2");
-  });
-
-  it("does not mutate the input line", () => {
-    toggleLineStyle(entry, 1, "bold");
-    expect(entry).not.toHaveProperty("style");
   });
 });

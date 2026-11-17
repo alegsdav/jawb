@@ -1,33 +1,65 @@
-import type { DocLine, LineIds, LineKind, LinePart } from "./docLineTypes";
+import type { DocLine, LineIds, LineKind } from "./docLineTypes";
 import { isInlineItem, uid } from "./resume";
-import { defaultStyle, effectiveStyle, toggleStyle, type StyleField } from "./textStyle";
-import type { Bullet, Item, Resume, Section, TextStyle } from "./types";
+import { cleanFormat, cleanMarks, cleanPara, joinRich } from "./richText";
+import type { Bullet, Item, Mark, Para, Resume, Section } from "./types";
 
-/** Pure converter between the structured Resume and the editor's lines. See docLineTypes.ts for the contract. */
+/**
+ * Pure converter between the structured Resume and the editor's lines. See docLineTypes.ts for the contract.
+ * Formatting is explicit data (marks / para) on both sides, so the lines carry it over unchanged.
+ */
 
-const withStyle = (st: TextStyle | undefined): { style?: TextStyle } => (st ? { style: st } : {});
-const withStyle2 = (st: TextStyle | undefined): { style2?: TextStyle } => (st ? { style2: st } : {});
+type Fmt = { marks?: Mark[]; para?: Para; rightMarks?: Mark[] };
 
-/** Lines for a Resume, in document order. Header lines and empty entries are always emitted. */
+/** The formatting keys of a line, present only when there is something to show. Marks are copied. */
+function fmt(marks?: Mark[], para?: Para, rightMarks?: Mark[]): Fmt {
+  const out: Fmt = {};
+  if (marks?.length) out.marks = marks.map((m) => ({ ...m }));
+  if (rightMarks?.length) out.rightMarks = rightMarks.map((m) => ({ ...m }));
+  if (para && Object.keys(para).length) out.para = { ...para };
+  return out;
+}
+
+/**
+ * The format of a title's last character, applied to the ": " that joins title and subtitle in one line.
+ * None when the title is empty or unformatted at its last character.
+ */
+function separatorMarks(titleMarks: Mark[] | undefined, title: string): Mark[] | undefined {
+  if (!title.length || !titleMarks) return undefined;
+  const last = title.length - 1;
+  const mark = titleMarks.find((m) => m.from <= last && last < m.to);
+  const f = cleanFormat(mark);
+  return f ? [{ from: 0, to: 2, ...f }] : undefined;
+}
+
+/** One line for an inline item: the title alone, or "title: subtitle" for data from before version 3. */
+function inlineLine(item: Item, sid: string): DocLine {
+  const para = item.para?.entry;
+  if (!item.subtitle) {
+    return { kind: "text", text: item.title, sid, iid: item.id, ...fmt(item.marks?.title, para) };
+  }
+  const rich = joinRich([
+    { text: item.title, marks: item.marks?.title },
+    { text: ": ", marks: separatorMarks(item.marks?.title, item.title) },
+    { text: item.subtitle, marks: item.marks?.subtitle },
+  ]);
+  return { kind: "text", text: rich.text, sid, iid: item.id, ...fmt(rich.marks, para) };
+}
+
+/** Lines for a Resume, in document order. The header lines and empty entries are always emitted when they exist. */
 export function resumeToLines(r: Resume): DocLine[] {
-  const hs = r.header.styles;
-  const lines: DocLine[] = [
-    { kind: "name", text: r.header.name, ...withStyle(hs?.name) },
-    { kind: "contact", text: r.header.contact, ...withStyle(hs?.contact) },
-  ];
+  const lines: DocLine[] = [];
+  const { name, contact } = r.header;
+  // A completely blank resume starts with both header lines.
+  const blank = !name && !contact && r.sections.length === 0;
+  if (name || blank) lines.push({ kind: "name", text: name, ...fmt(r.header.marks?.name, r.header.para?.name) });
+  if (contact || blank) lines.push({ kind: "contact", text: contact, ...fmt(r.header.marks?.contact, r.header.para?.contact) });
+
   for (const section of r.sections) {
-    lines.push({ kind: "heading", text: section.title, sid: section.id, ...withStyle(section.style) });
+    const sid = section.id;
+    lines.push({ kind: "heading", text: section.title, sid, ...fmt(section.marks, section.para) });
     for (const item of section.items) {
-      const sid = section.id;
       if (isInlineItem(item)) {
-        lines.push({
-          kind: "text",
-          text: joinInlineText(item.title, item.subtitle),
-          sid,
-          iid: item.id,
-          ...withStyle(item.styles?.title),
-          ...withStyle2(item.styles?.subtitle),
-        });
+        lines.push(inlineLine(item, sid));
         continue;
       }
       lines.push({
@@ -36,8 +68,7 @@ export function resumeToLines(r: Resume): DocLine[] {
         right: item.location,
         sid,
         iid: item.id,
-        ...withStyle(item.styles?.title),
-        ...withStyle2(item.styles?.location),
+        ...fmt(item.marks?.title, item.para?.entry, item.marks?.location),
       });
       if (item.subtitle || item.dates) {
         lines.push({
@@ -46,32 +77,62 @@ export function resumeToLines(r: Resume): DocLine[] {
           right: item.dates,
           sid,
           iid: item.id,
-          ...withStyle(item.styles?.subtitle),
-          ...withStyle2(item.styles?.dates),
+          ...fmt(item.marks?.subtitle, item.para?.role, item.marks?.dates),
         });
       }
-      for (const b of item.bullets) lines.push({ kind: "bullet", text: b.text, sid, iid: item.id, bid: b.id });
+      for (const b of item.bullets) {
+        lines.push({ kind: "bullet", text: b.text, sid, iid: item.id, bid: b.id, ...fmt(b.marks, b.para) });
+      }
     }
   }
   return lines;
 }
 
-type ItemField = keyof NonNullable<Item["styles"]>;
-
-/** Set or clear one field's style on an item, keeping the styles key absent when empty. */
-function putStyle(it: Item, field: ItemField, st: TextStyle | undefined): void {
-  const styles: NonNullable<Item["styles"]> = { ...it.styles };
-  if (st) styles[field] = st;
-  else delete styles[field];
-  if (Object.keys(styles).length) it.styles = styles;
-  else delete it.styles;
-}
+type Phase = "entry" | "role" | "bullets" | "inline";
+type ItemMarkField = keyof NonNullable<Item["marks"]>;
+type ItemParaField = keyof NonNullable<Item["para"]>;
 
 const newItem = (id: string, title: string, subtitle: string, location: string, dates: string): Item => ({
   id, title, subtitle, location, dates, bullets: [],
 });
 
-type Phase = "entry" | "role" | "bullets" | "inline";
+/** Set or clear one inline mark field of an item, keeping the marks key absent when empty. */
+function setItemMarks(it: Item, field: ItemMarkField, marks: Mark[] | undefined): void {
+  const next: NonNullable<Item["marks"]> = { ...it.marks };
+  if (marks) next[field] = marks;
+  else delete next[field];
+  if (Object.keys(next).length) it.marks = next;
+  else delete it.marks;
+}
+
+/** Set or clear one paragraph format of an item, keeping the para key absent when empty. */
+function setItemPara(it: Item, field: ItemParaField, para: Para | undefined): void {
+  const next: NonNullable<Item["para"]> = { ...it.para };
+  if (para) next[field] = para;
+  else delete next[field];
+  if (Object.keys(next).length) it.para = next;
+  else delete it.para;
+}
+
+/** The entry line's text and right part (title, location) with their formatting. */
+function applyEntry(it: Item, line: DocLine): void {
+  const right = line.right ?? "";
+  it.title = line.text;
+  it.location = right;
+  setItemMarks(it, "title", cleanMarks(line.marks, line.text.length));
+  setItemMarks(it, "location", cleanMarks(line.rightMarks, right.length));
+  setItemPara(it, "entry", cleanPara(line.para));
+}
+
+/** The role line's text and right part (subtitle, dates) with their formatting. */
+function applyRole(it: Item, line: DocLine): void {
+  const right = line.right ?? "";
+  it.subtitle = line.text;
+  it.dates = right;
+  setItemMarks(it, "subtitle", cleanMarks(line.marks, line.text.length));
+  setItemMarks(it, "dates", cleanMarks(line.rightMarks, right.length));
+  setItemPara(it, "role", cleanPara(line.para));
+}
 
 /**
  * Rebuild the Resume from the lines, in order. `prev` supplies every other key (version, facts, baseline).
@@ -90,8 +151,6 @@ export function linesToResume(lines: DocLine[], prev: Resume): { resume: Resume;
   };
 
   const sections: Section[] = [];
-  // Entry-origin items and their lines, for the style fixup at the end.
-  const fromEntry = new Map<Item, { entry: DocLine; role?: DocLine }>();
   let section: Section | undefined;
   let item: Item | undefined;
   let phase: Phase = "inline";
@@ -105,24 +164,33 @@ export function linesToResume(lines: DocLine[], prev: Resume): { resume: Resume;
     return section;
   };
 
+  // The first name and contact lines are the header; they carry no ids.
   const nameLine = nameAt >= 0 ? lines[nameAt] : undefined;
   const contactLine = contactAt >= 0 ? lines[contactAt] : undefined;
-  const headerStyles: NonNullable<Resume["header"]["styles"]> = {};
-  if (nameLine?.style) headerStyles.name = nameLine.style;
-  if (contactLine?.style) headerStyles.contact = contactLine.style;
-  const header: Resume["header"] = {
-    name: nameLine?.text ?? "",
-    contact: contactLine?.text ?? "",
-    ...(Object.keys(headerStyles).length ? { styles: headerStyles } : {}),
-  };
+  const header: Resume["header"] = { name: nameLine?.text ?? "", contact: contactLine?.text ?? "" };
+  const headerMarks: NonNullable<Resume["header"]["marks"]> = {};
+  const headerPara: NonNullable<Resume["header"]["para"]> = {};
+  const nm = cleanMarks(nameLine?.marks, header.name.length);
+  if (nm) headerMarks.name = nm;
+  const cm = cleanMarks(contactLine?.marks, header.contact.length);
+  if (cm) headerMarks.contact = cm;
+  const np = cleanPara(nameLine?.para);
+  if (np) headerPara.name = np;
+  const cp = cleanPara(contactLine?.para);
+  if (cp) headerPara.contact = cp;
+  if (Object.keys(headerMarks).length) header.marks = headerMarks;
+  if (Object.keys(headerPara).length) header.para = headerPara;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // The first name and contact lines are the header; they carry no ids.
     if (i === nameAt || i === contactAt) continue;
 
     if (line.kind === "heading") {
-      const sec: Section = { id: claim(taken.section, line.sid), title: line.text, items: [], ...withStyle(line.style) };
+      const sec: Section = { id: claim(taken.section, line.sid), title: line.text, items: [] };
+      const sm = cleanMarks(line.marks, line.text.length);
+      if (sm) sec.marks = sm;
+      const sp = cleanPara(line.para);
+      if (sp) sec.para = sp;
       sections.push(sec);
       section = sec;
       item = undefined;
@@ -132,11 +200,9 @@ export function linesToResume(lines: DocLine[], prev: Resume): { resume: Resume;
 
     if (line.kind === "entry") {
       const sec = ensureSection(line);
-      const it = newItem(claim(taken.item, line.iid), line.text, "", line.right ?? "", "");
-      putStyle(it, "title", line.style);
-      putStyle(it, "location", line.style2);
+      const it = newItem(claim(taken.item, line.iid), "", "", "", "");
+      applyEntry(it, line);
       sec.items.push(it);
-      fromEntry.set(it, { entry: line });
       item = it;
       phase = "entry";
       ids[i] = { sid: sec.id, iid: it.id };
@@ -149,19 +215,12 @@ export function linesToResume(lines: DocLine[], prev: Resume): { resume: Resume;
       if (item && phase === "entry") {
         // The second line of the current entry.
         cur = item;
-        cur.subtitle = line.text;
-        cur.dates = line.right ?? "";
-        putStyle(cur, "subtitle", line.style);
-        putStyle(cur, "dates", line.style2);
-        const m = fromEntry.get(cur);
-        if (m) m.role = line;
       } else {
-        cur = newItem(claim(taken.item, line.iid), "", line.text, "", line.right ?? "");
-        putStyle(cur, "subtitle", line.style);
-        putStyle(cur, "dates", line.style2);
+        cur = newItem(claim(taken.item, line.iid), "", "", "", "");
         sec.items.push(cur);
         item = cur;
       }
+      applyRole(cur, line);
       phase = "role";
       ids[i] = { sid: sec.id, iid: cur.id };
       continue;
@@ -170,6 +229,10 @@ export function linesToResume(lines: DocLine[], prev: Resume): { resume: Resume;
     if (line.kind === "bullet") {
       const sec = ensureSection(line);
       const bullet: Bullet = { id: claim(taken.bullet, line.bid), text: line.text };
+      const bm = cleanMarks(line.marks, line.text.length);
+      if (bm) bullet.marks = bm;
+      const bp = cleanPara(line.para);
+      if (bp) bullet.para = bp;
       let cur: Item;
       if (item && (phase === "entry" || phase === "role" || phase === "bullets")) {
         cur = item;
@@ -185,52 +248,22 @@ export function linesToResume(lines: DocLine[], prev: Resume): { resume: Resume;
       continue;
     }
 
-    // text, or a later name/contact line (treated as text).
+    // text, or a later name/contact line (treated as text): the whole line is the inline item's title.
     const sec = ensureSection(line);
-    const it: Item = {
-      id: claim(taken.item, line.iid),
-      ...splitInlineText(line.text),
-      location: "",
-      dates: "",
-      bullets: [],
-    };
-    putStyle(it, "title", line.style);
-    putStyle(it, "subtitle", line.style2);
+    const it = newItem(claim(taken.item, line.iid), "", "", "", "");
+    applyEntry(it, line);
     sec.items.push(it);
     item = it;
     phase = "inline";
     ids[i] = { sid: sec.id, iid: it.id };
   }
 
-  // An entry that ended up inline renders with the inline defaults, which differ from the entry's.
-  // Store the entry's effective style when it differs, so the document looks the same as before.
-  for (const [it, m] of fromEntry) {
-    if (!isInlineItem(it)) continue;
-    const title = effectiveStyle("title", m.entry.style);
-    putStyle(it, "title", differs("title", title, it) ? title : undefined);
-    if (m.role) {
-      const subtitle = effectiveStyle("subtitle", m.role.style);
-      putStyle(it, "subtitle", differs("subtitle", subtitle, it) ? subtitle : undefined);
-    }
-  }
-
-  return { resume: { ...prev, header, sections }, ids };
-}
-
-function differs(field: StyleField, st: Required<TextStyle>, it: Item): boolean {
-  const d = defaultStyle(field, it);
-  return st.bold !== d.bold || st.italic !== d.italic;
-}
-
-/** Split an inline line at the first ": ". No ": " means the whole line is the title. */
-export function splitInlineText(text: string): { title: string; subtitle: string } {
-  const at = text.indexOf(": ");
-  if (at < 0) return { title: text, subtitle: "" };
-  return { title: text.slice(0, at), subtitle: text.slice(at + 2) };
-}
-
-export function joinInlineText(title: string, subtitle: string): string {
-  return subtitle ? `${title}: ${subtitle}` : title;
+  const out: Resume = { ...prev, header, sections };
+  // Version 2 keys (styles, style) are never written back.
+  const legacy = out as Resume & { styles?: unknown; style?: unknown };
+  delete legacy.styles;
+  delete legacy.style;
+  return { resume: out, ids };
 }
 
 const NEXT_KIND: Record<LineKind, LineKind> = {
@@ -246,60 +279,4 @@ const NEXT_KIND: Record<LineKind, LineKind> = {
 /** The kind Enter creates after a line of `kind`. */
 export function nextKind(kind: LineKind): LineKind {
   return NEXT_KIND[kind];
-}
-
-/** The style field a line part maps to, or null when the part has no styling. */
-export function partField(kind: LineKind, part: LinePart): StyleField | null {
-  switch (kind) {
-    case "name":
-      return part === 1 ? "name" : null;
-    case "contact":
-      return part === 1 ? "contact" : null;
-    case "heading":
-      return part === 1 ? "sectionTitle" : null;
-    case "entry":
-      return part === 1 ? "title" : "location";
-    case "role":
-      return part === 1 ? "subtitle" : "dates";
-    case "text":
-      return part === 1 ? "title" : "subtitle";
-    case "bullet":
-      return null;
-  }
-}
-
-/** The pseudo inline item a text line stands for, so its label is bold only when there are details. */
-function textItem(line: DocLine): Item | undefined {
-  if (line.kind !== "text") return undefined;
-  return { id: "", ...splitInlineText(line.text), location: "", dates: "", bullets: [] };
-}
-
-/** The bold/italic a line part shows, defaults included. Null when the part has no styling. */
-export function lineEffectiveStyle(line: DocLine, part: LinePart): Required<TextStyle> | null {
-  const field = partField(line.kind, part);
-  if (!field) return null;
-  return effectiveStyle(field, part === 1 ? line.style : line.style2, textItem(line));
-}
-
-/** A copy of the line with one part's style replaced (or removed when undefined). */
-function withPart(line: DocLine, part: LinePart, st: TextStyle | undefined): DocLine {
-  const key = part === 1 ? "style" : "style2";
-  const out: DocLine = { ...line };
-  delete out[key];
-  if (st) out[key] = st;
-  return out;
-}
-
-/** Flip bold or italic on one part of a line. Returns the same object when the part has no styling. */
-export function toggleLineStyle(line: DocLine, part: LinePart, key: "bold" | "italic"): DocLine {
-  const field = partField(line.kind, part);
-  if (!field) return line;
-  const cur = part === 1 ? line.style : line.style2;
-  return withPart(line, part, toggleStyle(field, cur, key, textItem(line)));
-}
-
-/** Drop a part's override so it uses the default again. Returns the same object when the part has no styling. */
-export function resetLineStyle(line: DocLine, part: LinePart): DocLine {
-  if (!partField(line.kind, part)) return line;
-  return withPart(line, part, undefined);
 }
