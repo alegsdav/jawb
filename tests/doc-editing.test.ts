@@ -1,13 +1,18 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { Fragment, Slice, type Node as PMNode } from "prosemirror-model";
-import { EditorState, TextSelection, type Command } from "prosemirror-state";
+import { AllSelection, EditorState, TextSelection, type Command } from "prosemirror-state";
 import {
   caretInfo, headerGuard, enterCommand, backspaceCommand, deleteCommand, tabCommand, shiftTabCommand,
-  toggleStyleCommand, resetStyleCommand, setLineKindCommand, replaceLineTextCommand, editorKeymap,
+  toggleMarkCommand, setSizeCommand, setAlignCommand, toggleParaFlagCommand, toggleSpaceBeforeCommand,
+  clearFormattingCommand, setLineKindCommand, formatAt, linesInSelection, replaceLineTextCommand, editorKeymap,
   pasteTextParser, stripPastedIds,
 } from "../src/lib/docEditing";
 import { docSchema, docToLines, linesToDoc, lineToNode } from "../src/lib/pmSchema";
 import type { DocLine } from "../src/lib/docLineTypes";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const HEADER: DocLine[] = [
   { kind: "name", text: "Ada" },
@@ -39,7 +44,7 @@ function run(state: EditorState, cmd: Command): { ok: boolean; state: EditorStat
   return { ok, state: s };
 }
 
-/** Any change that leaves the text as it was, so the guard runs. */
+/** A change that leaves the text as it was, so the guard runs. */
 function touch(s: EditorState): EditorState {
   const tr = s.tr.insertText("~", 1);
   return s.apply(tr.delete(1, 2));
@@ -72,20 +77,42 @@ describe("caretInfo", () => {
     expect(c.pos).toBe(docPos(s.doc, 3, 0) - 1);
   });
 
-  it("reports part null on a bullet", () => {
-    expect(caretInfo(make(DOC, [5, 2])).part).toBeNull();
+  it("reports part 1 on a bullet (every kind has part 1)", () => {
+    expect(caretInfo(make(DOC, [5, 2])).part).toBe(1);
+  });
+});
+
+describe("linesInSelection", () => {
+  it("returns the caret's line for an empty selection", () => {
+    expect(linesInSelection(make(DOC, [3, 2])).map((l) => l.index)).toEqual([3]);
+  });
+
+  it("returns every line a range touches", () => {
+    expect(linesInSelection(make(DOC, [2, 3], [4, 1])).map((l) => l.index)).toEqual([2, 3, 4]);
+  });
+
+  it("returns every line for AllSelection", () => {
+    const s = EditorState.create({ doc: linesToDoc(DOC), plugins: [headerGuard] });
+    const withAll = s.apply(s.tr.setSelection(new AllSelection(s.doc)));
+    expect(linesInSelection(withAll).map((l) => l.index)).toEqual(DOC.map((_, i) => i));
   });
 });
 
 describe("headerGuard", () => {
-  it("adds the contact line to a one-line doc", () => {
-    const s = touch(make([{ kind: "name", text: "Ada" }], [0, 0]));
-    expect(lines(s)).toEqual([{ kind: "name", text: "Ada" }, { kind: "contact", text: "" }]);
-  });
-
-  it("turns a third name line into text", () => {
+  it("keeps the first name and turns a later one into text", () => {
     const doc = linesToDoc([...HEADER, { kind: "name", text: "Other" }]);
     expect(lines(touch(stateOf(doc, [0, 0])))[2]).toEqual({ kind: "text", text: "Other" });
+    expect(lines(touch(stateOf(doc, [0, 0])))[0]).toEqual({ kind: "name", text: "Ada" });
+  });
+
+  it("turns a second contact into text", () => {
+    const doc = linesToDoc([...HEADER, { kind: "contact", text: "Paris" }]);
+    expect(lines(touch(stateOf(doc, [0, 0])))[2]).toEqual({ kind: "text", text: "Paris" });
+  });
+
+  it("does not force header kinds: a single text line stays a text line", () => {
+    const s = touch(make([{ kind: "text", text: "A" }], [0, 0]));
+    expect(lines(s)).toEqual([{ kind: "text", text: "A" }]);
   });
 
   it("turns a tab in a bullet into a space", () => {
@@ -102,7 +129,7 @@ describe("headerGuard", () => {
     expect(lines(touch(stateOf(doc, [0, 0])))[2]).toEqual({ kind: "entry", text: "Acme", right: "" });
   });
 
-  it("replaces the second tab of a role with a space", () => {
+  it("replaces the extra tab of a role with a space", () => {
     const role = docSchema.nodes.line.create({ kind: "role" }, [
       docSchema.text("Eng"), tabType(), docSchema.text("2020"), tabType(), docSchema.text("now"),
     ]);
@@ -110,48 +137,52 @@ describe("headerGuard", () => {
     expect(lines(touch(stateOf(doc, [0, 0])))[2]).toEqual({ kind: "role", text: "Eng", right: "2020 now" });
   });
 
-  it("keeps the caret in place when it inserts a tab at the caret", () => {
+  it("keeps the caret before the tab it inserts at the caret's line end", () => {
     const entry = docSchema.nodes.line.create({ kind: "entry" }, docSchema.text("Acme"));
     const doc = docSchema.node("doc", null, [lineToNode(HEADER[0]), lineToNode(HEADER[1]), entry]);
-    const s = touch(stateOf(doc, [2, 0]));
-    expect(caret(s)).toEqual({ index: 2, offset: 0 });
+    const s = touch(stateOf(doc, [2, 4]));
+    expect(caret(s)).toEqual({ index: 2, offset: 4 });
+  });
+
+  it("AllSelection survives a guard fix without an invalid-selection warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const entry = docSchema.nodes.line.create({ kind: "entry" }, docSchema.text("Acme"));
+    const doc = docSchema.node("doc", null, [lineToNode(HEADER[0]), entry]);
+    const s = EditorState.create({ doc, plugins: [headerGuard], selection: new AllSelection(doc) });
+    const out = s.apply(s.tr.insertText("~", 1).delete(1, 2));
+    expect(out.selection).toBeInstanceOf(AllSelection);
+    expect(lines(out)[1]).toEqual({ kind: "entry", text: "Acme", right: "" });
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 
 describe("enterCommand", () => {
-  it("a: on the name line moves the caret to the contact line", () => {
+  it("in the middle of the name splits it: the new line is text, since a contact exists", () => {
     const r = run(make(DOC, [0, 2]), enterCommand);
     expect(r.ok).toBe(true);
-    expect(lines(r.state)).toEqual(DOC);
+    expect(lines(r.state)[0]).toEqual({ kind: "name", text: "Ad" });
+    expect(lines(r.state)[1]).toEqual({ kind: "text", text: "a" });
+    expect(lines(r.state)[2]).toEqual({ kind: "contact", text: "London" });
     expect(caret(r.state)).toEqual({ index: 1, offset: 0 });
   });
 
-  it("b: on the contact line adds a heading after it when the next line is not empty", () => {
-    const r = run(make(DOC, [1, 3]), enterCommand);
-    expect(lines(r.state)[2]).toEqual({ kind: "heading", text: "" });
-    expect(lines(r.state)[3]).toEqual({ kind: "heading", text: "EXPERIENCE" });
-    expect(caret(r.state)).toEqual({ index: 2, offset: 0 });
+  it("at the end of a name with no contact after it: the new line is a contact", () => {
+    const r = run(make([{ kind: "name", text: "Ada" }], [0, 3]), enterCommand);
+    expect(lines(r.state)).toEqual([{ kind: "name", text: "Ada" }, { kind: "contact", text: "" }]);
   });
 
-  it("b: on the contact line moves into the empty line below instead of adding one", () => {
-    const doc: DocLine[] = [...HEADER, { kind: "text", text: "" }, { kind: "text", text: "X" }];
-    const r = run(make(doc, [1, 0]), enterCommand);
-    expect(lines(r.state)).toEqual(doc);
-    expect(caret(r.state)).toEqual({ index: 2, offset: 0 });
-  });
-
-  it("c: an empty bullet becomes an entry with a tab", () => {
-    const doc: DocLine[] = [...HEADER, { kind: "bullet", text: "", bid: "b1" }];
-    const r = run(make(doc, [2, 0]), enterCommand);
-    expect(lines(r.state)[2]).toEqual({ kind: "entry", text: "", right: "" });
-    expect(caret(r.state)).toEqual({ index: 2, offset: 0 });
-  });
-
-  it("d: at the start of a non-empty line adds an empty line of the same kind before it", () => {
+  it("d: at the start of an empty-or-not bullet adds an empty bullet before it", () => {
     const r = run(make(DOC, [5, 0]), enterCommand);
     expect(lines(r.state)[5]).toEqual({ kind: "bullet", text: "" });
     expect(lines(r.state)[6]).toEqual({ kind: "bullet", text: "Built it", bid: "b1" });
     expect(caret(r.state)).toEqual({ index: 6, offset: 0 });
+  });
+
+  it("at the start of the name line adds an empty text line, not a second name", () => {
+    const r = run(make(DOC, [0, 0]), enterCommand);
+    expect(lines(r.state)[0]).toEqual({ kind: "text", text: "" });
+    expect(lines(r.state)[1]).toEqual({ kind: "name", text: "Ada" });
+    expect(caret(r.state)).toEqual({ index: 1, offset: 0 });
   });
 
   it("d: at the start of an entry adds an empty entry with a tab", () => {
@@ -161,21 +192,30 @@ describe("enterCommand", () => {
     expect(caret(r.state)).toEqual({ index: 4, offset: 0 });
   });
 
-  it("e: at the end of an entry's left part keeps the location and adds an empty role", () => {
+  it("c: at the end of an entry's title with a role line after it, the caret moves to the role line", () => {
     const r = run(make(DOC, [3, 4]), enterCommand);
-    expect(lines(r.state)[3]).toEqual({ kind: "entry", text: "Acme", right: "Remote" });
-    expect(lines(r.state)[4]).toEqual({ kind: "role", text: "", right: "" });
+    expect(lines(r.state)).toEqual(DOC);
     expect(caret(r.state)).toEqual({ index: 4, offset: 0 });
   });
 
-  it("e: in the middle of an entry's left part moves the rest to a new role line", () => {
+  it("c: at the end of an entry's title with no role after it, adds an empty role", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "entry", text: "Acme", right: "Remote" }, { kind: "text", text: "X" }];
+    const r = run(make(doc, [2, 4]), enterCommand);
+    expect(lines(r.state)[2]).toEqual({ kind: "entry", text: "Acme", right: "Remote" });
+    expect(lines(r.state)[3]).toEqual({ kind: "role", text: "", right: "" });
+    expect(lines(r.state)[4]).toEqual({ kind: "text", text: "X" });
+    expect(caret(r.state)).toEqual({ index: 3, offset: 0 });
+  });
+
+  it("c: in the middle of an entry's title moves the rest to a new role line", () => {
     const r = run(make(DOC, [3, 2]), enterCommand);
     expect(lines(r.state)[3]).toEqual({ kind: "entry", text: "Ac", right: "Remote" });
     expect(lines(r.state)[4]).toEqual({ kind: "role", text: "me", right: "" });
+    expect(lines(r.state)[5]).toEqual({ kind: "role", text: "Engineer", right: "2020" });
     expect(caret(r.state)).toEqual({ index: 4, offset: 0 });
   });
 
-  it("e: a role's left part moves the rest to a new bullet", () => {
+  it("c: a role's left part moves the rest to a new bullet", () => {
     const r = run(make(DOC, [4, 1]), enterCommand);
     expect(lines(r.state)[4]).toEqual({ kind: "role", text: "E", right: "2020" });
     expect(lines(r.state)[5]).toEqual({ kind: "bullet", text: "ngineer" });
@@ -183,25 +223,39 @@ describe("enterCommand", () => {
     expect(caret(r.state)).toEqual({ index: 5, offset: 0 });
   });
 
-  it("f: splits a text line at the caret", () => {
+  it("splits a text line at the caret", () => {
     const r = run(make(DOC, [6, 4]), enterCommand);
     expect(lines(r.state)[6]).toEqual({ kind: "text", text: "Lang" });
     expect(lines(r.state)[7]).toEqual({ kind: "text", text: "uages: EN" });
     expect(caret(r.state)).toEqual({ index: 7, offset: 0 });
   });
 
-  it("f: at the end of a heading adds an entry, with its tab", () => {
+  it("at the end of a heading adds an entry, with its tab", () => {
     const r = run(make(DOC, [2, 10]), enterCommand);
     expect(lines(r.state)[2]).toEqual({ kind: "heading", text: "EXPERIENCE" });
     expect(lines(r.state)[3]).toEqual({ kind: "entry", text: "", right: "" });
     expect(caret(r.state)).toEqual({ index: 3, offset: 0 });
   });
 
-  it("f: in the middle of a bullet keeps the bid on the first half only", () => {
+  it("in the middle of a bullet keeps the bid on the first half only", () => {
     const r = run(make(DOC, [5, 5]), enterCommand);
     expect(lines(r.state)[5]).toEqual({ kind: "bullet", text: "Built", bid: "b1" });
     expect(lines(r.state)[6]).toEqual({ kind: "bullet", text: " it" });
     expect(caret(r.state)).toEqual({ index: 6, offset: 0 });
+  });
+
+  it("an empty bullet becomes an entry with a tab", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "bullet", text: "", bid: "b1" }];
+    const r = run(make(doc, [2, 0]), enterCommand);
+    expect(lines(r.state)[2]).toEqual({ kind: "entry", text: "", right: "" });
+    expect(caret(r.state)).toEqual({ index: 2, offset: 0 });
+  });
+
+  it("keeps the paragraph formatting on the new line", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "text", text: "Hello", para: { align: "center" } }];
+    const r = run(make(doc, [2, 2]), enterCommand);
+    expect(lines(r.state)[2]).toEqual({ kind: "text", text: "He", para: { align: "center" } });
+    expect(lines(r.state)[3]).toEqual({ kind: "text", text: "llo", para: { align: "center" } });
   });
 
   it("deletes a selection before splitting", () => {
@@ -209,6 +263,15 @@ describe("enterCommand", () => {
     const r = run(make(doc, [2, 0], [2, 6]), enterCommand);
     expect(lines(r.state)).toEqual([...HEADER, { kind: "text", text: "" }, { kind: "text", text: "world" }]);
     expect(caret(r.state)).toEqual({ index: 3, offset: 0 });
+  });
+
+  it("with AllSelection does not throw and leaves a valid doc", () => {
+    const s = EditorState.create({ doc: linesToDoc(DOC), plugins: [headerGuard] });
+    const withAll = s.apply(s.tr.setSelection(new AllSelection(s.doc)));
+    const r = run(withAll, enterCommand);
+    expect(r.ok).toBe(true);
+    expect(r.state.doc.childCount).toBeGreaterThanOrEqual(1);
+    expect(() => caretInfo(r.state)).not.toThrow();
   });
 });
 
@@ -220,32 +283,18 @@ describe("backspaceCommand", () => {
     expect(caret(r.state)).toEqual({ index: 3, offset: 4 });
   });
 
-  it("at offset 0 does nothing on the name and contact lines", () => {
-    for (const idx of [0, 1]) {
-      const r = run(make(DOC, [idx, 0]), backspaceCommand);
-      expect(r.ok).toBe(true);
-      expect(lines(r.state)).toEqual(DOC);
-    }
-  });
-
-  it("at offset 0 of a non-empty heading does nothing", () => {
-    const r = run(make(DOC, [2, 0]), backspaceCommand);
-    expect(r.ok).toBe(true);
-    expect(lines(r.state)).toEqual(DOC);
-  });
-
-  it("deletes an empty line under the header and puts the caret at the end of the contact line", () => {
-    const doc: DocLine[] = [...HEADER, { kind: "text", text: "" }, { kind: "text", text: "X" }];
-    const r = run(make(doc, [2, 0]), backspaceCommand);
-    expect(lines(r.state)).toEqual([...HEADER, { kind: "text", text: "X" }]);
-    expect(caret(r.state)).toEqual({ index: 1, offset: 6 });
-  });
-
   it("deletes an empty line and puts the caret at the end of the line above", () => {
     const doc: DocLine[] = [...HEADER, { kind: "heading", text: "EXP" }, { kind: "text", text: "" }, { kind: "text", text: "X" }];
     const r = run(make(doc, [3, 0]), backspaceCommand);
     expect(lines(r.state)).toEqual([...HEADER, { kind: "heading", text: "EXP" }, { kind: "text", text: "X" }]);
     expect(caret(r.state)).toEqual({ index: 2, offset: 3 });
+  });
+
+  it("deletes an empty first line and puts the caret at the start of the line below", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "" }, { kind: "text", text: "X" }];
+    const r = run(make(doc, [0, 0]), backspaceCommand);
+    expect(lines(r.state)).toEqual([{ kind: "text", text: "X" }]);
+    expect(caret(r.state)).toEqual({ index: 0, offset: 0 });
   });
 
   it("turns a bullet into text at offset 0", () => {
@@ -255,7 +304,15 @@ describe("backspaceCommand", () => {
     expect(caret(r.state)).toEqual({ index: 3, offset: 0 });
   });
 
-  it("leaves a join of a text line into the line above to the default", () => {
+  it("joins two filled entry/role lines with a space (no glue)", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "entry", text: "Acme", right: "NYC" }, { kind: "role", text: "Eng", right: "2020" }];
+    const r = run(make(doc, [3, 0]), backspaceCommand);
+    expect(r.ok).toBe(true);
+    expect(lines(r.state)).toEqual([...HEADER, { kind: "entry", text: "Acme", right: "NYC Eng 2020" }]);
+    expect(caret(r.state)).toEqual({ index: 2, offset: 9 });
+  });
+
+  it("leaves a join of a text line into a heading to the default", () => {
     const doc: DocLine[] = [...HEADER, { kind: "heading", text: "EXP" }, { kind: "text", text: "Lang" }];
     const r = run(make(doc, [3, 0]), backspaceCommand);
     expect(r.ok).toBe(false);
@@ -275,15 +332,8 @@ describe("deleteCommand", () => {
     expect(caret(r.state)).toEqual({ index: 3, offset: 5 });
   });
 
-  it("at the end of the contact line is blocked", () => {
-    const r = run(make(DOC, [1, 6]), deleteCommand);
-    expect(r.ok).toBe(true);
-    expect(lines(r.state)).toEqual(DOC);
-  });
-
-  it("at the end of a text line is left to the default", () => {
-    const r = run(make(DOC, [6, 14]), deleteCommand);
-    expect(r.ok).toBe(false);
+  it("at the end of a non-empty line is left to the default", () => {
+    expect(run(make(DOC, [6, 14]), deleteCommand).ok).toBe(false);
   });
 
   it("deletes an empty line in the middle and puts the caret at the start of the line below", () => {
@@ -293,11 +343,11 @@ describe("deleteCommand", () => {
     expect(caret(r.state)).toEqual({ index: 2, offset: 0 });
   });
 
-  it("deletes an empty last line and puts the caret at the end of the line above", () => {
+  it("does not delete the last line", () => {
     const doc: DocLine[] = [...HEADER, { kind: "text", text: "A" }, { kind: "text", text: "" }];
     const r = run(make(doc, [3, 0]), deleteCommand);
-    expect(lines(r.state)).toEqual([...HEADER, { kind: "text", text: "A" }]);
-    expect(caret(r.state)).toEqual({ index: 2, offset: 1 });
+    expect(r.ok).toBe(false);
+    expect(lines(r.state)).toEqual(doc);
   });
 });
 
@@ -329,28 +379,129 @@ describe("tabCommand / shiftTabCommand", () => {
   });
 });
 
-describe("toggleStyleCommand / resetStyleCommand", () => {
-  it("toggles bold on the entry's left part only", () => {
-    const r = run(make(DOC, [3, 1]), toggleStyleCommand("bold"));
-    expect(r.ok).toBe(true);
-    expect(lines(r.state)[3]).toEqual({ kind: "entry", text: "Acme", right: "Remote", style: { bold: false, italic: false } });
+describe("toggleMarkCommand and formatAt", () => {
+  it("bold on a range makes formatAt report bold", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "text", text: "Hello world" }];
+    const r = run(make(doc, [2, 0], [2, 5]), toggleMarkCommand("bold"));
+    expect(formatAt(r.state).bold).toBe(true);
+    expect(formatAt(r.state).italic).toBe(false);
+    expect(lines(r.state)[2].marks).toEqual([{ from: 0, to: 5, bold: true }]);
   });
 
-  it("toggles italic on the entry's right part only", () => {
-    const r = run(make(DOC, [3, 8]), toggleStyleCommand("italic"));
-    expect(lines(r.state)[3]).toEqual({ kind: "entry", text: "Acme", right: "Remote", style2: { bold: false, italic: true } });
+  it("a partial range that is not all bold reports bold false", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "text", text: "Hello world" }];
+    const bolded = run(make(doc, [2, 0], [2, 5]), toggleMarkCommand("bold")).state;
+    const whole = bolded.apply(bolded.tr.setSelection(TextSelection.create(bolded.doc, docPos(bolded.doc, 2, 0), docPos(bolded.doc, 2, 11))));
+    expect(formatAt(whole).bold).toBe(false);
   });
 
-  it("does nothing on a bullet and returns true", () => {
-    const r = run(make(DOC, [5, 2]), toggleStyleCommand("bold"));
-    expect(r.ok).toBe(true);
-    expect(lines(r.state)).toEqual(DOC);
+  it("with a caret, toggles the stored marks and formatAt reports them", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "text", text: "Hello" }];
+    const r = run(make(doc, [2, 3]), toggleMarkCommand("italic"));
+    expect(formatAt(r.state).italic).toBe(true);
+    expect(lines(r.state)[2]).toEqual({ kind: "text", text: "Hello" });
+  });
+});
+
+describe("setSizeCommand", () => {
+  const SIZED: DocLine[] = [...HEADER, { kind: "text", text: "Hello world" }];
+
+  it("setSize 11 removes the size mark", () => {
+    const sized = run(make(SIZED, [2, 0], [2, 5]), setSizeCommand(14)).state;
+    expect(formatAt(sized).size).toBe(14);
+    const r = run(sized, setSizeCommand(11));
+    expect(formatAt(r.state).size).toBe(11);
+    expect(lines(r.state)[2].marks).toBeUndefined();
   });
 
-  it("reset removes the part's override", () => {
-    const toggled = run(make(DOC, [3, 1]), toggleStyleCommand("bold")).state;
-    const r = run(toggled, resetStyleCommand);
-    expect(lines(r.state)[3]).toEqual({ kind: "entry", text: "Acme", right: "Remote" });
+  it("setSize 14 on a range, then formatAt reports 14", () => {
+    const r = run(make(SIZED, [2, 0], [2, 5]), setSizeCommand(14));
+    expect(formatAt(r.state).size).toBe(14);
+  });
+
+  it("clamps the size to [8, 28]", () => {
+    const r = run(make(SIZED, [2, 0], [2, 5]), setSizeCommand(99));
+    expect(formatAt(r.state).size).toBe(28);
+  });
+
+  it("a range with mixed sizes reports null", () => {
+    const sized = run(make(SIZED, [2, 0], [2, 5]), setSizeCommand(14)).state;
+    const whole = sized.apply(sized.tr.setSelection(TextSelection.create(sized.doc, docPos(sized.doc, 2, 0), docPos(sized.doc, 2, 11))));
+    expect(formatAt(whole).size).toBeNull();
+  });
+
+  it("with a caret, sets the stored size", () => {
+    const r = run(make(SIZED, [2, 2]), setSizeCommand(16));
+    expect(formatAt(r.state).size).toBe(16);
+  });
+});
+
+describe("setAlignCommand", () => {
+  it("aligns every line the selection touches; left removes the alignment", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "text", text: "A" }, { kind: "text", text: "B" }];
+    const centered = run(make(doc, [2, 0], [3, 1]), setAlignCommand("center")).state;
+    expect(lines(centered).slice(2).map((l) => l.para)).toEqual([{ align: "center" }, { align: "center" }]);
+    expect(formatAt(centered).align).toBe("center");
+    const left = run(centered, setAlignCommand("left")).state;
+    expect(lines(left)[2].para).toBeUndefined();
+    expect(formatAt(left).align).toBe("left");
+  });
+
+  it("with AllSelection, updates every line", () => {
+    const s = EditorState.create({ doc: linesToDoc(DOC), plugins: [headerGuard] });
+    const withAll = s.apply(s.tr.setSelection(new AllSelection(s.doc)));
+    const r = run(withAll, setAlignCommand("right"));
+    expect(lines(r.state).every((l) => l.para?.align === "right")).toBe(true);
+  });
+});
+
+describe("toggleParaFlagCommand", () => {
+  const TWO: DocLine[] = [...HEADER, { kind: "text", text: "A" }, { kind: "text", text: "B" }];
+
+  it("rule: on when any touched line lacks it, then off when all have it", () => {
+    const first = run(make(TWO, [2, 0]), toggleParaFlagCommand("rule")).state;
+    expect(lines(first)[2].para).toEqual({ rule: true });
+    expect(lines(first)[3].para).toBeUndefined();
+
+    const both = run(first, toggleParaFlagCommand("rule")).state;
+    // The selection is the caret's line only; select both lines to test the any/all rule.
+    expect(lines(both)[2].para).toBeUndefined();
+
+    const range = first.apply(first.tr.setSelection(TextSelection.create(first.doc, docPos(first.doc, 2, 0), docPos(first.doc, 3, 1))));
+    const on = run(range, toggleParaFlagCommand("rule")).state;
+    expect(lines(on)[2].para).toEqual({ rule: true });
+    expect(lines(on)[3].para).toEqual({ rule: true });
+    expect(formatAt(on).rule).toBe(true);
+
+    const off = run(on, toggleParaFlagCommand("rule")).state;
+    expect(lines(off)[2].para).toBeUndefined();
+    expect(lines(off)[3].para).toBeUndefined();
+    expect(formatAt(off).rule).toBe(false);
+  });
+
+  it("caps works the same way", () => {
+    const r = run(make(TWO, [2, 0]), toggleParaFlagCommand("caps"));
+    expect(lines(r.state)[2].para).toEqual({ caps: true });
+  });
+});
+
+describe("toggleSpaceBeforeCommand", () => {
+  it("adds space before on the line, then removes it", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "text", text: "A" }];
+    const on = run(make(doc, [2, 0]), toggleSpaceBeforeCommand()).state;
+    expect(lines(on)[2].para).toEqual({ spaceBefore: 6 });
+    expect(formatAt(on).spaceBefore).toBe(true);
+    const off = run(on, toggleSpaceBeforeCommand()).state;
+    expect(lines(off)[2].para).toBeUndefined();
+    expect(formatAt(off).spaceBefore).toBe(false);
+  });
+});
+
+describe("clearFormattingCommand", () => {
+  it("removes marks and paragraph formatting of the selected lines", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "text", text: "Hello", marks: [{ from: 0, to: 5, bold: true, size: 14 }], para: { align: "center", rule: true } }];
+    const r = run(make(doc, [2, 0], [2, 5]), clearFormattingCommand());
+    expect(lines(r.state)[2]).toEqual({ kind: "text", text: "Hello" });
   });
 });
 
@@ -370,27 +521,32 @@ describe("setLineKindCommand", () => {
   });
 
   it("an entry becomes text and its tab turns into a space", () => {
-    const r = run(make(DOC, [3, 1], [3, 1]), setLineKindCommand("text"));
+    const r = run(make(DOC, [3, 1]), setLineKindCommand("text"));
     expect(lines(r.state)[3]).toEqual({ kind: "text", text: "Acme Remote" });
   });
 
-  it("skips the header lines", () => {
-    const r = run(make(TWO, [0, 0], [3, 2]), setLineKindCommand("bullet"));
-    expect(r.ok).toBe(true);
-    expect(lines(r.state).slice(0, 2)).toEqual(HEADER);
-    expect(lines(r.state)[2]).toEqual({ kind: "bullet", text: "Alpha" });
+  it("name over two lines only names the first, and demotes the old name line", () => {
+    const r = run(make(TWO, [2, 0], [3, 2]), setLineKindCommand("name"));
+    expect(lines(r.state)).toEqual([
+      { kind: "text", text: "Ada" },
+      { kind: "contact", text: "London" },
+      { kind: "name", text: "Alpha" },
+      { kind: "text", text: "Beta" },
+    ]);
   });
 
-  it("returns false when only header lines are selected, or for name and contact", () => {
-    expect(run(make(TWO, [0, 0]), setLineKindCommand("bullet")).ok).toBe(false);
-    expect(run(make(TWO, [2, 0], [3, 2]), setLineKindCommand("contact")).ok).toBe(false);
+  it("with AllSelection, updates every line and does not throw", () => {
+    const s = EditorState.create({ doc: linesToDoc(TWO), plugins: [headerGuard] });
+    const withAll = s.apply(s.tr.setSelection(new AllSelection(s.doc)));
+    const r = run(withAll, setLineKindCommand("bullet"));
+    expect(lines(r.state).every((l) => l.kind === "bullet")).toBe(true);
   });
 });
 
 describe("replaceLineTextCommand", () => {
-  const doc: DocLine[] = [...HEADER, { kind: "text", text: "X" }, { kind: "bullet", text: "Old text", bid: "b1" }];
+  const doc: DocLine[] = [...HEADER, { kind: "text", text: "X" }, { kind: "bullet", text: "Old text", bid: "b1", marks: [{ from: 0, to: 3, bold: true }] }];
 
-  it("replaces the text of the line with the bid and puts the caret at its end", () => {
+  it("replaces the text of the line with the bid and puts the caret at its end, with no marks", () => {
     const r = run(make(doc, [3, 0]), replaceLineTextCommand("b1", "New text"));
     expect(r.ok).toBe(true);
     expect(lines(r.state)[3]).toEqual({ kind: "bullet", text: "New text", bid: "b1" });
@@ -463,6 +619,19 @@ describe("stripPastedIds", () => {
     const out = stripPastedIds(slice);
     expect(out.content.child(0).childCount).toBe(3);
     expect(out.content.child(0).attrs.sid).toBeNull();
+  });
+
+  it("keeps the marks and paragraph formatting", () => {
+    const slice = new Slice(
+      Fragment.from([lineToNode({ kind: "bullet", text: "AB", marks: [{ from: 0, to: 1, bold: true }], para: { align: "right" }, bid: "b" })]),
+      1,
+      1,
+    );
+    const out = stripPastedIds(slice);
+    const line = out.content.child(0);
+    expect(line.attrs.bid).toBeNull();
+    expect(line.attrs.para).toEqual({ align: "right" });
+    expect(line.firstChild?.marks.some((m) => m.type.name === "bold")).toBe(true);
   });
 });
 
