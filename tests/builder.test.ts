@@ -67,8 +67,20 @@ describe("builder output", () => {
         stray: ["Never shown"],
       },
     });
-    expect(r.version).toBe(2);
-    expect(r.header).toEqual({ name: "Jordan Lee", contact: "Boston, MA • jo@college.edu • 555-010-2000 • github.com/jlee" });
+    expect(r.version).toBe(3);
+    expect(r.header).toEqual({
+      name: "Jordan Lee",
+      contact: "Boston, MA • jo@college.edu • 555-010-2000 • github.com/jlee",
+      marks: {
+        name: [{ from: 0, to: 10, bold: true, size: 16 }],
+        contact: [{ from: 0, to: "Boston, MA • jo@college.edu • 555-010-2000 • github.com/jlee".length, size: 10 }],
+      },
+      para: { name: { align: "center" }, contact: { align: "center" } },
+    });
+    // The Harvard look is the template, made explicit: headings bold with a rule, all caps, 6pt above.
+    expect(r.sections[1].marks).toEqual([{ from: 0, to: "Experience".length, bold: true }]);
+    expect(r.sections[1].para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
+    expect(r.sections[1].items[0].para).toEqual({ entry: { spaceBefore: 3 } });
     expect(r.sections.map((s) => s.title)).toEqual(["Education", "Experience", "Projects", "Leadership & Activities", "Skills"]);
     expect(r.sections[0].items[0]).toMatchObject({ title: "Northeastern University", subtitle: "B.S. in Data Science", dates: "May 2027" });
     expect(r.sections[0].items[0].bullets.map((b) => b.text)).toEqual(["GPA: 3.7"]);

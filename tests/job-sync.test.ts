@@ -414,6 +414,20 @@ describe("planSaveAsMaster", () => {
     expect(texts(b)).toEqual({ a1: "Built a dashboard", a2: "Wrote tests", a3: "Fixed bugs", b1: "Ran a study", g1: "GPA 3.9" });
   });
 
+  it("baseFromBaseline gives the copy's marks only where the copy still has the base text", () => {
+    const m1 = master1();
+    const copy = edit(cloneForJob(m1), (d) => {
+      d.sections[0].items[0].bullets[0].marks = [{ from: 0, to: 5, bold: true }]; // a1: text untouched
+      d.sections[0].items[0].bullets[1].text = "Edited";
+      d.sections[0].items[0].bullets[1].marks = [{ from: 0, to: 6, italic: true }]; // a2: text edited, marks must not follow
+      d.sections[0].items[0].bullets[1].para = { spaceBefore: 3 };
+    });
+    const b = baseFromBaseline(copy, m1);
+    const [a1, a2] = b.sections[0].items[0].bullets;
+    expect(a1).toEqual({ id: "a1", text: "Built a dashboard", marks: [{ from: 0, to: 5, bold: true }] });
+    expect(a2).toEqual({ id: "a2", text: "Wrote tests", para: { spaceBefore: 3 } });
+  });
+
   it("removeIds drops sections, entries and bullets by id", () => {
     const r = removeIds(master1(), new Set(["edu", "beta", "a2"]));
     expect(r.sections.map((s) => s.id)).toEqual(["exp"]);

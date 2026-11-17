@@ -1,6 +1,7 @@
 import type { Fact, Resume } from "./types";
 import { guardNumbers, knownNumbers } from "./analysis";
 import { factIsActive, freshFacts, hasPlaceholder, type NewFact } from "./facts";
+import { withBulletText } from "./resume";
 
 /**
  * Coaching logic that runs on the server and in tests (no React, no Supabase): checking what the AI
@@ -211,7 +212,8 @@ export function insertCoachedBullet(
       items: sec.items.map((it) => {
         if (it.id !== target.entryId) return it;
         if (mode === "replace" && target.bulletId && it.bullets.some((b) => b.id === target.bulletId)) {
-          return { ...it, bullets: it.bullets.map((b) => (b.id === target.bulletId ? { ...b, text } : b)) };
+          // The new text replaces the old one, so the old marks go (the paragraph stays).
+          return { ...it, bullets: it.bullets.map((b) => (b.id === target.bulletId ? withBulletText(b, text) : b)) };
         }
         // Fill an empty last bullet rather than leaving it dangling.
         const last = it.bullets[it.bullets.length - 1];

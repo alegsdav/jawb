@@ -178,6 +178,14 @@ describe("putting the bullet on the resume, and its fact", () => {
     expect(r.sections[0].items[0].bullets).toHaveLength(2); // input untouched
   });
 
+  it("replace drops the bullet's old marks (they belonged to the old text) and keeps its paragraph formatting", () => {
+    const r = resume();
+    const target = r.sections[0].items[0].bullets[1];
+    r.sections[0].items[0].bullets[1] = { ...target, marks: [{ from: 0, to: 3, bold: true }], para: { spaceBefore: 4 } };
+    const out = insertCoachedBullet(r, { sectionId: "s1", entryId: "e1", bulletId: "b2" }, "Wrote study guides", "replace", "unused");
+    expect(out.resume.sections[0].items[0].bullets[1]).toEqual({ id: "b2", text: "Wrote study guides", para: { spaceBefore: 4 } });
+  });
+
   it("inserting creates a fact linked to the new bullet: active without placeholders, a draft with them", () => {
     const plan = coachedFactPlan([], { resumeId: "TAILORED", bulletId: "new1", entryId: "e1" }, "Tutored 15 students a week");
     expect(plan).toEqual({

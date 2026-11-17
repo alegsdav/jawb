@@ -1,5 +1,5 @@
-import type { Item, Resume, Section } from "./types";
-import { bulletTextMap } from "./resume";
+import type { Bullet, Item, Mark, Resume, Section } from "./types";
+import { bulletTextMap, compact, setOpt, withBulletText } from "./resume";
 
 /**
  * Helpers for a job's tailored copy of the master resume.
@@ -219,24 +219,35 @@ export function applyPull(copy: Resume, master: Resume): { resume: Resume } & Pu
   const plan = planPull(copy, master);
   const base = copy.baseline ?? {};
   const m = bulletTextMap(master);
-  const take = (id: string, text: string) => {
+  const mBullets = new Map(master.sections.flatMap((s) => s.items.flatMap((it) => it.bullets.map((b) => [b.id, b] as const))));
+  const takes = (id: string, text: string) => {
     const old = base[id];
     const now = m.get(id);
-    return old !== undefined && now !== undefined && now !== old && text === old ? now : text;
+    return old !== undefined && now !== undefined && now !== old && text === old;
   };
-  const h = (field: "name" | "contact", key: string) =>
-    headerField(copy.header[field], base[key], master.header[field]) === "take" ? master.header[field] : copy.header[field];
+  // A bullet that takes the master's wording takes the master's marks with it (the copy's marks belonged to the old text).
+  const bullet = (b: Bullet): Bullet => {
+    const mb = mBullets.get(b.id);
+    if (!mb || !takes(b.id, b.text)) return b;
+    const out = withBulletText(b, mb.text);
+    setOpt(out, "marks", mb.marks);
+    return out;
+  };
+  const pick = (field: "name" | "contact", key: string): { text: string; marks?: Mark[] } =>
+    headerField(copy.header[field], base[key], master.header[field]) === "take"
+      ? { text: master.header[field], marks: master.header.marks?.[field] }
+      : { text: copy.header[field], marks: copy.header.marks?.[field] };
+  const name = pick("name", HEADER_NAME);
+  const contact = pick("contact", HEADER_CONTACT);
+  // Header paragraph formatting stays with the copy (this function only takes text, and the marks that go with it).
+  const header: Resume["header"] = { ...copy.header, name: name.text, contact: contact.text };
+  setOpt(header, "marks", compact({ name: name.marks, contact: contact.marks }));
   const resume: Resume = {
     ...copy,
-    // Header styles stay with the copy (this function only takes text from the master).
-    header: {
-      name: h("name", HEADER_NAME),
-      contact: h("contact", HEADER_CONTACT),
-      ...(copy.header.styles ? { styles: copy.header.styles } : {}),
-    },
+    header,
     sections: copy.sections.map((s) => ({
       ...s,
-      items: s.items.map((it) => ({ ...it, bullets: it.bullets.map((b) => ({ ...b, text: take(b.id, b.text) })) })),
+      items: s.items.map((it) => ({ ...it, bullets: it.bullets.map(bullet) })),
     })),
     baseline: rebase(copy, master, plan),
   };
@@ -291,7 +302,7 @@ export function addFromMaster(copy: Resume, master: Resume, add: Pick<PullAdditi
         items: s.items.map((it) => {
           if (it.id !== mit.id || found) return it;
           found = true;
-          return { ...it, bullets: insert(it.bullets, insertAt(mit.bullets, bi, it.bullets), { ...mit.bullets[bi] }) };
+          return { ...it, bullets: insert(it.bullets, insertAt(mit.bullets, bi, it.bullets), structuredClone(mit.bullets[bi])) };
         }),
       }));
       return found ? { ...copy, sections, baseline: withKeys(copy, master, "bullet", add.id) } : copy;
@@ -332,13 +343,13 @@ export function resolveRemoval(copy: Resume, removal: Pick<PullRemoval, "kind" |
   return { ...copy, sections, baseline };
 }
 
-/** The resume with one bullet's text replaced (accepting a suggestion, filling a placeholder). */
+/** The resume with one bullet's text replaced (accepting a suggestion, filling a placeholder). Its marks go; its paragraph stays. */
 export function replaceBullet(r: Resume, bulletId: string, text: string): Resume {
   return {
     ...r,
     sections: r.sections.map((s) => ({
       ...s,
-      items: s.items.map((it) => ({ ...it, bullets: it.bullets.map((b) => (b.id === bulletId ? { ...b, text } : b)) })),
+      items: s.items.map((it) => ({ ...it, bullets: it.bullets.map((b) => (b.id === bulletId ? withBulletText(b, text) : b)) })),
     })),
   };
 }

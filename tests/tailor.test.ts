@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyPull, cloneForJob, compareMap, diffFields, ensureBaseline, HEADER_CONTACT, HEADER_NAME, JOB_FIELDS, makeBaseline, omitKeys,
-  planPull, readBaseline, stripBaseline,
+  planPull, readBaseline, replaceBullet, stripBaseline,
 } from "@/lib/tailor";
 import { bulletTextMap, countChangedBullets } from "@/lib/resume";
 import type { Job, Resume } from "@/lib/types";
@@ -92,6 +92,29 @@ describe("pull master changes", () => {
 
   it("does nothing for copies without a baseline", () => {
     expect(planPull(doc({ a: "A1" }), doc({ a: "A2" })).total).toBe(0);
+  });
+});
+
+describe("pulled wording takes the master's marks with it", () => {
+  it("a bullet that takes the master's new wording takes the master's marks; one the copy edited keeps its own", () => {
+    const master0 = doc({ a: "A1", b: "B1" });
+    const copy = cloneForJob(master0);
+    copy.sections[0].items[0].bullets[0].marks = [{ from: 0, to: 2, italic: true }]; // copy's own, on the old text
+    copy.sections[0].items[0].bullets[1].text = "B mine";
+    copy.sections[0].items[0].bullets[1].marks = [{ from: 0, to: 1, bold: true }];
+    const master1 = doc({ a: "A2", b: "B2" });
+    master1.sections[0].items[0].bullets[0].marks = [{ from: 0, to: 1, bold: true }];
+    const { resume } = applyPull(copy, master1);
+    const [a, b] = resume.sections[0].items[0].bullets;
+    expect(a).toEqual({ id: "a", text: "A2", marks: [{ from: 0, to: 1, bold: true }] });
+    expect(b).toEqual({ id: "b", text: "B mine", marks: [{ from: 0, to: 1, bold: true }] });
+  });
+
+  it("replaceBullet drops the old marks with the old text and keeps the paragraph", () => {
+    const copy = doc({ a: "A1" });
+    copy.sections[0].items[0].bullets[0] = { id: "a", text: "A1", marks: [{ from: 0, to: 2, bold: true }], para: { spaceBefore: 3 } };
+    const out = replaceBullet(copy, "a", "Totally new");
+    expect(out.sections[0].items[0].bullets[0]).toEqual({ id: "a", text: "Totally new", para: { spaceBefore: 3 } });
   });
 });
 

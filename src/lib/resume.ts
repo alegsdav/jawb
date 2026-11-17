@@ -1,4 +1,6 @@
-import { cleanStyle } from "./textStyle";
+import { effectiveStyle, cleanStyle } from "./textStyle";
+import { TEMPLATE } from "./template";
+import { cleanMarks, cleanPara, wholeMarks, type Format } from "./richText";
 import type { Bullet, Item, Resume, Section, TextStyle } from "./types";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
@@ -11,7 +13,12 @@ export const emptySection = (title = "Section"): Section => ({
   id: uid(), title, items: [emptyItem()],
 });
 
-export const RESUME_VERSION = 2;
+/**
+ * 3 = explicit formatting (marks/para). Older data is migrated by normalizeResume: version 2 (Harvard look
+ * implied by field, `styles` overrides) becomes explicit template formatting; version 1 also swaps the
+ * title and subtitle of entries.
+ */
+export const RESUME_VERSION = 3;
 
 export const emptyResume = (): Resume => ({
   version: RESUME_VERSION,
@@ -23,69 +30,133 @@ export function isEmptyResume(r: Resume): boolean {
   return !r.sections.some((s) => s.items.some((it) => it.title || it.subtitle || it.bullets.some((b) => b.text.trim())));
 }
 
-/** Keep the valid style entries among `keys` of a raw styles object. Undefined when none are left. */
-function styleMap<K extends string>(raw: unknown, keys: readonly K[]): Partial<Record<K, TextStyle>> | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const out: Partial<Record<K, TextStyle>> = {};
-  for (const k of keys) {
-    const st = cleanStyle((raw as Record<string, unknown>)[k]);
-    if (st) out[k] = st;
-  }
-  return Object.keys(out).length ? out : undefined;
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Obj) : {});
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const idOf = (v: unknown): string => (typeof v === "string" && v ? v : uid());
+
+/** A copy of `o` without its undefined-valued keys; undefined when nothing is left. */
+export function compact<T extends object>(o: T): T | undefined {
+  const out: Partial<T> = {};
+  for (const k of Object.keys(o) as (keyof T)[]) if (o[k] !== undefined) out[k] = o[k];
+  return Object.keys(out).length ? (out as T) : undefined;
+}
+
+/** A Format with the effective bold/italic in place of `base`'s (false means regular, so it is dropped). */
+function formatWith(base: Format, st: Required<TextStyle>): Format {
+  return { ...base, bold: st.bold ? true : undefined, italic: st.italic ? true : undefined };
+}
+
+/** The item's inline formatting: explicit marks (version 3) or the implied v2 look made explicit. */
+function itemMarks(raw: Obj, it: Item, legacy: boolean): Item["marks"] {
+  const st = obj(raw.styles);
+  const field = (k: "title" | "subtitle" | "location" | "dates") =>
+    legacy
+      ? wholeMarks(it[k], formatWith({}, effectiveStyle(k, cleanStyle(st[k]), it)))
+      : cleanMarks(obj(raw.marks)[k], it[k].length);
+  return compact({ title: field("title"), subtitle: field("subtitle"), location: field("location"), dates: field("dates") });
+}
+
+/** The item's paragraph formatting: explicit (version 3), or the template's spacing for a non-inline entry (v2). */
+function itemPara(raw: Obj, it: Item, legacy: boolean): Item["para"] {
+  if (legacy) return isInlineItem(it) ? undefined : compact({ entry: cleanPara(TEMPLATE.entry.para) });
+  const p = obj(raw.para);
+  return compact({ entry: cleanPara(p.entry), role: cleanPara(p.role) });
 }
 
 /** Make sure every section/item/bullet has an id (AI output or old data may lack them). */
 export function normalizeResume(raw: unknown): Resume {
-  const r = (raw ?? {}) as Partial<Resume>;
-  const legacy = (r.version ?? 1) < RESUME_VERSION;
-  const headerStyles = styleMap(r.header?.styles, ["name", "contact"] as const);
-  return {
-    version: RESUME_VERSION,
-    header: {
-      name: r.header?.name ?? "",
-      contact: r.header?.contact ?? "",
-      ...(headerStyles ? { styles: headerStyles } : {}),
-    },
-    ...(Array.isArray(r.facts) ? { facts: r.facts.filter((f): f is string => typeof f === "string") } : {}),
-    sections: (r.sections ?? []).map((s) => {
-      const style = cleanStyle(s.style);
-      return {
-        id: s.id || uid(),
-        title: s.title ?? "",
-        ...(style ? { style } : {}),
-        items: (s.items ?? []).map((it) => {
-          const itemStyles = styleMap(it.styles, ["title", "subtitle", "location", "dates"] as const);
-          const title = it.title ?? "";
-          const subtitle = it.subtitle ?? "";
-          // v1 stored role in title and organization in subtitle; Harvard puts the organization first.
-          const swap = legacy && Boolean(it.dates || it.location) && Boolean(subtitle);
-          return {
-            id: it.id || uid(),
-            title: swap ? subtitle : title,
-            subtitle: swap ? title : subtitle,
-            location: it.location ?? "",
-            dates: it.dates ?? "",
-            bullets: (it.bullets ?? []).map((b) =>
-              typeof b === "string" ? { id: uid(), text: b } : { id: b.id || uid(), text: b.text ?? "" },
-            ),
-            ...(itemStyles ? { styles: itemStyles } : {}),
-          };
-        }),
-      };
-    }),
+  const r = obj(raw);
+  const version = typeof r.version === "number" ? r.version : 1;
+  const swapTitles = version < 2; // v1 stored role in title and organization in subtitle; Harvard puts the organization first.
+  const legacy = version < 3; // v2 and older: formatting is implied by field, so make it explicit.
+
+  const header = obj(r.header);
+  const hs = obj(header.styles);
+  const name = str(header.name);
+  const contact = str(header.contact);
+  const out: Resume = { version: RESUME_VERSION, header: { name, contact }, sections: [] };
+  if (legacy) {
+    setOpt(out.header, "marks", compact({
+      name: wholeMarks(name, formatWith(TEMPLATE.name.format, effectiveStyle("name", cleanStyle(hs.name)))),
+      contact: wholeMarks(contact, formatWith(TEMPLATE.contact.format, effectiveStyle("contact", cleanStyle(hs.contact)))),
+    }));
+    setOpt(out.header, "para", compact({ name: cleanPara(TEMPLATE.name.para), contact: cleanPara(TEMPLATE.contact.para) }));
+  } else {
+    setOpt(out.header, "marks", compact({
+      name: cleanMarks(obj(header.marks).name, name.length),
+      contact: cleanMarks(obj(header.marks).contact, contact.length),
+    }));
+    setOpt(out.header, "para", compact({ name: cleanPara(obj(header.para).name), contact: cleanPara(obj(header.para).contact) }));
+  }
+  if (Array.isArray(r.facts)) out.facts = r.facts.filter((f): f is string => typeof f === "string");
+
+  out.sections = arr(r.sections).map((sv) => {
+    const sec = obj(sv);
+    const title = str(sec.title);
+    const section: Section = { id: idOf(sec.id), title, items: arr(sec.items).map((itv) => normalizeItem(obj(itv), swapTitles, legacy)) };
+    if (legacy) {
+      setOpt(section, "marks", wholeMarks(title, formatWith(TEMPLATE.heading.format, effectiveStyle("sectionTitle", cleanStyle(sec.style)))));
+      setOpt(section, "para", cleanPara(TEMPLATE.heading.para));
+    } else {
+      setOpt(section, "marks", cleanMarks(sec.marks, title.length));
+      setOpt(section, "para", cleanPara(sec.para));
+    }
+    return section;
+  });
+  return out;
+}
+
+/** Set `key` on `node`, or leave it out when `value` is undefined. */
+export function setOpt<T extends object, K extends keyof T>(node: T, key: K, value: T[K] | undefined): void {
+  if (value === undefined) delete (node as Partial<T>)[key];
+  else node[key] = value;
+}
+
+function normalizeItem(raw: Obj, swapTitles: boolean, legacy: boolean): Item {
+  const title0 = str(raw.title);
+  const subtitle0 = str(raw.subtitle);
+  const swap = swapTitles && Boolean(raw.dates || raw.location) && Boolean(subtitle0);
+  const it: Item = {
+    id: idOf(raw.id),
+    title: swap ? subtitle0 : title0,
+    subtitle: swap ? title0 : subtitle0,
+    location: str(raw.location),
+    dates: str(raw.dates),
+    bullets: arr(raw.bullets).map((b) => normalizeBullet(b, legacy)),
   };
+  setOpt(it, "marks", itemMarks(raw, it, legacy));
+  setOpt(it, "para", itemPara(raw, it, legacy));
+  return it;
+}
+
+function normalizeBullet(v: unknown, legacy: boolean): Bullet {
+  if (typeof v === "string") return { id: uid(), text: v };
+  const b = obj(v);
+  const text = str(b.text);
+  if (legacy) return { id: idOf(b.id), text };
+  const bullet: Bullet = { id: idOf(b.id), text };
+  setOpt(bullet, "marks", cleanMarks(b.marks, text.length));
+  setOpt(bullet, "para", cleanPara(b.para));
+  return bullet;
 }
 
 /** True when an item renders as a single inline line (skills, publications, memberships). */
 export const isInlineItem = (it: Item) => !it.bullets.length && !it.dates && !it.location;
 
-/** Plain-text rendering with bullet ids, used in AI prompts. */
+/**
+ * Plain-text rendering with bullet ids, used in AI prompts. Plain text only: formatting never reaches the AI.
+ * An inline item is one line: its title, then ": subtitle" when it has one (data from before version 3).
+ */
 export function resumeToPromptText(r: Resume): string {
   const lines = [r.header.name, r.header.contact, ""];
   for (const s of r.sections) {
     lines.push(`## ${s.title}`);
     for (const it of s.items) {
-      const head = [it.title, it.subtitle, it.location, it.dates].filter(Boolean).join(" | ");
+      const head = isInlineItem(it)
+        ? [it.title, it.subtitle].filter(Boolean).join(": ")
+        : [it.title, it.subtitle, it.location, it.dates].filter(Boolean).join(" | ");
       if (head) lines.push(`- ${head}`);
       for (const b of it.bullets) if (b.text.trim()) lines.push(`    [b:${b.id}] ${b.text}`);
     }
@@ -183,6 +254,54 @@ function matchSections(next: Section[], prev: Section[]): Map<number, number> {
 }
 
 /**
+ * Formatting is content-like: a matched node keeps the previous version's formatting for each field where
+ * the new version has none, but only while that field's text is unchanged (marks are positions in the text).
+ */
+function carryBullet(b: Bullet, pb: Bullet | undefined): Bullet {
+  if (!pb || pb.text !== b.text) return b;
+  const out: Bullet = { ...b };
+  setOpt(out, "marks", b.marks ?? pb.marks);
+  setOpt(out, "para", b.para ?? pb.para);
+  return out;
+}
+
+function carryItem(it: Item, pit: Item | undefined): Item {
+  if (!pit) return it;
+  const out: Item = { ...it };
+  const marks: NonNullable<Item["marks"]> = { ...it.marks };
+  for (const k of ["title", "subtitle", "location", "dates"] as const) {
+    if (!marks[k] && pit.marks?.[k] && it[k] === pit[k]) marks[k] = pit.marks[k];
+  }
+  setOpt(out, "marks", compact(marks));
+  const para: NonNullable<Item["para"]> = { ...it.para };
+  para.entry ??= pit.para?.entry;
+  para.role ??= pit.para?.role;
+  setOpt(out, "para", compact(para));
+  return out;
+}
+
+function carrySection(sec: Section, ps: Section | undefined): Section {
+  if (!ps || ps.title !== sec.title) return sec;
+  const out: Section = { ...sec };
+  setOpt(out, "marks", sec.marks ?? ps.marks);
+  setOpt(out, "para", sec.para ?? ps.para);
+  return out;
+}
+
+function carryHeader(next: Resume["header"], prev: Resume["header"]): Resume["header"] {
+  const out: Resume["header"] = { ...next };
+  const marks: NonNullable<Resume["header"]["marks"]> = { ...next.marks };
+  if (!marks.name && prev.marks?.name && next.name === prev.name) marks.name = prev.marks.name;
+  if (!marks.contact && prev.marks?.contact && next.contact === prev.contact) marks.contact = prev.marks.contact;
+  setOpt(out, "marks", compact(marks));
+  const para: NonNullable<Resume["header"]["para"]> = { ...next.para };
+  para.name ??= prev.para?.name;
+  para.contact ??= prev.para?.contact;
+  setOpt(out, "para", compact(para));
+  return out;
+}
+
+/**
  * After a re-import, carry ids over from the previous version wherever content matches, so
  * "Changes vs master" in existing jobs keeps meaning something. Sections match by title,
  * items by title (+subtitle), bullets by identical text first and then by closest wording
@@ -206,20 +325,28 @@ export function reconcileIds(prev: Resume, next: Resume): Resume {
     const items = s.items.map((it, ii) => {
       const pit = ps && im.has(ii) ? ps.items[im.get(ii)!] : undefined;
       const bm = pit ? matchBullets(it.bullets, pit.bullets) : new Map<number, number>();
-      const bullets = it.bullets.map((b, bi) => take("bullet", b, pit && bm.has(bi) ? pit.bullets[bm.get(bi)!] : undefined));
-      // Styles are formatting, not content: a matched entry keeps the previous version's styles.
-      const styles = pit?.styles && !it.styles ? { styles: pit.styles } : {};
-      return take("item", { ...it, bullets, ...styles }, pit);
+      const bullets = it.bullets.map((b, bi) => {
+        const pb = pit && bm.has(bi) ? pit.bullets[bm.get(bi)!] : undefined;
+        return take("bullet", carryBullet(b, pb), pb);
+      });
+      return take("item", carryItem({ ...it, bullets }, pit), pit);
     });
-    const style = ps?.style && !s.style ? { style: ps.style } : {};
-    return take("section", { ...s, items, ...style }, ps);
+    return take("section", carrySection({ ...s, items }, ps), ps);
   });
   // A new node whose id happens to equal a carried-over id would make two nodes share an id.
   for (const { kind, node } of fresh) if (carried[kind].has(node.id)) node.id = uid();
 
   const out: Resume = { ...next, version: next.version ?? prev.version ?? RESUME_VERSION, sections };
-  if (prev.header.styles && !next.header.styles) out.header = { ...out.header, styles: prev.header.styles };
+  // The header's formatting survives too (see carryHeader).
+  out.header = carryHeader(next.header, prev.header);
   delete out.facts;
   if (prev.facts) out.facts = prev.facts;
+  return out;
+}
+
+/** The bullet with new text: its marks belonged to the old text, so they go; the paragraph stays. */
+export function withBulletText(b: Bullet, text: string): Bullet {
+  const out: Bullet = { ...b, text };
+  setOpt(out, "marks", undefined);
   return out;
 }

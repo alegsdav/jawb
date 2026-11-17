@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Analysis, Item, Job, Resume, Section } from "./types";
+import type { Analysis, Bullet, Item, Job, Mark, Resume, Section } from "./types";
 import { MASTER_RETRIES, mergeResumes, sameJson, type MergeConflict, type MergeResult } from "./master";
-import { normalizeResume, bulletTextMap } from "./resume";
+import { bulletTextMap, compact, normalizeResume, setOpt } from "./resume";
 import { normalizeAnalysis } from "./analysis";
 import { dbErrorMessage, isMissingColumn, OPTIONAL_JOB_COLUMNS } from "./db";
 import {
@@ -261,6 +261,10 @@ const hasStructure = (base: Record<string, string>) => Object.keys(base).some((k
 const shortLabel = (t: string, n = 90) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
 const itemLabel = (it: Item) => [it.title, it.subtitle].map((x) => x.trim()).filter(Boolean).join(" — ") || "Untitled entry";
 
+/** The copy's marks for a text field when the base has the copy's text (marks belong to their text); else none. */
+const sameTextMarks = (copyText: string, copyMarks: Mark[] | undefined, baseText: string): Mark[] | undefined =>
+  copyText === baseText ? copyMarks : undefined;
+
 /**
  * The master as it was when the copy was made (or last pulled), rebuilt from the copy's structure
  * and its baseline: the copy's sections/entries/bullets that the baseline knows, with the baseline's
@@ -280,29 +284,56 @@ export function baseFromBaseline(copy: Resume, master: Resume): Resume {
       const mi = mItems.get(it.id);
       const inBase = structured ? ITEM_KEY + it.id in base : !!mi || it.bullets.some((b) => b.id in base);
       if (!inBase) continue;
-      items.push({
+      const title = base[ITEM_KEY + it.id] ?? mi?.title ?? it.title;
+      const subtitle = mi?.subtitle ?? it.subtitle;
+      const location = mi?.location ?? it.location;
+      const dates = mi?.dates ?? it.dates;
+      const item: Item = {
         id: it.id,
-        title: base[ITEM_KEY + it.id] ?? mi?.title ?? it.title,
-        subtitle: mi?.subtitle ?? it.subtitle,
-        location: mi?.location ?? it.location,
-        dates: mi?.dates ?? it.dates,
-        bullets: it.bullets.filter((b) => b.id in base).map((b) => ({ id: b.id, text: base[b.id] })),
-        // Styles are not text, so the baseline doesn't record them: keep the copy's styles (the item this is built from).
-        ...(it.styles ? { styles: it.styles } : {}),
-      });
+        title,
+        subtitle,
+        location,
+        dates,
+        bullets: it.bullets
+          .filter((b) => b.id in base)
+          .map((b) => {
+            const text = base[b.id];
+            const out: Bullet = { id: b.id, text };
+            // Formatting belongs to the text it was made for: the copy's marks only where the copy still has that text.
+            setOpt(out, "marks", sameTextMarks(b.text, b.marks, text));
+            setOpt(out, "para", b.para);
+            return out;
+          }),
+      };
+      setOpt(item, "marks", compact({
+        title: sameTextMarks(it.title, it.marks?.title, title),
+        subtitle: sameTextMarks(it.subtitle, it.marks?.subtitle, subtitle),
+        location: sameTextMarks(it.location, it.marks?.location, location),
+        dates: sameTextMarks(it.dates, it.marks?.dates, dates),
+      }));
+      setOpt(item, "para", compact({ entry: it.para?.entry, role: it.para?.role }));
+      items.push(item);
     }
     const inBase = structured ? SECTION_KEY + s.id in base : !!ms || items.length > 0;
     if (!inBase) continue;
-    // Section style comes from the copy too (see the item note above).
-    sections.push({ id: s.id, title: base[SECTION_KEY + s.id] ?? ms?.title ?? s.title, items, ...(s.style ? { style: s.style } : {}) });
+    const title = base[SECTION_KEY + s.id] ?? ms?.title ?? s.title;
+    const section: Section = { id: s.id, title, items };
+    setOpt(section, "marks", sameTextMarks(s.title, s.marks, title));
+    setOpt(section, "para", s.para);
+    sections.push(section);
   }
+  const header: Resume["header"] = {
+    name: base[HEADER_NAME] ?? master.header.name,
+    contact: base[HEADER_CONTACT] ?? master.header.contact,
+  };
+  setOpt(header, "marks", compact({
+    name: sameTextMarks(copy.header.name, copy.header.marks?.name, header.name),
+    contact: sameTextMarks(copy.header.contact, copy.header.marks?.contact, header.contact),
+  }));
+  setOpt(header, "para", copy.header.para);
   return {
     ...(master.version !== undefined ? { version: master.version } : {}),
-    header: {
-      name: base[HEADER_NAME] ?? master.header.name,
-      contact: base[HEADER_CONTACT] ?? master.header.contact,
-      ...(copy.header.styles ? { styles: copy.header.styles } : {}),
-    },
+    header,
     sections,
   };
 }

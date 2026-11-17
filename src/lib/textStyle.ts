@@ -1,8 +1,9 @@
 import type { Item, TextStyle } from "./types";
 
 /**
- * Bold / italic for the non-bullet fields. Pure helpers shared by the editor, the read-only view and
- * the PDF. Bullets have no formatting. The AI never sees styles.
+ * legacy (version 2) formatting, used only to migrate old data: the implied Harvard bold/italic per
+ * field, and `styles` overrides. Version 3 resumes store explicit marks/para instead (see
+ * normalizeResume in resume.ts), so nothing else should read this file.
  */
 
 export type StyleField = "name" | "contact" | "sectionTitle" | "title" | "subtitle" | "location" | "dates";
@@ -38,23 +39,6 @@ export function defaultStyle(field: StyleField, item?: Item): Required<TextStyle
 export function effectiveStyle(field: StyleField, override: TextStyle | undefined, item?: Item): Required<TextStyle> {
   const d = defaultStyle(field, item);
   return { bold: override?.bold ?? d.bold, italic: override?.italic ?? d.italic };
-}
-
-/**
- * Flip one flag of the effective style. Returns the full new style, or undefined when that equals the
- * default (so the data stays clean).
- */
-export function toggleStyle(
-  field: StyleField,
-  override: TextStyle | undefined,
-  key: "bold" | "italic",
-  item?: Item,
-): TextStyle | undefined {
-  const cur = effectiveStyle(field, override, item);
-  const next = { ...cur, [key]: !cur[key] };
-  const d = defaultStyle(field, item);
-  if (next.bold === d.bold && next.italic === d.italic) return undefined;
-  return next;
 }
 
 /** Keep only boolean bold/italic from untrusted data. Undefined when nothing is left. */

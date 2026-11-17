@@ -54,7 +54,7 @@ const item = (id: string, title: string, bullets: [string, string][], extra: Par
 
 /** Two sections: Experience (Acme: b1, b2, b3; Beta: b4) and Skills (one inline item). */
 const baseDoc = (): Resume => ({
-  version: 2,
+  version: 3,
   header: { name: "Ada Lovelace", contact: "ada@example.com" },
   sections: [
     {
@@ -457,5 +457,118 @@ describe("saveMasterDocument", () => {
     const base = baseDoc();
     const db = fakeDb(null);
     await expect(saveMasterDocument(db.client, "m1", base, { content: base, updatedAt: "t0" })).rejects.toThrow("deleted elsewhere");
+  });
+});
+
+// ---------- formatting travels with its text ----------
+
+describe("mergeResumes: text and its marks", () => {
+  const base = baseDoc();
+  const boldFirst = (d: Resume, bid: string, n: number) => {
+    for (const s of d.sections) for (const it of s.items) for (const b of it.bullets) if (b.id === bid) b.marks = [{ from: 0, to: n, bold: true }];
+  };
+  const bulletOf = (r: Resume, bid: string) => r.sections.flatMap((s) => s.items).flatMap((it) => it.bullets).find((b) => b.id === bid)!;
+  /** Marks never run past the text they belong to. */
+  const marksFit = (r: Resume) =>
+    r.sections.every((s) => s.items.every((it) => it.bullets.every((b) => (b.marks ?? []).every((m) => m.to <= b.text.length))));
+
+  it("a marks-only edit on one side is taken, without a conflict", () => {
+    const server = edit(base, (d) => boldFirst(d, "b2", 5)); // "Wrote" bold
+    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(bulletOf(merged, "b1").text).toBe("Built a React dashboard");
+    expect(bulletOf(merged, "b2").marks).toEqual([{ from: 0, to: 5, bold: true }]);
+  });
+
+  it("bold on one side and new wording on the other is one bullet changed twice: a conflict, local's pair kept", () => {
+    const server = edit(base, (d) => setBullet(d, "b3", "Fixed 40 bugs"));
+    const local = edit(base, (d) => boldFirst(d, "b3", 5)); // "Fixed" bold on the old text
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([{ where: 'Bullet in "Acme"', local: "Fixed bugs", server: "Fixed 40 bugs" }]);
+    expect(bulletOf(merged, "b3")).toEqual({ id: "b3", text: "Fixed bugs", marks: [{ from: 0, to: 5, bold: true }] });
+    expect(marksFit(merged)).toBe(true);
+  });
+
+  it("local edits the text, server bolds a word of the OLD text: a conflict; local's text keeps its own marks", () => {
+    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
+    const server = edit(base, (d) => boldFirst(d, "b1", 5)); // "Built" bold on the old text
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([{ where: 'Bullet in "Acme"', local: "Built a React dashboard", server: "Built a dashboard" }]);
+    expect(bulletOf(merged, "b1")).toEqual({ id: "b1", text: "Built a React dashboard" });
+    expect(marksFit(merged)).toBe(true);
+  });
+
+  it("texts equal, marks differ on both sides: no conflict, local wins", () => {
+    const local = edit(base, (d) => boldFirst(d, "b2", 5));
+    const server = edit(base, (d) => {
+      for (const s of d.sections) for (const it of s.items) for (const b of it.bullets) if (b.id === "b2") b.marks = [{ from: 0, to: 3, italic: true }];
+    });
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(bulletOf(merged, "b2").marks).toEqual([{ from: 0, to: 5, bold: true }]);
+  });
+
+  it("the same text and marks on both sides: no conflict", () => {
+    const local = edit(base, (d) => boldFirst(d, "b2", 5));
+    const server = edit(base, (d) => boldFirst(d, "b2", 5));
+    expect(mergeResumes(base, local, server).conflicts).toEqual([]);
+  });
+
+  it("entry field marks merge like text: a server bold on the title is taken when only it changed", () => {
+    const server = edit(base, (d) => (d.sections[0].items[0].marks = { title: [{ from: 0, to: 4, bold: true }] }));
+    const local = edit(base, (d) => (d.sections[0].items[0].dates = "2024 – 2025"));
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(findItem(merged, "i1")).toMatchObject({ title: "Acme", dates: "2024 – 2025", marks: { title: [{ from: 0, to: 4, bold: true }] } });
+  });
+
+  it("header marks follow the header text: a marks-only change on one side is taken", () => {
+    const server = edit(base, (d) => (d.header.marks = { name: [{ from: 0, to: 3, bold: true, size: 16 }] }));
+    const local = edit(base, (d) => (d.header.contact = "ada@new.com"));
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(merged.header).toEqual({
+      name: "Ada Lovelace",
+      contact: "ada@new.com",
+      marks: { name: [{ from: 0, to: 3, bold: true, size: 16 }] },
+    });
+  });
+
+  it("section title marks travel with the title", () => {
+    const server = edit(base, (d) => {
+      d.sections[1].marks = [{ from: 0, to: 6, bold: true }];
+    });
+    const local = edit(base, (d) => setBullet(d, "b4", "Ran a 3-month study"));
+    const { merged } = mergeResumes(base, local, server);
+    expect(merged.sections[1]).toMatchObject({ title: "Skills", marks: [{ from: 0, to: 6, bold: true }] });
+  });
+});
+
+describe("mergeResumes: paragraph formatting", () => {
+  const base = baseDoc();
+
+  it("the side that changed the paragraph formatting wins, without a conflict", () => {
+    const local = edit(base, (d) => (d.sections[0].items[0].bullets[0].para = { spaceBefore: 4 }));
+    const server = edit(base, (d) => (d.sections[0].items[0].bullets[2].para = { align: "right" }));
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(merged.sections[0].items[0].bullets[0].para).toEqual({ spaceBefore: 4 });
+    expect(merged.sections[0].items[0].bullets[2].para).toEqual({ align: "right" });
+  });
+
+  it("both sides changed the same line's paragraph formatting differently: local, no conflict", () => {
+    const local = edit(base, (d) => (d.header.para = { name: { align: "center" } }));
+    const server = edit(base, (d) => (d.header.para = { name: { align: "right" } }));
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(merged.header.para).toEqual({ name: { align: "center" } });
+  });
+
+  it("takes the server's section heading formatting when only the server changed it", () => {
+    const server = edit(base, (d) => (d.sections[0].para = { rule: true, caps: true, spaceBefore: 6 }));
+    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
+    const { merged } = mergeResumes(base, local, server);
+    expect(merged.sections[0].para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
   });
 });

@@ -1,6 +1,6 @@
 import type { Item, Resume, Section } from "./types";
 import { guardNumbers, knownNumbers } from "./analysis";
-import { normalizeResume, RESUME_VERSION, uid } from "./resume";
+import { normalizeResume, uid } from "./resume";
 
 /**
  * The guided builder ("I don't have a resume yet"): a three-step wizard whose answers become a
@@ -217,7 +217,8 @@ export function buildDraftResume(input: Omit<BuilderState, "step">, raw: unknown
     .filter(([, v]) => v.trim())
     .map(([label, v]) => ({ id: uid(), title: label, subtitle: v.trim(), location: "", dates: "", bullets: [] }));
   if (skillItems.length) sections.push({ id: uid(), title: "Skills", items: skillItems });
-  return normalizeResume({ version: RESUME_VERSION, header: { name: about.name.trim(), contact }, sections });
+  // v2 = Harvard defaults; normalizeResume turns them into explicit template formatting (see template.ts).
+  return normalizeResume({ version: 2, header: { name: about.name.trim(), contact }, sections });
 }
 
 /** The builder's raw "what did you do" answers, as facts linked to their entries on the master. */

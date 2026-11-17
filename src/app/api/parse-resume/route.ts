@@ -46,7 +46,8 @@ export async function POST(req: Request) {
         onUsage: meter.add,
       }),
     );
-    const resume = normalizeResume({ ...(parsed as object), version: 2 }); // prompt already uses the v2 layout
+    // v2 = Harvard defaults; normalizeResume turns them into explicit template formatting (see template.ts).
+    const resume = normalizeResume({ ...(parsed as object), version: 2 });
     if (!resume.sections.length) {
       return NextResponse.json({ error: "Couldn't find any resume sections in that file." }, { status: 422 });
     }

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Bullet, Item, Resume, Section } from "./types";
-import { normalizeResume } from "./resume";
+import type { Bullet, Item, Mark, Para, Resume, Section } from "./types";
+import { compact, normalizeResume, setOpt } from "./resume";
+import { cleanMarks, cleanPara, marksEqual, paraEqual } from "./richText";
 import { dbErrorMessage } from "./db";
 
 /**
@@ -87,24 +88,6 @@ const short = (t: string, n = 40) => {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 };
 
-/**
- * Three-way merge of a scalar. Whichever side changed relative to `base` wins; if both changed it to
- * different values it's a conflict and the merged value is the local one.
- */
-function mergeScalar(
-  b: string | undefined,
-  l: string,
-  s: string,
-  where: string,
-  conflicts: MergeConflict[],
-): string {
-  if (l === s) return l;
-  if (b !== undefined && l === b) return s;
-  if (b !== undefined && s === b) return l;
-  conflicts.push({ where, local: l, server: s });
-  return l;
-}
-
 /** Ids (in order) of `side` that are also in `other`. */
 const commonOrder = (side: { id: string }[], other: Set<string>) => side.filter((x) => other.has(x.id)).map((x) => x.id);
 
@@ -181,41 +164,76 @@ export function mergeResumes(base: Resume, local: Resume, server: Resume): Merge
   const conflicts: MergeConflict[] = [];
 
   const mergeBullet = (where: string) => (b: Bullet | undefined, l: Bullet, s: Bullet): Bullet => {
-    const text = mergeScalar(b?.text, l.text, s.text, where, conflicts);
-    return text === l.text ? l : { ...l, text };
+    const rich = mergeRich(where, pairOf(b?.text, b?.marks), compactRich(l.text, l.marks), compactRich(s.text, s.marks), conflicts);
+    const out = withRich(l, rich);
+    setOpt(out, "para", mergePara(b?.para, l.para, s.para));
+    return out;
   };
 
   const mergeItem = (b: Item | undefined, l: Item, s: Item): Item => {
     const name = short(l.title || s.title || l.subtitle || s.subtitle || "an entry");
-    const field = (k: "title" | "subtitle" | "location" | "dates", label: string) =>
-      mergeScalar(b?.[k], l[k], s[k], `${label} of "${name}"`, conflicts);
-    // `...l` also carries `styles` from the local side, the same side the rest of the object comes from.
-    return {
-      ...l,
+    const field = (k: ItemField, label: string) =>
+      mergeRich(`${label} of "${name}"`, pairOf(b?.[k], b?.marks?.[k]), compactRich(l[k], l.marks?.[k]), compactRich(s[k], s.marks?.[k]), conflicts);
+    const fields = {
       title: field("title", "Title"),
       subtitle: field("subtitle", "Second line"),
       location: field("location", "Location"),
       dates: field("dates", "Dates"),
+    };
+    const out: Item = {
+      ...l,
+      title: fields.title.text,
+      subtitle: fields.subtitle.text,
+      location: fields.location.text,
+      dates: fields.dates.text,
       bullets: mergeList(b?.bullets ?? [], l.bullets, s.bullets, mergeBullet(`Bullet in "${name}"`)),
     };
+    setOpt(out, "marks", compact({
+      title: fields.title.marks,
+      subtitle: fields.subtitle.marks,
+      location: fields.location.marks,
+      dates: fields.dates.marks,
+    }));
+    setOpt(out, "para", compact({
+      entry: mergePara(b?.para?.entry, l.para?.entry, s.para?.entry),
+      role: mergePara(b?.para?.role, l.para?.role, s.para?.role),
+    }));
+    return out;
   };
 
-  const mergeSection = (b: Section | undefined, l: Section, s: Section): Section => ({
-    ...l,
-    title: mergeScalar(b?.title, l.title, s.title, `Section title "${short(l.title || s.title)}"`, conflicts),
-    items: mergeList(b?.items ?? [], l.items, s.items, mergeItem),
-  });
+  const mergeSection = (b: Section | undefined, l: Section, s: Section): Section => {
+    const title = mergeRich(
+      `Section title "${short(l.title || s.title)}"`,
+      pairOf(b?.title, b?.marks),
+      compactRich(l.title, l.marks),
+      compactRich(s.title, s.marks),
+      conflicts,
+    );
+    const out: Section = { ...l, items: mergeList(b?.items ?? [], l.items, s.items, mergeItem) };
+    out.title = title.text;
+    setOpt(out, "marks", title.marks);
+    setOpt(out, "para", mergePara(b?.para, l.para, s.para));
+    return out;
+  };
 
   const sections = mergeList(base.sections, local.sections, server.sections, mergeSection);
+  const name = mergeRich("Name", pairOf(base.header.name, base.header.marks?.name), compactRich(local.header.name, local.header.marks?.name), compactRich(server.header.name, server.header.marks?.name), conflicts);
+  const contact = mergeRich(
+    "Contact line",
+    pairOf(base.header.contact, base.header.marks?.contact),
+    compactRich(local.header.contact, local.header.marks?.contact),
+    compactRich(server.header.contact, server.header.marks?.contact),
+    conflicts,
+  );
   const merged: Resume = {
     ...local,
     version: Math.max(local.version ?? 0, server.version ?? 0) || local.version,
-    header: {
-      name: mergeScalar(base.header.name, local.header.name, server.header.name, "Name", conflicts),
-      contact: mergeScalar(base.header.contact, local.header.contact, server.header.contact, "Contact line", conflicts),
-      // Styles come from the local side, like `...local` above (no style conflict logic).
-      ...(local.header.styles ? { styles: local.header.styles } : {}),
-    },
+    header: compactHeader(
+      name,
+      contact,
+      mergePara(base.header.para?.name, local.header.para?.name, server.header.para?.name),
+      mergePara(base.header.para?.contact, local.header.para?.contact, server.header.para?.contact),
+    ),
     sections: dedupeIds(sections, conflicts),
   };
   // Legacy `content.facts`: nobody writes it any more; keep whatever the row has.
@@ -223,6 +241,59 @@ export function mergeResumes(base: Resume, local: Resume, server: Resume): Merge
   if (legacy) merged.facts = legacy;
   else delete merged.facts;
   return { merged, conflicts };
+}
+
+type ItemField = "title" | "subtitle" | "location" | "dates";
+
+/** A text field with its marks, as one value: the two always travel together. */
+type Rich = { text: string; marks?: Mark[] };
+
+/** A base-side value as a pair (undefined when the base has no such node). */
+const pairOf = (text: string | undefined, marks: Mark[] | undefined): Rich | undefined =>
+  text === undefined ? undefined : compactRich(text, marks);
+
+/** A text field with its marks, clipped to its text. */
+function compactRich(text: string, marks: Mark[] | undefined): Rich {
+  const cleaned = cleanMarks(marks, text.length);
+  return cleaned ? { text, marks: cleaned } : { text };
+}
+
+const sameRich = (x: Rich, y: Rich) => x.text === y.text && marksEqual(x.marks, y.marks);
+
+/**
+ * Three-way merge of a text field together with its marks. A side that changed the pair relative to
+ * base wins as a whole, so the winner's text and marks always match. Both changed it differently: a
+ * conflict (reported with the texts), local kept. Texts equal but marks differ on both sides: local,
+ * no conflict. Base missing: the same rules without the base step.
+ */
+function mergeRich(where: string, b: Rich | undefined, l: Rich, s: Rich, conflicts: MergeConflict[]): Rich {
+  if (sameRich(l, s)) return l;
+  if (b && sameRich(l, b)) return s;
+  if (b && sameRich(s, b)) return l;
+  if (l.text === s.text) return l;
+  conflicts.push({ where, local: l.text, server: s.text });
+  return l;
+}
+
+/** Paragraph formatting: whichever side changed relative to base wins; both changed differently: local. */
+function mergePara(b: Para | undefined, l: Para | undefined, s: Para | undefined): Para | undefined {
+  const pick = paraEqual(l, b) ? s : l;
+  return pick === undefined ? undefined : cleanPara(pick);
+}
+
+/** The merged header line for a text field: its text, and its marks when it has any. */
+function compactHeader(name: Rich, contact: Rich, namePara: Para | undefined, contactPara: Para | undefined): Resume["header"] {
+  const header: Resume["header"] = { name: name.text, contact: contact.text };
+  setOpt(header, "marks", compact({ name: name.marks, contact: contact.marks }));
+  setOpt(header, "para", compact({ name: namePara, contact: contactPara }));
+  return header;
+}
+
+/** `node` with its text and marks set to `rich` (no marks key when there are none). */
+function withRich<T extends { text: string; marks?: Mark[] }>(node: T, rich: Rich): T {
+  const out: T = { ...node, text: rich.text };
+  setOpt(out, "marks", rich.marks);
+  return out;
 }
 
 /**

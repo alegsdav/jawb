@@ -99,10 +99,11 @@ describe("normalizeResume", () => {
     expect(r.sections[0].items[0].bullets[0].text).toBe("Did a thing");
   });
 
-  it("is idempotent on v2 content", () => {
+  it("is idempotent: normalizing a normalized resume changes nothing", () => {
     const once = normalizeResume(v1);
     expect(normalizeResume(once)).toEqual(once);
-    expect(normalizeResume(master())).toEqual(master());
+    const twice = normalizeResume(master());
+    expect(normalizeResume(twice)).toEqual(twice);
   });
 
   it("keeps string facts and drops junk ones", () => {
