@@ -73,9 +73,9 @@ export async function docEdit(cmd: "cut" | "copy" | "paste" | "selectAll"): Prom
 
 /** Helper text for a menu hint: the editing and print shortcuts of the document. */
 export const EDIT_SHORTCUTS =
-  "Enter: new line · Backspace at the start of a line: join it with the line above (on a bullet: turn it into normal text) · " +
-  "Tab: jump to the right-aligned part of an entry line · Ctrl/⌘+Z: undo · Ctrl/⌘+Shift+Z: redo · " +
-  "Ctrl/⌘+B / I: bold / italic · Ctrl/⌘+P: print · Ctrl/⌘+X/C/V: cut, copy, paste";
+  "Ctrl/⌘+B / I / U: bold, italic, underline · Ctrl/⌘+Shift+L / E / R / J: align left, center, right, justify · " +
+  "Ctrl/⌘+\\: clear formatting · Enter: new line · Backspace at the start of a line: join it with the line above · " +
+  "Tab: right-aligned part of an entry line · Ctrl/⌘+Z / Ctrl/⌘+Shift+Z: undo / redo · Ctrl/⌘+P: print";
 
 /** Row of menu triggers (File, Edit, View...) for the top bar. */
 export function MenuBar({ children }: { children: React.ReactNode }) {

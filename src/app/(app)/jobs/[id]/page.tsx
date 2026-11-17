@@ -30,7 +30,7 @@ import {
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
 import { ResumeDocument } from "@/components/ResumeDocument";
-import { EMPTY_FORMAT_STATE, LINE_KIND_LABELS, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
+import { EMPTY_FORMAT_STATE, FONT_SIZES, LINE_KIND_LABELS, type Align, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { JobHeader } from "@/components/job/JobHeader";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
@@ -78,11 +78,21 @@ const ZOOM_CHOICES: [number, string][] = [[0, "Fit"], [0.5, "50%"], [0.75, "75%"
 
 /** A check mark in a fixed-width cell, so the labels of ticked and unticked menu items line up. */
 /** Help > Editing tips: the same habits as the resume page's tips, plus how the coaching panel follows the caret. */
+/** Help > Editing tips: the resume page's tips, plus how the coaching panel follows the selection. */
 const EDITING_TIPS =
-  "Click a bullet to see its feedback and suggested edits. Type anywhere, like a normal document. Each line has a style " +
-  "(Section heading, Entry title, Entry subtitle, Bullet, Normal text): change it from Format or the style box in the toolbar. " +
-  "Enter starts a new line, Backspace joins lines. On an entry title or subtitle line, Tab jumps to the right-aligned part " +
-  "(location or dates). Undo with Ctrl/⌘+Z.";
+  "Click a bullet to see its feedback and suggested edits. Type anywhere, like a normal document. Select text and use the " +
+  "toolbar or Format menu for bold, italic, underline, size and alignment. Each line also has a style (Normal text, Name, " +
+  "Contact line, Section heading, Entry title, Entry subtitle, Bullet) that tells the app what the line is, so the AI knows " +
+  "which lines are your bullets. On an entry title or subtitle, Tab jumps to the right-aligned part (location or dates). " +
+  "Undo with Ctrl/⌘+Z.";
+
+/** Format > Align choices, with their shortcuts. */
+const ALIGN_CHOICES: { align: Align; label: string; shortcut: string }[] = [
+  { align: "left", label: "Align left", shortcut: "Ctrl+Shift+L" },
+  { align: "center", label: "Center", shortcut: "Ctrl+Shift+E" },
+  { align: "right", label: "Align right", shortcut: "Ctrl+Shift+R" },
+  { align: "justify", label: "Justify", shortcut: "Ctrl+Shift+J" },
+];
 
 const tick = (on: boolean) => <span className="inline-block w-3 shrink-0 text-center">{on ? "✓" : ""}</span>;
 
@@ -1104,8 +1114,6 @@ export default function JobPage() {
     </div>
   );
 
-  /** Style changes apply to the caret's line; none apply to the name and contact lines. */
-  const noLineStyle = formatState.lineKind === null || formatState.lineKind === "name" || formatState.lineKind === "contact";
   const topBar = (
     <DocToolbar>
       <Link
@@ -1149,10 +1157,10 @@ export default function JobPage() {
           <MenuItem onSelect={doc.undo} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
           <MenuItem onSelect={doc.redo} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
           <MenuSeparator />
-          <MenuItem onSelect={() => void docEdit("cut")} shortcut="Ctrl+X">Cut</MenuItem>
-          <MenuItem onSelect={() => void docEdit("copy")} shortcut="Ctrl+C">Copy</MenuItem>
-          <MenuItem onSelect={() => void docEdit("paste")} shortcut="Ctrl+V">Paste</MenuItem>
-          <MenuItem onSelect={() => void docEdit("selectAll")} shortcut="Ctrl+A">Select all</MenuItem>
+          <MenuItem onSelect={() => void docEdit("cut")} disabled={!formatState.active} shortcut="Ctrl+X">Cut</MenuItem>
+          <MenuItem onSelect={() => void docEdit("copy")} disabled={!formatState.active} shortcut="Ctrl+C">Copy</MenuItem>
+          <MenuItem onSelect={() => void docEdit("paste")} disabled={!formatState.active} shortcut="Ctrl+V">Paste</MenuItem>
+          <MenuItem onSelect={() => void docEdit("selectAll")} disabled={!formatState.active} shortcut="Ctrl+A">Select all</MenuItem>
           <MenuSeparator />
           <MenuItem onSelect={reviewNext} disabled={pending.length === 0}>Review next suggestion</MenuItem>
           <MenuItem onSelect={acceptAll} disabled={pending.length === 0}>Accept all suggestions</MenuItem>
@@ -1171,40 +1179,54 @@ export default function JobPage() {
           ))}
         </MenuBarMenu>
         <MenuBarMenu label="Format">
-          <MenuItem onSelect={() => commandsRef.current?.toggleBold()} disabled={!formatState.canFormat} shortcut="Ctrl+B">
-            <span className="flex items-center gap-1.5">{tick(formatState.bold)}Bold</span>
+        <MenuItem onSelect={() => commandsRef.current?.toggleMark("bold")} disabled={!formatState.active} shortcut="Ctrl+B">
+          <span className="flex items-center gap-1.5">{tick(formatState.bold)}Bold</span>
+        </MenuItem>
+        <MenuItem onSelect={() => commandsRef.current?.toggleMark("italic")} disabled={!formatState.active} shortcut="Ctrl+I">
+          <span className="flex items-center gap-1.5">{tick(formatState.italic)}Italic</span>
+        </MenuItem>
+        <MenuItem onSelect={() => commandsRef.current?.toggleMark("underline")} disabled={!formatState.active} shortcut="Ctrl+U">
+          <span className="flex items-center gap-1.5">{tick(formatState.underline)}Underline</span>
+        </MenuItem>
+        <MenuSeparator />
+        <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
+        {FONT_SIZES.map((pt) => (
+          <MenuItem key={pt} onSelect={() => commandsRef.current?.setSize(pt)} disabled={!formatState.active}>
+            <span className="flex items-center gap-1.5">{tick(formatState.size === pt)}{`${pt} pt`}</span>
           </MenuItem>
-          <MenuItem onSelect={() => commandsRef.current?.toggleItalic()} disabled={!formatState.canFormat} shortcut="Ctrl+I">
-            <span className="flex items-center gap-1.5">{tick(formatState.italic)}Italic</span>
+        ))}
+        <MenuSeparator />
+        {ALIGN_CHOICES.map(({ align, label, shortcut }) => (
+          <MenuItem key={align} onSelect={() => commandsRef.current?.setAlign(align)} disabled={!formatState.active} shortcut={shortcut}>
+            <span className="flex items-center gap-1.5">{tick(formatState.align === align)}{label}</span>
           </MenuItem>
-          <MenuSeparator />
-          {LINE_KIND_LABELS.map(({ kind, label, hint }) => {
-            const current = formatState.lineKind === kind;
-            return (
-              <MenuItem
-                key={kind}
-                onSelect={() => commandsRef.current?.setLineKind(kind)}
-                disabled={noLineStyle}
-                hint={hint}
-              >
-                <span className="flex items-center gap-1.5">
-                  {tick(current)}
-                  {label}
-                  {current && <span className="sr-only">(current)</span>}
-                </span>
-              </MenuItem>
-            );
-          })}
-          <MenuSeparator />
-          <MenuItem onSelect={() => commandsRef.current?.resetFormat()} disabled={!formatState.canFormat}>
-            Reset to default style
+        ))}
+        <MenuSeparator />
+        <MenuItem onSelect={() => commandsRef.current?.toggleRule()} disabled={!formatState.active}>
+          <span className="flex items-center gap-1.5">{tick(formatState.rule)}Line under</span>
+        </MenuItem>
+        <MenuItem onSelect={() => commandsRef.current?.toggleCaps()} disabled={!formatState.active}>
+          <span className="flex items-center gap-1.5">{tick(formatState.caps)}All caps</span>
+        </MenuItem>
+        <MenuItem onSelect={() => commandsRef.current?.toggleSpaceBefore()} disabled={!formatState.active}>
+          <span className="flex items-center gap-1.5">{tick(formatState.spaceBefore)}Space before line</span>
+        </MenuItem>
+        <MenuSeparator />
+        {LINE_KIND_LABELS.map(({ kind, label, hint }) => (
+          <MenuItem key={kind} onSelect={() => commandsRef.current?.setLineKind(kind)} disabled={!formatState.active} hint={hint}>
+            <span className="flex items-center gap-1.5">{tick(formatState.lineKind === kind)}{label}</span>
           </MenuItem>
+        ))}
+        <MenuSeparator />
+        <MenuItem onSelect={() => commandsRef.current?.clearFormatting()} disabled={!formatState.active} shortcut={"Ctrl+\\"}>
+          Clear formatting
+        </MenuItem>
         </MenuBarMenu>
         <MenuBarMenu label="Help">
           <MenuItem onSelect={() => {}} hint={EDITING_TIPS}>
             Editing tips
           </MenuItem>
-          <MenuItem onSelect={() => {}} hint={`${EDIT_SHORTCUTS} · Ctrl/⌘+B / I (bold / italic)`}>
+          <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS}>
             Keyboard shortcuts
           </MenuItem>
           <MenuItem

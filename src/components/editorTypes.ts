@@ -1,28 +1,59 @@
 import type { LineKind } from "@/lib/docLineTypes";
+import type { Para } from "@/lib/types";
 
 /**
  * Contract between the resume editor (ResumeDocument) and the pages that host it.
  */
 
-/** Imperative document commands for the page's Format menu and shortcuts. All act on the line with the caret. */
+export type MarkName = "bold" | "italic" | "underline";
+export type Align = NonNullable<Para["align"]> | "left";
+
+/** Font sizes offered in the toolbar and Format menu, in points. 11 is the default (no size mark). */
+export const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28] as const;
+export const DEFAULT_FONT_SIZE = 11;
+
+/** Imperative document commands for the page's Format menu and shortcuts. They act on the editor's selection. */
 export type DocCommands = {
-  /** Toggle bold / italic on the part of the line the caret is in (a no-op for bullets and with no caret). */
-  toggleBold(): void;
-  toggleItalic(): void;
-  /** Remove the bold/italic override on the caret's line part, back to its default. */
-  resetFormat(): void;
-  /** Change the paragraph style of the caret's line (no-op on the name and contact lines). */
+  /** Toggle bold / italic / underline on the selection (or on what you type next, with a caret). */
+  toggleMark(mark: MarkName): void;
+  /** Set the font size (points) of the selection. 11 removes the size mark. */
+  setSize(pt: number): void;
+  /** Align every line touched by the selection. */
+  setAlign(align: Align): void;
+  /** Toggle the rule line under / ALL CAPS / extra space before, on every line touched by the selection. */
+  toggleRule(): void;
+  toggleCaps(): void;
+  toggleSpaceBefore(): void;
+  /** Remove all inline marks in the selection and all paragraph formatting of the lines it touches. */
+  clearFormatting(): void;
+  /** Change the paragraph style of every line touched by the selection. */
   setLineKind(kind: LineKind): void;
 };
 
 /**
- * Formatting state of the caret's line, for the toolbar and the Format menu.
- * canFormat: the caret is in a line part that has bold/italic (not a bullet, editor focused or last focused).
- * lineKind: the caret line's kind, or null when nothing is selected.
+ * Formatting state at the selection, for the toolbar and the Format menu.
+ * active: the editor has a selection (focused, or last focused and not dismissed).
+ * bold/italic/underline: on for the whole selection (with a caret: what typing would produce).
+ * size: the selection's size in points, or null when it mixes sizes.
+ * align/rule/caps/spaceBefore: of the line with the selection's start.
  */
-export type FormatState = { canFormat: boolean; bold: boolean; italic: boolean; lineKind: LineKind | null };
+export type FormatState = {
+  active: boolean;
+  lineKind: LineKind | null;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  size: number | null;
+  align: Align;
+  rule: boolean;
+  caps: boolean;
+  spaceBefore: boolean;
+};
 
-export const EMPTY_FORMAT_STATE: FormatState = { canFormat: false, bold: false, italic: false, lineKind: null };
+export const EMPTY_FORMAT_STATE: FormatState = {
+  active: false, lineKind: null, bold: false, italic: false, underline: false, size: DEFAULT_FONT_SIZE,
+  align: "left", rule: false, caps: false, spaceBefore: false,
+};
 
 /** What's selected in the document (the caret's line), by id. The coaching panel follows it. */
 export type DocSelection =
@@ -30,11 +61,13 @@ export type DocSelection =
   | { kind: "entry"; sectionId: string; entryId: string }
   | { kind: "bullet"; sectionId: string; entryId: string; bulletId: string };
 
-/** User-facing names of the paragraph styles, in dropdown order. name/contact are fixed and not choosable. */
+/** User-facing names of the paragraph styles, in dropdown order. */
 export const LINE_KIND_LABELS: { kind: LineKind; label: string; hint: string }[] = [
-  { kind: "heading", label: "Section heading", hint: "EXPERIENCE, EDUCATION…" },
+  { kind: "text", label: "Normal text", hint: "Any line" },
+  { kind: "name", label: "Name", hint: "Your name (one per resume)" },
+  { kind: "contact", label: "Contact line", hint: "Email, phone, links (one per resume)" },
+  { kind: "heading", label: "Section heading", hint: "Experience, Education…" },
   { kind: "entry", label: "Entry title", hint: "Organization  ⇥  Location" },
   { kind: "role", label: "Entry subtitle", hint: "Role  ⇥  Dates" },
   { kind: "bullet", label: "Bullet", hint: "What you did and its impact" },
-  { kind: "text", label: "Normal text", hint: "Languages: Python, SQL" },
 ];

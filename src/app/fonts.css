@@ -1,0 +1,37 @@
+/*
+ * Carlito is the open, metric-compatible stand-in for Calibri (SIL OFL, see public/fonts/carlito-OFL.txt).
+ * The resume uses `font-family: Calibri, Carlito, ...`, so a device with Calibri uses it and everything
+ * else gets Carlito with the same glyph widths (same line breaks and page length). Files are the latin
+ * subset from @fontsource/carlito; scripts/copy-fonts.mjs refreshes them on upgrade.
+ */
+@font-face {
+  font-family: "Carlito";
+  src: url("/fonts/carlito-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Carlito";
+  src: url("/fonts/carlito-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Carlito";
+  src: url("/fonts/carlito-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Carlito";
+  src: url("/fonts/carlito-700-italic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}

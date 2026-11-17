@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import "./fonts.css";
 
 const ui = Inter({ variable: "--font-ui", subsets: ["latin"], weight: ["400", "500", "600"] });
 

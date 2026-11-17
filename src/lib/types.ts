@@ -1,17 +1,36 @@
-export type Bullet = { id: string; text: string };
-
 /**
- * Bold / italic override for one non-bullet field. Each flag is optional: an absent flag means the
- * Harvard default for that field (see textStyle.ts). Omitted from the data when it equals the default.
+ * Inline formatting over the characters [from, to) of one plain-text field (a bullet's text, an entry's
+ * title, ...). The text itself stays plain, so the AI, the number checks, placeholders and facts read it
+ * unchanged; formatting lives next to it. Canonical form (see cleanMarks in richText.ts): sorted,
+ * non-overlapping, each range carries its full format, ranges with no format are omitted, adjacent equal
+ * ranges are merged. Absent flags mean regular weight, upright, no underline, 11pt.
  */
+export type Mark = { from: number; to: number; bold?: true; italic?: true; underline?: true; size?: number };
+
+/** Line (paragraph) formatting. Absent = left aligned, no rule line, normal case, no extra space. */
+export type Para = {
+  align?: "center" | "right" | "justify";
+  /** A thin line under the paragraph (the template uses it under section headings). */
+  rule?: true;
+  /** Shown in ALL CAPS (the stored text keeps its own case). */
+  caps?: true;
+  /** Extra space above the paragraph, in points. */
+  spaceBefore?: number;
+};
+
+export type Bullet = { id: string; text: string; marks?: Mark[]; para?: Para };
+
+/** Legacy (resume version 2) whole-field bold/italic override. Only read when migrating old data (textStyle.ts). */
 export type TextStyle = { bold?: boolean; italic?: boolean };
 
 /**
- * One entry in a section, laid out Harvard-style:
- *   title (bold)              location
- *   subtitle (italic)         dates
- *   • bullets
- * Items with no bullets, dates or location render as one inline line ("Languages: Python, SQL").
+ * One entry in a section. Its lines in the document:
+ *   title              location        (the "entry" line; location right-aligned after a tab)
+ *   subtitle           dates           (the "role" line; only when subtitle or dates is set)
+ *   bullets
+ * Items with no bullets, dates or location are one plain line (`title`; `subtitle` is only non-empty in
+ * data from before version 3, where the line was "title: subtitle").
+ * Formatting is explicit (marks/para); nothing about a field implies a look.
  */
 export type Item = {
   id: string;
@@ -20,26 +39,33 @@ export type Item = {
   location: string;
   dates: string;
   bullets: Bullet[];
-  /** Per-field bold/italic overrides. Omitted when every field uses its default. */
-  styles?: { title?: TextStyle; subtitle?: TextStyle; location?: TextStyle; dates?: TextStyle };
+  /** Inline formatting per field. Omitted when no field has any. */
+  marks?: { title?: Mark[]; subtitle?: Mark[]; location?: Mark[]; dates?: Mark[] };
+  /** Paragraph formatting of the entry line (or the plain line of an inline item) and of the role line. */
+  para?: { entry?: Para; role?: Para };
 };
 
 export type Section = {
   id: string;
   title: string;
   items: Item[];
-  /** Bold/italic override for the section title. Omitted when it uses the default. */
-  style?: TextStyle;
+  /** Inline formatting of the section title. */
+  marks?: Mark[];
+  /** Paragraph formatting of the section heading line. */
+  para?: Para;
 };
 
 export type Resume = {
-  /** 2 = title is the organization/school (line 1), subtitle is the role/degree (line 2). */
+  /**
+   * 3 = explicit formatting (marks/para). 2 = Harvard defaults implied by field, with `styles` overrides.
+   * 2+ = title is the organization/school (line 1), subtitle is the role/degree (line 2).
+   */
   version?: number;
   header: {
     name: string;
     contact: string;
-    /** Bold/italic overrides for the name and contact line. Omitted when they use the defaults. */
-    styles?: { name?: TextStyle; contact?: TextStyle };
+    marks?: { name?: Mark[]; contact?: Mark[] };
+    para?: { name?: Para; contact?: Para };
   };
   sections: Section[];
   /**
