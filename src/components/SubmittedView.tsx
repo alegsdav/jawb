@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Resume } from "@/lib/types";
-import { ResumeView } from "./ResumeDocument";
+import { ResumeView } from "./ResumeView";
 import { downloadResumePdf } from "./pdfDownload";
 
 export const formatSubmitted = (iso: string) =>

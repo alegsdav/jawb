@@ -1,87 +1,126 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
-import type { Item, Resume, TextStyle } from "@/lib/types";
-import { isInlineItem } from "@/lib/resume";
-import { effectiveStyle, type StyleField } from "@/lib/textStyle";
+import { createElement as h, type ReactElement } from "react";
+import type { DocLine } from "@/lib/docLineTypes";
+import { resumeToLines } from "@/lib/docLines";
+import { PDF_FONT, registerPdfFonts } from "@/lib/pdfFonts";
+import { DEFAULT_SIZE, toRuns, type Run } from "@/lib/richText";
+import type { Resume } from "@/lib/types";
 
-// Harvard single-column layout, matching the on-screen document. Text-based so ATS parsers read it.
+// The page setup is the only fixed look: US Letter, 0.2in top and bottom, 0.42in left and right (points),
+// Calibri (Carlito) 11pt. Everything else comes from the resume's own marks and paragraph formatting.
+// Built with createElement (not JSX) so the test runner can import this file (tsconfig sets jsx: preserve).
 const s = StyleSheet.create({
-  page: { paddingVertical: 43, paddingHorizontal: 43, fontSize: 11, fontFamily: "Times-Roman", lineHeight: 1.25 },
-  name: { fontSize: 16.5, textAlign: "center" },
-  contact: { fontSize: 10, textAlign: "center", marginTop: 2 },
-  section: { marginTop: 9 },
-  sectionTitle: {
-    textTransform: "uppercase", letterSpacing: 0.4,
-    borderBottomWidth: 0.75, borderBottomColor: "#000", paddingBottom: 1, marginBottom: 4,
+  page: {
+    paddingTop: 14.4,
+    paddingBottom: 14.4,
+    paddingLeft: 30.24,
+    paddingRight: 30.24,
+    fontFamily: PDF_FONT,
+    fontSize: DEFAULT_SIZE,
+    lineHeight: 1.15,
   },
-  item: { marginBottom: 4.5 },
+  rule: { borderBottomWidth: 0.75, borderBottomColor: "#000", paddingBottom: 1 },
   row: { flexDirection: "row", justifyContent: "space-between" },
-  bulletRow: { flexDirection: "row", paddingLeft: 8, marginTop: 1 },
-  dot: { width: 10 },
+  rowLeft: { flexShrink: 1 },
+  bullet: { flexDirection: "row", paddingLeft: 8 },
+  bulletDot: { width: 10 },
   bulletText: { flex: 1 },
 });
 
-/** The built-in Times face for a bold/italic pair. */
-function fontFor(bold: boolean, italic: boolean): string {
-  if (bold) return italic ? "Times-BoldItalic" : "Times-Bold";
-  return italic ? "Times-Italic" : "Times-Roman";
+/** Most lines in one unbreakable entry group; longer groups may break across pages. */
+const MAX_UNBROKEN_LINES = 10;
+
+/** One text part as nested Text runs: bold / italic / underline / size, plus ALL CAPS when the line asks. */
+function runNodes(text: string, marks: DocLine["marks"], caps: boolean): ReactElement[] {
+  return toRuns(text, marks).map((run: Run, i) =>
+    h(
+      Text,
+      {
+        key: i,
+        style: {
+          fontWeight: run.bold ? 700 : 400,
+          fontStyle: run.italic ? "italic" : "normal",
+          textDecoration: run.underline ? "underline" : "none",
+          fontSize: run.size,
+          ...(caps ? { textTransform: "uppercase" as const } : {}),
+        },
+      },
+      run.text,
+    ),
+  );
 }
 
-/** Font style for one field: its effective bold/italic (override or Harvard default). */
-function fieldFont(field: StyleField, override: TextStyle | undefined, item?: Item) {
-  const { bold, italic } = effectiveStyle(field, override, item);
-  return { fontFamily: fontFor(bold, italic) };
+/** One line of the document: its paragraph formatting as View/Text styles, its runs as nested Text. */
+function pdfLine(line: DocLine, key: number): ReactElement {
+  const para = line.para;
+  const caps = !!para?.caps;
+  const textAlign: "left" | "center" | "right" | "justify" = para?.align ?? "left";
+  const viewStyle = {
+    ...(para?.spaceBefore ? { marginTop: para.spaceBefore } : {}),
+    ...(para?.rule ? s.rule : {}),
+  };
+  const textStyle = { textAlign, ...(caps ? { textTransform: "uppercase" as const } : {}) };
+
+  if (line.kind === "bullet") {
+    return h(
+      View,
+      { key, style: [s.bullet, viewStyle] },
+      h(Text, { style: s.bulletDot }, "•"),
+      h(Text, { style: [s.bulletText, { textAlign }] }, ...runNodes(line.text, line.marks, caps)),
+    );
+  }
+
+  if (line.kind === "entry" || line.kind === "role") {
+    const right = line.right
+      ? h(Text, { style: textStyle }, ...runNodes(line.right, line.rightMarks, caps))
+      : null;
+    return h(
+      View,
+      { key, style: [s.row, viewStyle] },
+      h(Text, { style: [s.rowLeft, textStyle] }, ...runNodes(line.text, line.marks, caps)),
+      right,
+    );
+  }
+
+  const nodes = runNodes(line.text, line.marks, caps);
+  return h(View, { key, style: viewStyle }, h(Text, { style: textStyle }, ...(nodes.length ? nodes : [" "])));
+}
+
+/**
+ * Lines that belong together and should not split across a page break: an entry with its role line and
+ * bullets. Anything else is its own group.
+ */
+function groupLines(lines: DocLine[]): DocLine[][] {
+  const groups: DocLine[][] = [];
+  let open: DocLine[] | null = null;
+  for (const line of lines) {
+    if (line.kind === "entry") {
+      open = [line];
+      groups.push(open);
+    } else if ((line.kind === "role" || line.kind === "bullet") && open) {
+      open.push(line);
+    } else {
+      open = null;
+      groups.push([line]);
+    }
+  }
+  return groups;
 }
 
 export function ResumePdf({ resume }: { resume: Resume }) {
-  const styles = resume.header.styles;
-  return (
-    <Document title={`${resume.header.name} Resume`} author={resume.header.name}>
-      <Page size="LETTER" style={s.page}>
-        <Text style={[s.name, fieldFont("name", styles?.name)]}>{resume.header.name}</Text>
-        {resume.header.contact ? (
-          <Text style={[s.contact, fieldFont("contact", styles?.contact)]}>{resume.header.contact}</Text>
-        ) : null}
-        {resume.sections.map((sec) => (
-          <View key={sec.id} style={s.section}>
-            <Text style={[s.sectionTitle, fieldFont("sectionTitle", sec.style)]}>{sec.title}</Text>
-            {sec.items.map((it) => {
-              const title = fieldFont("title", it.styles?.title, it);
-              const subtitle = fieldFont("subtitle", it.styles?.subtitle, it);
-              if (isInlineItem(it)) {
-                return it.subtitle ? (
-                  <Text key={it.id} style={s.item}>
-                    <Text style={title}>{it.title}: </Text>
-                    <Text style={subtitle}>{it.subtitle}</Text>
-                  </Text>
-                ) : (
-                  <Text key={it.id} style={[s.item, title]}>{it.title}</Text>
-                );
-              }
-              const bullets = it.bullets.filter((b) => b.text.trim());
-              return (
-                <View key={it.id} style={s.item} wrap={false}>
-                  <View style={s.row}>
-                    <Text style={title}>{it.title}</Text>
-                    <Text style={fieldFont("location", it.styles?.location, it)}>{it.location}</Text>
-                  </View>
-                  {(it.subtitle || it.dates) && (
-                    <View style={s.row}>
-                      <Text style={subtitle}>{it.subtitle}</Text>
-                      <Text style={fieldFont("dates", it.styles?.dates, it)}>{it.dates}</Text>
-                    </View>
-                  )}
-                  {bullets.map((b) => (
-                    <View key={b.id} style={s.bulletRow}>
-                      <Text style={s.dot}>•</Text>
-                      <Text style={s.bulletText}>{b.text}</Text>
-                    </View>
-                  ))}
-                </View>
-              );
-            })}
-          </View>
-        ))}
-      </Page>
-    </Document>
+  registerPdfFonts();
+  const groups = groupLines(resumeToLines(resume));
+  return h(
+    Document,
+    { title: `${resume.header.name} Resume`, author: resume.header.name },
+    h(
+      Page,
+      { size: "LETTER", style: s.page },
+      ...groups.map((group, g) => {
+        const children = group.map((line, i) => pdfLine(line, i));
+        const keepTogether = group.length > 1 && group.length <= MAX_UNBROKEN_LINES;
+        return h(View, { key: g, wrap: !keepTogether }, ...children);
+      }),
+    ),
   );
 }
