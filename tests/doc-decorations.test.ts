@@ -45,52 +45,6 @@ const fb = (rating: BulletFeedback["rating"], over: Partial<BulletFeedback> = {}
   ...over,
 });
 
-describe("inline bold / italic", () => {
-  it("entry: title bold by default, location normal", () => {
-    const set = decos({}, doc);
-    const start = lineStart(doc, 3);
-    const title = set.filter((d) => d.from === start + 1 && d.to === start + 1 + "Analytical Engines".length);
-    const loc = set.filter((d) => d.from === start + 1 + "Analytical Engines".length + 1 && d.to > d.from);
-    expect(title.map(cls)).toEqual(["font-bold not-italic"]);
-    expect(loc.map(cls)).toEqual(["font-normal not-italic"]);
-  });
-
-  it("a styled override replaces the default", () => {
-    const styled: DocLine[] = [
-      { kind: "entry", text: "Title", right: "Place", sid: "s", iid: "i", style: { bold: false, italic: true } },
-    ];
-    const d = linesToDoc(styled);
-    const set = decos({}, d);
-    const inline = set.filter((x) => cls(x) !== undefined && x.to > x.from);
-    expect(inline.map(cls)).toEqual(["font-normal italic", "font-normal not-italic"]);
-  });
-
-  it("text line: label bold, details normal, the ': ' left undecorated", () => {
-    const start = lineStart(doc, 8);
-    const set = decos({}, doc).filter((x) => x.from > start && x.to <= start + doc.child(8).nodeSize);
-    const label = set.find((x) => x.from === start + 1 && x.to === start + 1 + "Languages".length);
-    const details = set.find((x) => x.from === start + 1 + "Languages".length + 2 && x.to === start + doc.child(8).nodeSize - 1);
-    expect(cls(label!)).toBe("font-bold not-italic");
-    expect(cls(details!)).toBe("font-normal not-italic");
-    expect(set.length).toBe(2);
-  });
-
-  it("bullets get no style decorations", () => {
-    const set = decos({}, doc);
-    const bulletRanges: [number, number][] = [];
-    for (let i = 0; i < doc.childCount; i++) {
-      if (doc.child(i).attrs.kind === "bullet") {
-        const s = lineStart(doc, i);
-        bulletRanges.push([s, s + doc.child(i).nodeSize]);
-      }
-    }
-    const styleDecos = set.filter((x) => (cls(x) ?? "").startsWith("font-") || (cls(x) ?? "").includes("italic"));
-    for (const [s, e] of bulletRanges) {
-      expect(styleDecos.filter((x) => x.from >= s && x.to <= e)).toEqual([]);
-    }
-  });
-});
-
 describe("placeholders for empty parts", () => {
   it("shown only on the caret line", () => {
     const off = decos({ caretLine: 3 }).filter((x) => key(x)?.startsWith("ph:"));
@@ -101,6 +55,15 @@ describe("placeholders for empty parts", () => {
     const set = decos({ caretLine: 7 }).filter((x) => key(x)?.startsWith("ph:"));
     expect(set.map(key)).toEqual(["ph:Location"]);
     expect(set[0].from).toBe(lineStart(doc, 7) + 1 + "Ada Co".length + 1);
+  });
+
+  it("empty heading and text lines show their own placeholders, not all caps", () => {
+    const d = linesToDoc([
+      { kind: "heading", text: "", sid: "s" },
+      { kind: "text", text: "", sid: "s", iid: "i" },
+    ]);
+    expect(decos({ caretLine: 0 }, d).filter((x) => key(x)?.startsWith("ph:")).map(key)).toEqual(["ph:Section heading"]);
+    expect(decos({ caretLine: 1 }, d).filter((x) => key(x)?.startsWith("ph:")).map(key)).toEqual(["ph:Type here"]);
   });
 
   it("an empty bullet shows the accomplishment placeholder on the caret line", () => {

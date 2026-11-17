@@ -85,6 +85,18 @@ export const SettingsIcon = ({ className }: P) => (
 export const ListIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M9.5 6.5h10M9.5 12h10M9.5 17.5h10" /><circle cx="5" cy="6.5" r=".9" fill="currentColor" /><circle cx="5" cy="12" r=".9" fill="currentColor" /><circle cx="5" cy="17.5" r=".9" fill="currentColor" /></svg>
 );
+export const AlignLeftIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="M4 6h16M4 10h10M4 14h16M4 18h10" /></svg>
+);
+export const AlignCenterIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="M4 6h16M7 10h10M4 14h16M7 18h10" /></svg>
+);
+export const AlignRightIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="M4 6h16M10 10h10M4 14h16M10 18h10" /></svg>
+);
+export const AlignJustifyIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+);
 export const LineIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M5 8h14M5 12h14M5 16h9" /></svg>
 );

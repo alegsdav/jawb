@@ -2,14 +2,14 @@ import type { Node as PMNode } from "prosemirror-model";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import type { BulletFeedback, Rating } from "@/lib/analysis";
 import { PLACEHOLDER_RE } from "@/lib/facts";
-import type { LineKind, LinePart } from "@/lib/docLineTypes";
-import { lineEffectiveStyle } from "@/lib/docLines";
-import { nodeToLine, partRanges } from "@/lib/pmSchema";
+import type { LineKind } from "@/lib/docLineTypes";
+import { partRanges } from "@/lib/pmSchema";
 
 /**
  * ProseMirror decorations for the resume editor: the AI's highlights drawn over the text (rating tints,
- * placeholder marks, the rating dot, the "changed vs master" bar), the bold/italic of each line part, and
- * the grey placeholder text of empty parts. Pure: runs in Node, DOM is only touched inside widget toDOM.
+ * placeholder marks, the rating dot, the "changed vs master" bar) and the grey placeholder text of empty
+ * parts. Formatting (bold, italic, size, alignment) is real document data, not decorations. Pure: runs in
+ * Node, DOM is only touched inside widget toDOM.
  */
 
 export type DecorationOptions = {
@@ -53,11 +53,11 @@ export function bulletInfo(bid: string, text: string, opts: Pick<DecorationOptio
 export const PART_PLACEHOLDERS: Record<LineKind, [string, string?]> = {
   name: ["Your Name"],
   contact: ["City, ST • email • phone • linkedin.com/in/you"],
-  heading: ["SECTION HEADING"],
+  heading: ["Section heading"],
   entry: ["Organization / School / Project", "Location"],
   role: ["Role / Degree", "Dates"],
   bullet: ["Accomplishment: verb + what + measurable impact"],
-  text: ["Text"],
+  text: ["Type here"],
 };
 
 function placeholderWidget(text: string) {
@@ -75,26 +75,10 @@ export function buildDecorations(doc: PMNode, opts: DecorationOptions): Decorati
   const decorations: Decoration[] = [];
 
   doc.forEach((node, offset, index) => {
-    const line = nodeToLine(node);
-    const kind = line.kind;
+    const kind = node.attrs.kind as LineKind;
     const contentStart = offset + 1;
 
-    // 1. Bold / italic of each part (bullets have no styles).
-    if (kind !== "bullet") {
-      const { part1, part2 } = partRanges(node);
-      const parts: [LinePart, [number, number] | null][] = [[1, part1], [2, part2]];
-      for (const [part, range] of parts) {
-        if (!range || range[0] === range[1]) continue;
-        const st = lineEffectiveStyle(line, part);
-        if (!st) continue;
-        const cls = (st.bold ? "font-bold" : "font-normal") + " " + (st.italic ? "italic" : "not-italic");
-        decorations.push(
-          Decoration.inline(contentStart + range[0], contentStart + range[1], { class: cls }),
-        );
-      }
-    }
-
-    // 2. Placeholders for empty parts, on the caret line only.
+    // 1. Placeholders for empty parts, on the caret line only.
     if (index === opts.caretLine) {
       const { part1, part2 } = partRanges(node);
       const ph = PART_PLACEHOLDERS[kind];
@@ -112,7 +96,7 @@ export function buildDecorations(doc: PMNode, opts: DecorationOptions): Decorati
       }
     }
 
-    // 3. Bullets: tint, placeholder marks, rating dot, change bar.
+    // 2. Bullets: tint, placeholder marks, rating dot, change bar.
     if (kind === "bullet" && node.attrs.bid != null) {
       const bid = node.attrs.bid as string;
       const info = bulletInfo(bid, node.textContent, opts);

@@ -1,35 +1,48 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { EditorState, Plugin, TextSelection, type Command, type Transaction } from "prosemirror-state";
 import type { DecorationSet } from "prosemirror-view";
 import { EditorView } from "prosemirror-view";
 import type { Node as PMNode } from "prosemirror-model";
 import type { BulletFeedback } from "@/lib/analysis";
-import type { Resume, TextStyle } from "@/lib/types";
-import { effectiveStyle } from "@/lib/textStyle";
-import { isInlineItem } from "@/lib/resume";
+import type { Resume } from "@/lib/types";
 import type { LineKind, LinePart } from "@/lib/docLineTypes";
-import { linesToResume, lineEffectiveStyle, resumeToLines } from "@/lib/docLines";
-import { docToLines, linesToDoc, nodeToLine } from "@/lib/pmSchema";
+import { linesToResume, resumeToLines } from "@/lib/docLines";
+import { docToLines, linesToDoc } from "@/lib/pmSchema";
 import {
   caretInfo,
+  clearFormattingCommand,
   editorKeymap,
+  formatAt,
   headerGuard,
   pasteTextParser,
   replaceLineTextCommand,
-  resetStyleCommand,
+  setAlignCommand,
   setLineKindCommand,
+  setSizeCommand,
   stripPastedIds,
-  toggleStyleCommand,
+  toggleMarkCommand,
+  toggleParaFlagCommand,
+  toggleSpaceBeforeCommand,
 } from "@/lib/docEditing";
 import { buildDecorations, bulletInfo, type DecorationOptions } from "./docDecorations";
 import { BulletCommentCard } from "./BulletCommentCard";
-import { LINE_KIND_LABELS, type DocCommands, type DocSelection, type FormatState } from "./editorTypes";
-import { ListIcon } from "./icons";
+import {
+  EMPTY_FORMAT_STATE,
+  FONT_SIZES,
+  LINE_KIND_LABELS,
+  type Align,
+  type DocCommands,
+  type DocSelection,
+  type FormatState,
+  type MarkName,
+} from "./editorTypes";
+import { AlignCenterIcon, AlignJustifyIcon, AlignLeftIcon, AlignRightIcon, ListIcon } from "./icons";
 
 export type { DocCommands, DocSelection, FormatState } from "./editorTypes";
+export { ResumeView } from "./ResumeView";
 
 type Props = {
   value: Resume;
@@ -63,7 +76,7 @@ type Props = {
   quiet?: boolean;
   /** Called when the selection changes (null when nothing is selected). The coaching panel follows it. */
   onSelectionChange?: (selection: DocSelection | null) => void;
-  /** Filled with the document commands (bold, italic, reset, paragraph style) on every render. */
+  /** Filled with the document commands (marks, size, align, rule, caps, space before, clear, paragraph style) on every render. */
   commandsRef?: React.RefObject<DocCommands | null>;
   /** Called when the caret line's formatting state changes. */
   onFormatStateChange?: (s: FormatState) => void;
@@ -76,13 +89,13 @@ const COMMIT = "docCommit";
 /** REDECORATE: nothing changed in the doc, only the decoration options. */
 const REDECORATE = "docRedecorate";
 
+/** Page geometry in px (1in = 96px): US Letter height, top/bottom margin 0.2in. Side margins are CSS only. */
 const PAGE_H = 1056;
-const MARGIN = 58;
-const LINE = 18;
+const MARGIN_Y = 19.2;
+/** One line of 11pt text at 1.15 line height, in px. */
+const LINE = 16.87;
 
-const styleCls = (s: Required<TextStyle>) => `${s.bold ? "font-bold" : "font-normal"} ${s.italic ? "italic" : "not-italic"}`;
-
-/** What the caret is in, as plain values (stored in React state for the toolbar, the card and the selection). */
+/** What the caret is in, as plain values (stored in React state for the card and the selection). */
 type CaretSummary = {
   /** Index of the caret's line in the document. */
   index: number;
@@ -95,14 +108,14 @@ type CaretSummary = {
   /** Which part of the line the caret is in (null for bullets). */
   part: LinePart | null;
   text: string;
-  bold: boolean;
-  italic: boolean;
 };
+
+/** The toolbar's formatting state at the selection (FormatState without `active`). */
+type Fmt = Omit<FormatState, "active">;
 
 function summarize(state: EditorState): CaretSummary {
   const c = caretInfo(state);
   const attrs = c.line.attrs;
-  const st = c.part ? lineEffectiveStyle(nodeToLine(c.line), c.part) : null;
   return {
     index: c.index,
     pos: c.pos,
@@ -112,14 +125,16 @@ function summarize(state: EditorState): CaretSummary {
     bid: attrs.bid ?? null,
     part: c.part,
     text: c.line.textContent,
-    bold: st?.bold ?? false,
-    italic: st?.italic ?? false,
   };
 }
 
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-const sameStyle = (a: TextStyle | undefined, b: TextStyle | undefined) => a?.bold === b?.bold && a?.italic === b?.italic;
+/** Steps that change marks: a format change is its own undo step (committed to the page). */
+const isMarkStep = (step: { toJSON(): unknown }) => {
+  const type = (step.toJSON() as { stepType?: string }).stepType;
+  return type === "addMark" || type === "removeMark";
+};
 
 function selectionOf(c: CaretSummary): DocSelection | null {
   if (c.kind === "bullet") {
@@ -139,6 +154,19 @@ function runOn(view: EditorView | null, cmd: Command) {
   view.focus();
 }
 
+const MARK_BUTTONS: { name: MarkName; title: string; glyph: string; glyphClass: string }[] = [
+  { name: "bold", title: "Bold (Ctrl+B)", glyph: "B", glyphClass: "text-[14px] font-bold" },
+  { name: "italic", title: "Italic (Ctrl+I)", glyph: "I", glyphClass: "font-serif text-[16px] italic" },
+  { name: "underline", title: "Underline (Ctrl+U)", glyph: "U", glyphClass: "text-[14px] underline" },
+];
+
+const ALIGN_BUTTONS: { align: Align; title: string; Icon: ComponentType<{ className?: string }> }[] = [
+  { align: "left", title: "Align left (Ctrl+Shift+L)", Icon: AlignLeftIcon },
+  { align: "center", title: "Center (Ctrl+Shift+E)", Icon: AlignCenterIcon },
+  { align: "right", title: "Align right (Ctrl+Shift+R)", Icon: AlignRightIcon },
+  { align: "justify", title: "Justify (Ctrl+Shift+J)", Icon: AlignJustifyIcon },
+];
+
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
   commentSlot, reveal, quiet = false, onSelectionChange, commandsRef, onFormatStateChange,
@@ -146,6 +174,7 @@ export function ResumeDocument({
   // Whether the editor's selection counts as selected: on while the editor or the toolbar/card is in use.
   const [selActive, setSelActiveState] = useState(false);
   const [caret, setCaret] = useState<CaretSummary | null>(null);
+  const [fmt, setFmt] = useState<Fmt | null>(null);
 
   const mountRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -183,6 +212,8 @@ export function ResumeDocument({
       const summary = summarize(state);
       caretRef.current = summary;
       setCaret((prev) => (prev && sameJson(prev, summary) ? prev : summary));
+      const f = formatAt(state);
+      setFmt((prev) => (prev && sameJson(prev, f) ? prev : f));
     };
 
     // Decorations depend on the doc, the options and the caret line; cache on those.
@@ -220,7 +251,7 @@ export function ResumeDocument({
       const commit =
         forced ||
         lines.length !== prev.length ||
-        lines.some((l, i) => l.kind !== prev[i].kind || !sameStyle(l.style, prev[i].style) || !sameStyle(l.style2, prev[i].style2));
+        lines.some((l, i) => l.kind !== prev[i].kind || !sameJson(l.para, prev[i].para));
 
       lastEmitted.current = resume;
       valueRef.current = resume;
@@ -233,7 +264,9 @@ export function ResumeDocument({
       const before = view.state;
       const next = before.apply(tr); // includes headerGuard's appended fixes
       view.updateState(next);
-      if (next.doc !== before.doc && !tr.getMeta(EXTERNAL)) emit(view, before, next, !!tr.getMeta(COMMIT));
+      // Explicit commits (COMMIT) and format changes (mark steps) are their own undo steps.
+      const forced = !!tr.getMeta(COMMIT) || tr.steps.some(isMarkStep);
+      if (next.doc !== before.doc && !tr.getMeta(EXTERNAL)) emit(view, before, next, forced);
       syncCaret(view.state);
     };
 
@@ -357,7 +390,7 @@ export function ResumeDocument({
     if (!el || !onMeasure) return;
     const ro = new ResizeObserver(() => {
       if (el.offsetWidth < 600) return; // reflowed phone layout isn't page-accurate
-      const usable = PAGE_H - 2 * MARGIN;
+      const usable = PAGE_H - 2 * MARGIN_Y;
       const h = el.scrollHeight;
       onMeasure({ pages: Math.max(1, Math.ceil(h / usable)), overflowLines: Math.max(0, Math.ceil((h - usable) / LINE)) });
     });
@@ -368,14 +401,10 @@ export function ResumeDocument({
   // ---- derived state: the caret, only while the document counts as selected ----
   const caretOn = selActive ? caret : null;
   const sel = useMemo(() => (selActive && caret ? selectionOf(caret) : null), [selActive, caret]);
+  // The toolbar's state: the selection's formatting while the document counts as selected, else the empty state.
   const fmtState = useMemo<FormatState>(
-    () => ({
-      lineKind: selActive && caret ? caret.kind : null,
-      canFormat: selActive && !!caret && caret.part !== null,
-      bold: selActive && !!caret?.bold,
-      italic: selActive && !!caret?.italic,
-    }),
-    [selActive, caret],
+    () => (selActive && fmt ? { active: true, ...fmt } : EMPTY_FORMAT_STATE),
+    [selActive, fmt],
   );
 
   // Report selection and formatting changes by value, so re-renders with the same state don't fire.
@@ -394,13 +423,17 @@ export function ResumeDocument({
     propsRef.current?.onFormatStateChange?.(fmtState);
   }, [fmtState]);
 
-  // The document commands, for the page's Format menu and shortcuts. They act on the caret's line.
+  // The document commands, for the page's Format menu and shortcuts. They act on the selection.
   useEffect(() => {
     if (!commandsRef) return;
     commandsRef.current = {
-      toggleBold: () => runOn(viewRef.current, toggleStyleCommand("bold")),
-      toggleItalic: () => runOn(viewRef.current, toggleStyleCommand("italic")),
-      resetFormat: () => runOn(viewRef.current, resetStyleCommand),
+      toggleMark: (mark) => runOn(viewRef.current, toggleMarkCommand(mark)),
+      setSize: (pt) => runOn(viewRef.current, setSizeCommand(pt)),
+      setAlign: (align) => runOn(viewRef.current, setAlignCommand(align)),
+      toggleRule: () => runOn(viewRef.current, toggleParaFlagCommand("rule")),
+      toggleCaps: () => runOn(viewRef.current, toggleParaFlagCommand("caps")),
+      toggleSpaceBefore: () => runOn(viewRef.current, toggleSpaceBeforeCommand()),
+      clearFormatting: () => runOn(viewRef.current, clearFormattingCommand()),
       setLineKind: (kind) => runOn(viewRef.current, setLineKindCommand(kind)),
     };
   });
@@ -427,60 +460,81 @@ export function ResumeDocument({
     return () => cancelAnimationFrame(frame);
   }, [cardBid]);
 
-  // ---- toolbar: paragraph style, bold, italic, bulleted list ----
-  const headerLine = caretOn?.kind === "name" || caretOn?.kind === "contact";
-  const kindOn = caretOn?.kind ?? null;
+  // ---- toolbar, in Google Docs order: paragraph style, font size, bold/italic/underline, align, list ----
+  const on = fmtState.active;
+  const sizeOptions: readonly number[] =
+    fmtState.size !== null && !(FONT_SIZES as readonly number[]).includes(fmtState.size)
+      ? [...FONT_SIZES, fmtState.size].sort((x, y) => x - y)
+      : FONT_SIZES;
   const toolbar = actionsSlot ? (
     createPortal(
       <div role="toolbar" aria-label="Formatting" className="flex shrink-0 items-center gap-1">
         <select
           aria-label="Paragraph style"
-          className="h-8 rounded-md border border-border bg-surface px-2 text-sm text-fg"
-          disabled={!caretOn || headerLine}
-          value={kindOn ?? ""}
+          className="h-8 shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
+          disabled={!on}
+          value={fmtState.lineKind ?? ""}
           onChange={(e) => runOn(viewRef.current, setLineKindCommand(e.target.value as LineKind))}
         >
-          {!caretOn && <option value="" disabled>Paragraph style</option>}
-          {headerLine && kindOn && <option value={kindOn} disabled>{kindOn === "name" ? "Name" : "Contact line"}</option>}
-          {caretOn && !headerLine && LINE_KIND_LABELS.map((k) => (
+          {!fmtState.lineKind && <option value="" disabled>Paragraph style</option>}
+          {LINE_KIND_LABELS.map((k) => (
             <option key={k.kind} value={k.kind}>{k.label}</option>
           ))}
         </select>
+        <select
+          aria-label="Font size"
+          className="h-8 w-[4.5rem] shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
+          disabled={!on}
+          value={fmtState.size === null ? "" : String(fmtState.size)}
+          onChange={(e) => runOn(viewRef.current, setSizeCommand(Number(e.target.value)))}
+        >
+          {fmtState.size === null && <option value="" disabled>—</option>}
+          {sizeOptions.map((pt) => (
+            <option key={pt} value={String(pt)}>{pt}</option>
+          ))}
+        </select>
+        <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
+        {MARK_BUTTONS.map((b) => (
+          <button
+            key={b.name}
+            type="button"
+            className="icon-btn shrink-0 aria-pressed:bg-surface-2 aria-pressed:text-fg"
+            title={b.title}
+            aria-label={b.title}
+            aria-pressed={fmtState[b.name]}
+            disabled={!on}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => runOn(viewRef.current, toggleMarkCommand(b.name))}
+          >
+            <span className={`leading-none ${b.glyphClass}`}>{b.glyph}</span>
+          </button>
+        ))}
+        <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
+        {ALIGN_BUTTONS.map(({ align, title, Icon }) => (
+          <button
+            key={align}
+            type="button"
+            className="icon-btn shrink-0 aria-pressed:bg-surface-2 aria-pressed:text-fg"
+            title={title}
+            aria-label={title}
+            aria-pressed={fmtState.align === align}
+            disabled={!on}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => runOn(viewRef.current, setAlignCommand(align))}
+          >
+            <Icon className="h-4 w-4" />
+          </button>
+        ))}
         <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
         <button
           type="button"
-          className="icon-btn aria-pressed:bg-surface-2 aria-pressed:text-fg"
-          title="Bold (Ctrl+B)"
-          aria-label="Bold (Ctrl+B)"
-          aria-pressed={fmtState.bold}
-          disabled={!fmtState.canFormat}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => runOn(viewRef.current, toggleStyleCommand("bold"))}
-        >
-          <span className="text-[14px] leading-none font-bold">B</span>
-        </button>
-        <button
-          type="button"
-          className="icon-btn aria-pressed:bg-surface-2 aria-pressed:text-fg"
-          title="Italic (Ctrl+I)"
-          aria-label="Italic (Ctrl+I)"
-          aria-pressed={fmtState.italic}
-          disabled={!fmtState.canFormat}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => runOn(viewRef.current, toggleStyleCommand("italic"))}
-        >
-          <span className="font-serif text-[16px] leading-none italic">I</span>
-        </button>
-        <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />
-        <button
-          type="button"
-          className="icon-btn aria-pressed:bg-surface-2 aria-pressed:text-fg"
+          className="icon-btn shrink-0 aria-pressed:bg-surface-2 aria-pressed:text-fg"
           title="Bulleted list"
           aria-label="Bulleted list"
-          aria-pressed={kindOn === "bullet"}
-          disabled={!caretOn || headerLine}
+          aria-pressed={fmtState.lineKind === "bullet"}
+          disabled={!on}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => runOn(viewRef.current, setLineKindCommand(kindOn === "bullet" ? "text" : "bullet"))}
+          onClick={() => runOn(viewRef.current, setLineKindCommand(fmtState.lineKind === "bullet" ? "text" : "bullet"))}
         >
           <ListIcon className="h-4 w-4" />
         </button>
@@ -523,7 +577,7 @@ export function ResumeDocument({
       >
         <div className="doc-page">
           {/* Page-break guide (desktop only) */}
-          <div aria-hidden className="doc-pagebreak" style={{ top: PAGE_H }}>
+          <div aria-hidden className="doc-pagebreak" style={{ top: PAGE_H - MARGIN_Y }}>
             <span>Page 2</span>
           </div>
           <div ref={contentRef} className="doc-content">
@@ -551,68 +605,4 @@ export function ResumeDocument({
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, from + length)));
     view.focus();
   }
-}
-
-// ---------- read-only view ----------
-
-/** The same Harvard page, not editable (e.g. the frozen copy that was submitted). */
-export function ResumeView({ value }: { value: Resume }) {
-  return (
-    <div className="doc-canvas">
-      <div className="doc-page doc-readonly">
-        <div className="doc-content">
-          <div className="text-center">
-            {value.header.name && <div className={`doc-name ${styleCls(effectiveStyle("name", value.header.styles?.name))}`}>{value.header.name}</div>}
-            {value.header.contact && (
-              <div className={`doc-contact ${styleCls(effectiveStyle("contact", value.header.styles?.contact))}`}>{value.header.contact}</div>
-            )}
-          </div>
-          {value.sections.map((section) => (
-            <section key={section.id} className="doc-section">
-              <h3 className={`doc-section-title ${styleCls(effectiveStyle("sectionTitle", section.style))}`}>{section.title}</h3>
-              {section.items.map((it) => {
-                const st = (f: "title" | "subtitle" | "location" | "dates") => styleCls(effectiveStyle(f, it.styles?.[f], it));
-                return isInlineItem(it) ? (
-                  <div key={it.id} className="doc-entry">
-                    {it.subtitle ? (
-                      <>
-                        <span className={st("title")}>{it.title}:</span> <span className={st("subtitle")}>{it.subtitle}</span>
-                      </>
-                    ) : (
-                      <span className={st("title")}>{it.title}</span>
-                    )}
-                  </div>
-                ) : (
-                  <div key={it.id} className="doc-entry">
-                    <div className="flex flex-wrap items-baseline gap-x-3">
-                      <span className={st("title")}>{it.title}</span>
-                      <span className={`ml-auto ${st("location")}`}>{it.location}</span>
-                    </div>
-                    {(it.subtitle || it.dates) && (
-                      <div className="flex flex-wrap items-baseline gap-x-3">
-                        <span className={st("subtitle")}>{it.subtitle}</span>
-                        <span className={`ml-auto ${st("dates")}`}>{it.dates}</span>
-                      </div>
-                    )}
-                    {it.bullets.some((b) => b.text.trim()) && (
-                      <ul className="doc-bullets">
-                        {it.bullets
-                          .filter((b) => b.text.trim())
-                          .map((b) => (
-                            <li key={b.id} className="flex">
-                              <span aria-hidden className="select-none pr-2 pl-1">•</span>
-                              <span className="min-w-0 flex-1">{b.text}</span>
-                            </li>
-                          ))}
-                      </ul>
-                    )}
-                  </div>
-                );
-              })}
-            </section>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }

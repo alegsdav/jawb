@@ -125,7 +125,10 @@ body {
   .ph-mirror { font-size: 16px !important; }
 }
 
-/* ---------- Resume "document" (Harvard single-page layout on paper) ---------- */
+/* ---------- Document page (the resume editor and the read-only view) ----------
+   The page setup is the only fixed look: US Letter, margins 0.2in top/bottom and 0.42in left/right,
+   Calibri 11pt (Carlito where Calibri isn't installed). Everything else comes from the data: marks and
+   paragraph formatting (see the line classes below). Sizes and spacing are in em relative to 11pt. */
 @layer components {
 .doc-canvas {
   background: transparent;
@@ -138,14 +141,13 @@ body {
   width: 100%;
   max-width: 816px;            /* 8.5in */
   min-height: 1056px;          /* 11in */
-  padding: 58px;               /* 0.6in */
+  padding: 0.2in 0.42in;
   background: #fff;
   box-shadow: 0 1px 3px rgb(60 64 67 / 0.15), 0 4px 8px 3px rgb(60 64 67 / 0.08);
-  border-radius: 0;
   color: #111;
-  font-family: "Times New Roman", Times, "Liberation Serif", serif;
-  font-size: 14.67px;          /* 11pt */
-  line-height: 1.25;
+  font-family: Calibri, Carlito, "Liberation Sans", Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.15;
 }
 .doc-content { position: relative; }
 .doc-pagebreak {
@@ -157,54 +159,39 @@ body {
   position: absolute; right: 8px; top: 4px;
   font: 11px/1 var(--font-ui), system-ui, sans-serif; color: #9a9a95;
 }
-.doc-name { font-size: 22px; line-height: 1.2; text-align: center; } /* weight comes from the line's bold/italic style */
-.doc-contact { font-size: 13.3px; margin-top: 2px; }
-.doc-section { margin-top: 4px; padding-top: 8px; }
-.doc-section-title {
-  display: block; width: 100%;
-  text-transform: uppercase; letter-spacing: 0.04em;
-  border-bottom: 1px solid #111; border-radius: 0; padding-bottom: 1px; margin-bottom: 5px;
-}
-.doc-entry { margin-bottom: 6px; }
-.doc-bullets { margin-top: 1px; padding-left: 10px; }
-.doc-bullets li + li { margin-top: 1px; }
 .doc-ui { font-family: var(--font-ui), system-ui, sans-serif; }
-/* Read-only page (submitted snapshot) */
-.doc-readonly .doc-contact, .doc-readonly .doc-entry { white-space: pre-wrap; overflow-wrap: anywhere; }
+.doc-readonly { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* The editor: one continuous contentEditable document (ProseMirror). Each line is a block with its paragraph style. */
+/* The editor: one continuous contentEditable document (ProseMirror). Each line is a block; its paragraph
+   formatting comes from the doc-align-* / doc-rule / doc-caps classes and its marks from <strong>, <em>, <u>
+   and sized spans. The same classes style the read-only view. */
 .doc-editor { outline: none; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; caret-color: #111; }
-.doc-line { position: relative; min-height: 1.25em; }
-.doc-line-name { font-size: 22px; line-height: 1.2; text-align: center; }
-.doc-line-contact { font-size: 13.3px; margin-top: 2px; text-align: center; }
-.doc-line-heading {
-  text-transform: uppercase; letter-spacing: 0.04em;
-  border-bottom: 1px solid #111; padding-bottom: 1px; margin-top: 12px; margin-bottom: 5px;
-}
+.doc-line { position: relative; min-height: 1.15em; }
 .doc-line-entry, .doc-line-role { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
-.doc-line-entry { margin-top: 6px; }
-.doc-line-heading + .doc-line-entry, .doc-line-heading + .doc-line-text { margin-top: 0; }
 .doc-tab { flex: 1 1 auto; min-width: 12px; align-self: stretch; }
-.doc-line-bullet { padding-left: 24px; margin-top: 1px; border-radius: 2px; }
-.doc-line-bullet::before { content: "•"; position: absolute; left: 11px; user-select: none; -webkit-user-select: none; }
+.doc-line-bullet { padding-left: 18pt; }
+.doc-line-bullet::before { content: "•"; position: absolute; left: 6pt; user-select: none; -webkit-user-select: none; }
+.doc-align-center { text-align: center; }
+.doc-align-right { text-align: right; }
+.doc-align-justify { text-align: justify; }
+.doc-line-entry.doc-align-center, .doc-line-role.doc-align-center { justify-content: center; }
+.doc-line-entry.doc-align-right, .doc-line-role.doc-align-right { justify-content: flex-end; }
+.doc-rule { border-bottom: 0.75pt solid #111; padding-bottom: 1pt; margin-bottom: 2pt; }
+.doc-caps { text-transform: uppercase; }
 .doc-placeholder { color: #b0b0aa; pointer-events: none; user-select: none; -webkit-user-select: none; }
 .doc-ph { background: #ffd84d; border-radius: 2px; box-shadow: 0 0 0 1px #d9a800; }
 /* The rating dot and the change bar sit in the page margin, beside the line. */
-.doc-dot { left: -14px; }
-.doc-changebar { right: -22px; }
+.doc-dot { left: -12px; }
+.doc-changebar { right: -16px; }
 @media (max-width: 900px) {
   .doc-pagebreak { display: none; }
 }
 @media (max-width: 639px) {
-  /* Phones get a reflowed page, like Google Docs' mobile view. */
+  /* Phones get a reflowed page, like Google Docs' mobile view. 16px keeps iOS from zooming into the editor. */
   .doc-canvas { padding: 0 0 24px; background: #fff; min-height: calc(100dvh - 12rem); }
   .doc-page { min-height: 0; padding: 20px 16px; font-size: 16px; box-shadow: none; }
-  .doc-name, .doc-line-name { font-size: 24px; }
-  .doc-contact { font-size: 16px; } /* >= 16px so iOS doesn't zoom when it's focused */
-  .doc-line-contact { font-size: 16px; }
-  .doc-bullets { padding-left: 2px; }
-  .doc-line-bullet { padding-left: 14px; }
-  .doc-line-bullet::before { left: 2px; }
+  .doc-line-bullet { padding-left: 14pt; }
+  .doc-line-bullet::before { left: 2pt; }
   .doc-dot { left: -12px; }
   .doc-changebar { right: -10px; }
 }
@@ -215,6 +202,9 @@ body {
 
 }
 
+/* The editor's focus is the page itself: no blue box around the whole document while typing. */
+.doc-editor:focus, .doc-editor:focus-visible { outline: none; }
+
 /* Print: only the resume sheet(s), no app chrome, no zoom scaling, no placeholders or highlights. */
 @media print {
   @page { size: letter; margin: 0; }
@@ -223,7 +213,7 @@ body {
   .doc-page, .doc-page * { visibility: visible !important; }
   .doc-page { position: absolute; left: 0; top: 0; box-shadow: none !important; margin: 0 !important; }
   .zoom-frame { transform: none !important; }
-  .doc-ui, .doc-pagebreak { display: none !important; }
+  .doc-ui, .doc-pagebreak, .doc-placeholder { display: none !important; }
   .doc-ph { background: transparent !important; box-shadow: none !important; }
   ::placeholder { color: transparent !important; }
 }
