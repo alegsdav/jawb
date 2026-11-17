@@ -233,6 +233,41 @@ describe("resumeToLines", () => {
     ]);
   });
 
+  it("emits no heading for an untitled first section with items, so no blank line appears", () => {
+    const r: Resume = {
+      header: { name: "Ada", contact: "London" },
+      sections: [
+        { id: "pre", title: "", items: [{ id: "k", title: "ada@example.com", subtitle: "", location: "", dates: "", bullets: [] }] },
+        { id: "edu", title: "EDUCATION", items: [] },
+      ],
+    };
+    expect(resumeToLines(r)).toStrictEqual<DocLine[]>([
+      { kind: "name", text: "Ada" },
+      { kind: "contact", text: "London" },
+      { kind: "text", text: "ada@example.com", sid: "pre", iid: "k" },
+      { kind: "heading", text: "EDUCATION", sid: "edu" },
+    ]);
+  });
+
+  it("keeps the heading of an untitled section that is not first, so its boundary survives", () => {
+    const r: Resume = {
+      header: { name: "Ada", contact: "" },
+      sections: [
+        { id: "a", title: "A", items: [] },
+        { id: "b", title: "", items: [{ id: "k", title: "X", subtitle: "", location: "", dates: "", bullets: [] }] },
+      ],
+    };
+    // The empty contact is omitted (the resume has content), as for any other resume.
+    expect(resumeToLines(r).map((l) => l.kind)).toEqual(["name", "heading", "heading", "text"]);
+  });
+
+  it("keeps the heading of an untitled first section with no items", () => {
+    expect(resumeToLines({ header: { name: "Ada", contact: "" }, sections: [{ id: "s", title: "", items: [] }] })).toStrictEqual([
+      { kind: "name", text: "Ada" },
+      { kind: "heading", text: "", sid: "s" },
+    ]);
+  });
+
   it("emits both empty header lines only for a completely blank resume", () => {
     expect(resumeToLines({ header: { name: "", contact: "" }, sections: [] })).toStrictEqual([
       { kind: "name", text: "" },
@@ -509,10 +544,44 @@ describe("linesToResume", () => {
   });
 });
 
+describe("round trip of an untitled section before the first heading", () => {
+  const untitled: Resume = {
+    header: { name: "Ada", contact: "London" },
+    sections: [
+      {
+        id: "pre",
+        title: "",
+        items: [
+          { id: "k", title: "ada@example.com", subtitle: "", location: "", dates: "", bullets: [] },
+        ],
+      },
+      { id: "edu", title: "EDUCATION", items: [] },
+    ],
+  };
+
+  it("linesToResume(resumeToLines(r)) gives back r", () => {
+    const { resume: back } = linesToResume(resumeToLines(untitled), untitled);
+    expect(back).toStrictEqual(untitled);
+  });
+
+  it("resumeToLines(linesToResume(lines)) gives back the same lines", () => {
+    const lines = resumeToLines(untitled);
+    const { resume } = linesToResume(lines, untitled);
+    expect(resumeToLines(resume)).toStrictEqual(lines);
+  });
+
+  it("a text line typed before the first heading is an untitled section with no blank heading after a rebuild", () => {
+    const lines = [...head, line({ kind: "text", text: "ada@example.com", sid: "pre", iid: "k" }), line({ kind: "heading", text: "S", sid: "s" })];
+    const { resume } = linesToResume(lines, untitled);
+    expect(resume.sections[0].title).toBe("");
+    expect(resumeToLines(resume).filter((l) => l.kind === "heading").map((l) => l.text)).toEqual(["S"]);
+  });
+});
+
 describe("nextKind", () => {
   it("follows the Enter table", () => {
     expect(nextKind("name")).toBe("contact");
-    expect(nextKind("contact")).toBe("heading");
+    expect(nextKind("contact")).toBe("text");
     expect(nextKind("heading")).toBe("entry");
     expect(nextKind("entry")).toBe("role");
     expect(nextKind("role")).toBe("bullet");

@@ -101,6 +101,21 @@ describe("linesInSelection", () => {
     expect(linesInSelection(make(doc, [0, 1], [1, 1])).map((l) => l.index)).toEqual([0, 1]);
   });
 
+  it("leaves out an empty last line that a range ends at offset 0 of (the range reaches no content in it)", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "aaa" }, { kind: "text", text: "" }];
+    expect(linesInSelection(make(doc, [0, 1], [1, 0])).map((l) => l.index)).toEqual([0]);
+  });
+
+  it("includes an empty last line when the caret is on it", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "aaa" }, { kind: "text", text: "" }];
+    expect(linesInSelection(make(doc, [1, 0])).map((l) => l.index)).toEqual([1]);
+  });
+
+  it("includes an empty line that a range runs through", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "" }, { kind: "text", text: "bbb" }];
+    expect(linesInSelection(make(doc, [0, 0], [1, 2])).map((l) => l.index)).toEqual([0, 1]);
+  });
+
   it("returns every line for AllSelection", () => {
     const s = EditorState.create({ doc: linesToDoc(DOC), plugins: [headerGuard] });
     const withAll = s.apply(s.tr.setSelection(new AllSelection(s.doc)));
@@ -167,6 +182,36 @@ describe("headerGuard", () => {
 });
 
 describe("enterCommand", () => {
+  it("at the end of the name with an empty contact line after it: the caret moves there, no new line", () => {
+    const doc: DocLine[] = [{ kind: "name", text: "Ada" }, { kind: "contact", text: "" }, { kind: "heading", text: "S" }];
+    const r = run(make(doc, [0, 3]), enterCommand);
+    expect(lines(r.state)).toEqual(doc);
+    expect(caret(r.state)).toEqual({ index: 1, offset: 0 });
+  });
+
+  it("at the end of an empty name with an empty contact after it: the caret moves to the contact", () => {
+    const doc: DocLine[] = [{ kind: "name", text: "" }, { kind: "contact", text: "" }];
+    const r = run(make(doc, [0, 0]), enterCommand);
+    expect(lines(r.state)).toEqual(doc);
+    expect(caret(r.state)).toEqual({ index: 1, offset: 0 });
+  });
+
+  it("typing from scratch: name, Enter, email lands in the contact line, not a text line below it", () => {
+    const empty: DocLine[] = [{ kind: "name", text: "" }, { kind: "contact", text: "" }];
+    let s = make(empty, [0, 0]);
+    s = s.apply(s.tr.insertText("Ada"));
+    s = run(s, enterCommand).state;
+    s = s.apply(s.tr.insertText("ada@example.com"));
+    expect(lines(s)).toEqual([{ kind: "name", text: "Ada" }, { kind: "contact", text: "ada@example.com" }]);
+  });
+
+  it("at the end of a contact line, Enter adds a text line, not a heading", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "heading", text: "S" }];
+    const r = run(make(doc, [1, 6]), enterCommand);
+    expect(lines(r.state)).toEqual([...HEADER.slice(0, 1), { kind: "contact", text: "London" }, { kind: "text", text: "" }, { kind: "heading", text: "S" }]);
+    expect(caret(r.state)).toEqual({ index: 2, offset: 0 });
+  });
+
   it("in the middle of the name splits it: the new line is text, since a contact exists", () => {
     const r = run(make(DOC, [0, 2]), enterCommand);
     expect(r.ok).toBe(true);

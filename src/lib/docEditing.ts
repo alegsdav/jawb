@@ -221,7 +221,16 @@ export const enterCommand: Command = (state, dispatch) => {
     return finish(setCaret(tr, insertAt + 1), dispatch);
   }
 
-  // d. Otherwise split the line at the caret. The new line keeps the paragraph formatting, not the ids.
+  // d. Enter at the end of the name, with an empty contact line right after it: the caret goes there. A new
+  // contact could not be added (there is one), and splitting would strand the empty contact below the new line.
+  if (kind === "name" && offset === line.content.size) {
+    const after = tr.doc.maybeChild(index + 1);
+    if (after?.attrs.kind === "contact" && after.textContent === "") {
+      return finish(setCaret(tr, pos + line.nodeSize + 1), dispatch);
+    }
+  }
+
+  // e. Otherwise split the line at the caret. The new line keeps the paragraph formatting, not the ids.
   const newKind = nextKind(kind);
   const headerTaken = isHeader(newKind) && hasOtherKind(tr.doc, newKind, index);
   const splitKind: LineKind = headerTaken ? "text" : newKind;

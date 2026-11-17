@@ -54,9 +54,13 @@ export function resumeToLines(r: Resume): DocLine[] {
   if (name || blank) lines.push({ kind: "name", text: name, ...fmt(r.header.marks?.name, r.header.para?.name) });
   if (contact || blank) lines.push({ kind: "contact", text: contact, ...fmt(r.header.marks?.contact, r.header.para?.contact) });
 
-  for (const section of r.sections) {
+  for (const [index, section] of r.sections.entries()) {
     const sid = section.id;
-    lines.push({ kind: "heading", text: section.title, sid, ...fmt(section.marks, section.para) });
+    const sectionFmt = fmt(section.marks, section.para);
+    // An untitled first section with items has no heading line: its items start the resume, and linesToResume
+    // reads them back into the same untitled section. Any other section keeps its heading, so its boundary survives.
+    const implicit = index === 0 && section.title === "" && section.items.length > 0 && !sectionFmt.marks && !sectionFmt.para;
+    if (!implicit) lines.push({ kind: "heading", text: section.title, sid, ...sectionFmt });
     for (const item of section.items) {
       if (isInlineItem(item)) {
         lines.push(inlineLine(item, sid));
@@ -268,7 +272,7 @@ export function linesToResume(lines: DocLine[], prev: Resume): { resume: Resume;
 
 const NEXT_KIND: Record<LineKind, LineKind> = {
   name: "contact",
-  contact: "heading",
+  contact: "text",
   heading: "entry",
   entry: "role",
   role: "bullet",
