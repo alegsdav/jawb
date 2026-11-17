@@ -23,21 +23,36 @@ export function isDocUndoTarget(target: EventTarget | MaybeElement): boolean {
 }
 
 /**
- * Undo/redo for a document value. Rapid edits (typing) coalesce into one step;
- * structural edits pass commit=true to always create a step.
+ * Whether an edit may join the previous undo step. Only a quick follow-up (under 1s) on the same
+ * coalesce key does: a change on another line (different key) always starts a new step. Callers that
+ * pass no key get the old behavior (any quick edit joins). commit=true never joins.
+ */
+export function joinsPreviousStep(
+  prev: { at: number; key?: string },
+  now: number,
+  commit: boolean,
+  key?: string,
+): boolean {
+  return !commit && prev.at !== 0 && now - prev.at < 1000 && key === prev.key;
+}
+
+/**
+ * Undo/redo for a document value. Rapid edits (typing) coalesce into one step, but only on the same
+ * line: pass a `key` identifying the edit location (e.g. the caret's line) as the third argument of
+ * `set`. Structural edits pass commit=true to always create a step.
  * Binds Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y while mounted, but only for keypresses in the
  * document (see isDocUndoTarget); other fields keep the browser's native undo.
  */
 export function useHistory<T>() {
   const [s, setS] = useState<State<T>>({ past: [], present: null, future: [] });
-  const lastEdit = useRef(0);
+  const lastEdit = useRef<{ at: number; key?: string }>({ at: 0 });
 
   const reset = useCallback((v: T) => setS({ past: [], present: v, future: [] }), []);
 
-  const set = useCallback((next: T | ((prev: T) => T), commit = false) => {
+  const set = useCallback((next: T | ((prev: T) => T), commit = false, key?: string) => {
     const now = Date.now();
-    const coalesce = !commit && now - lastEdit.current < 1000;
-    lastEdit.current = commit ? 0 : now;
+    const coalesce = joinsPreviousStep(lastEdit.current, now, commit, key);
+    lastEdit.current = commit ? { at: 0 } : { at: now, key };
     setS((st) => {
       if (st.present === null) return st;
       const v = typeof next === "function" ? (next as (p: T) => T)(st.present) : next;
@@ -47,7 +62,7 @@ export function useHistory<T>() {
   }, []);
 
   const undo = useCallback(() => {
-    lastEdit.current = 0;
+    lastEdit.current = { at: 0 };
     setS((st) =>
       st.past.length && st.present !== null
         ? { past: st.past.slice(0, -1), present: st.past[st.past.length - 1], future: [st.present, ...st.future] }
@@ -56,7 +71,7 @@ export function useHistory<T>() {
   }, []);
 
   const redo = useCallback(() => {
-    lastEdit.current = 0;
+    lastEdit.current = { at: 0 };
     setS((st) =>
       st.future.length && st.present !== null
         ? { past: [...st.past, st.present], present: st.future[0], future: st.future.slice(1) }
