@@ -30,7 +30,7 @@ import {
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
 import { ResumeDocument } from "@/components/ResumeDocument";
-import { EMPTY_FORMAT_STATE, FONT_SIZES, LINE_KIND_LABELS, type Align, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
+import { EMPTY_FORMAT_STATE, LINE_KIND_LABELS, MENU_FONT_SIZES, type Align, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { JobHeader } from "@/components/job/JobHeader";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
@@ -164,6 +164,9 @@ export default function JobPage() {
   const [factUndo, setFactUndo] = useState<Fact | null>(null);
   /** Imperative document commands (bold, italic, reset, set a line's style) for the Format menu. */
   const commandsRef = useRef<DocCommands | null>(null);
+  /** Undo/redo from the toolbar or Edit menu; the editor gets focus back so the next keystrokes land in it. */
+  const undoAndFocus = () => { doc.undo(); commandsRef.current?.focus(); };
+  const redoAndFocus = () => { doc.redo(); commandsRef.current?.focus(); };
   /** Formatting state of the caret's line (drives the Format menu's check marks and enabled states). */
   const [formatState, setFormatState] = useState<FormatState>(EMPTY_FORMAT_STATE);
 
@@ -1154,8 +1157,8 @@ export default function JobPage() {
           </MenuItem>
         </MenuBarMenu>
         <MenuBarMenu label="Edit">
-          <MenuItem onSelect={doc.undo} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
-          <MenuItem onSelect={doc.redo} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
+          <MenuItem onSelect={undoAndFocus} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
+          <MenuItem onSelect={redoAndFocus} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
           <MenuSeparator />
           <MenuItem onSelect={() => void docEdit("cut")} disabled={!formatState.active} shortcut="Ctrl+X">Cut</MenuItem>
           <MenuItem onSelect={() => void docEdit("copy")} disabled={!formatState.active} shortcut="Ctrl+C">Copy</MenuItem>
@@ -1190,7 +1193,7 @@ export default function JobPage() {
         </MenuItem>
         <MenuSeparator />
         <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
-        {FONT_SIZES.map((pt) => (
+        {MENU_FONT_SIZES.map((pt) => (
           <MenuItem key={pt} onSelect={() => commandsRef.current?.setSize(pt)} disabled={!formatState.active}>
             <span className="flex items-center gap-1.5">{tick(formatState.size === pt)}{`${pt} pt`}{formatState.size === pt && <span className="sr-only">(current)</span>}</span>
           </MenuItem>
@@ -1260,7 +1263,7 @@ export default function JobPage() {
       {resumeBar && (
         <div className={`shrink-0 ${tab === "analysis" ? "hidden lg:block" : ""}`}>
           <EditorToolbar>
-            <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
+            <UndoRedo undo={undoAndFocus} redo={redoAndFocus} canUndo={doc.canUndo} canRedo={doc.canRedo} />
             <IconButton label="Print (Ctrl+P)" onClick={() => window.print()}>
               <PrintIcon />
             </IconButton>

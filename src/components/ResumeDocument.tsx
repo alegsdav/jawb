@@ -336,6 +336,19 @@ export function ResumeDocument({
     if (view) view.dispatch(view.state.tr.setMeta(REDECORATE, true));
   }, [decoOpts, selActive]);
 
+  // Escape clears the selection and closes the comment card, wherever focus is (the card's buttons included).
+  // An open menu takes the Escape first.
+  useEffect(() => {
+    if (!selActive) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      if (document.querySelector('[role="menu"]')) return;
+      setSelActiveState(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selActive]);
+
   // Selection is cleared by a pointer or focus outside the document, its toolbar and the comment card.
   // Menus and toolbars marked data-doc-keep-selection don't count as outside.
   // (Not on blur: iOS Safari never focuses buttons, so blur/relatedTarget can't tell a toolbar tap from leaving.)
@@ -429,6 +442,8 @@ export function ResumeDocument({
     commandsRef.current = {
       toggleMark: (mark) => runOn(viewRef.current, toggleMarkCommand(mark)),
       setSize: (pt) => runOn(viewRef.current, setSizeCommand(pt)),
+      // After the external-sync effect has restored the caret (undo/redo re-render first).
+      focus: () => requestAnimationFrame(() => viewRef.current?.focus()),
       setAlign: (align) => runOn(viewRef.current, setAlignCommand(align)),
       toggleRule: () => runOn(viewRef.current, toggleParaFlagCommand("rule")),
       toggleCaps: () => runOn(viewRef.current, toggleParaFlagCommand("caps")),
@@ -570,10 +585,6 @@ export function ResumeDocument({
         ref={canvasRef}
         className="doc-canvas"
         onPointerDownCapture={() => setSelActiveState(true)}
-        onKeyDown={(e) => {
-          // Escape clears the selection, unless a menu or popover inside the canvas already handled it.
-          if (e.key === "Escape" && !e.defaultPrevented && !e.nativeEvent.isComposing) setSelActiveState(false);
-        }}
       >
         <div className="doc-page">
           {/* Page-break guide (desktop only) */}

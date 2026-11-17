@@ -9,7 +9,7 @@ import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
 import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import type { Fact, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
-import { EMPTY_FORMAT_STATE, FONT_SIZES, LINE_KIND_LABELS, type Align, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
+import { EMPTY_FORMAT_STATE, LINE_KIND_LABELS, MENU_FONT_SIZES, type Align, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { CoachPanel } from "@/components/CoachPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
@@ -165,6 +165,9 @@ export default function MasterResumePage() {
   const [commentEl, setCommentEl] = useState<HTMLDivElement | null>(null);
   /** The document's commands (bold, italic, reset, set a line's style) for the Format menu. */
   const commandsRef = useRef<DocCommands | null>(null);
+  /** Undo/redo from the toolbar or Edit menu; the editor gets focus back so the next keystrokes land in it. */
+  const undoAndFocus = () => { doc.undo(); commandsRef.current?.focus(); };
+  const redoAndFocus = () => { doc.redo(); commandsRef.current?.focus(); };
   /** Formatting state of the caret's line (drives the Format menu's check marks and enabled states). */
   const [formatState, setFormatState] = useState<FormatState>(EMPTY_FORMAT_STATE);
   const [zoom, setZoom] = useZoom("resume");
@@ -395,8 +398,8 @@ export default function MasterResumePage() {
               <MenuItem onSelect={() => setImportOpen((o) => !o)}>Re-import resume</MenuItem>
             </MenuBarMenu>
             <MenuBarMenu label="Edit">
-              <MenuItem onSelect={doc.undo} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
-              <MenuItem onSelect={doc.redo} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
+              <MenuItem onSelect={undoAndFocus} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
+              <MenuItem onSelect={redoAndFocus} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
               <MenuSeparator />
               <MenuItem onSelect={() => void docEdit("cut")} disabled={!formatState.active} shortcut="Ctrl+X">Cut</MenuItem>
               <MenuItem onSelect={() => void docEdit("copy")} disabled={!formatState.active} shortcut="Ctrl+C">Copy</MenuItem>
@@ -438,7 +441,7 @@ export default function MasterResumePage() {
               </MenuItem>
               <MenuSeparator />
               <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
-              {FONT_SIZES.map((pt) => {
+              {MENU_FONT_SIZES.map((pt) => {
                 const current = formatState.size === pt;
                 return (
                   <MenuItem key={pt} onSelect={() => commandsRef.current?.setSize(pt)} disabled={!formatState.active}>
@@ -526,7 +529,7 @@ export default function MasterResumePage() {
 
       {!empty && (
         <EditorToolbar>
-          <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
+          <UndoRedo undo={undoAndFocus} redo={redoAndFocus} canUndo={doc.canUndo} canRedo={doc.canRedo} />
           <IconButton label="Print (Ctrl/⌘+P)" onClick={() => window.print()}>
             <PrintIcon />
           </IconButton>

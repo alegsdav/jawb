@@ -96,7 +96,7 @@ export function Menu({
           data-doc-keep-selection
           role="menu"
           onKeyDown={onListKey}
-          className={`float-dark absolute top-full z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] p-1 ${
+          className={`float-dark absolute top-full z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-8rem)] overflow-y-auto p-1 ${
             alignLeft ? "left-0" : "right-0"
           }`}
         >

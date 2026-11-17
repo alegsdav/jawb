@@ -11,6 +11,8 @@ export type Align = NonNullable<Para["align"]> | "left";
 /** Font sizes offered in the toolbar and Format menu, in points. 11 is the default (no size mark). */
 export const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28] as const;
 export const DEFAULT_FONT_SIZE = 11;
+/** The shorter size list in the Format menus (the toolbar select keeps all of FONT_SIZES). */
+export const MENU_FONT_SIZES = [8, 10, 11, 12, 14, 16, 18, 24] as const;
 
 /** Imperative document commands for the page's Format menu and shortcuts. They act on the editor's selection. */
 export type DocCommands = {
@@ -18,6 +20,8 @@ export type DocCommands = {
   toggleMark(mark: MarkName): void;
   /** Set the font size (points) of the selection. 11 removes the size mark. */
   setSize(pt: number): void;
+  /** Give the editor keyboard focus without moving the selection (after undo/redo from a toolbar or menu). */
+  focus(): void;
   /** Align every line touched by the selection. */
   setAlign(align: Align): void;
   /** Toggle the rule line under / ALL CAPS / extra space before, on every line touched by the selection. */
