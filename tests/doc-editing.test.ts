@@ -91,6 +91,16 @@ describe("linesInSelection", () => {
     expect(linesInSelection(make(DOC, [2, 3], [4, 1])).map((l) => l.index)).toEqual([2, 3, 4]);
   });
 
+  it("leaves out a line that a range ends at offset 0 of", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "aaa" }, { kind: "text", text: "bbb" }];
+    expect(linesInSelection(make(doc, [0, 1], [1, 0])).map((l) => l.index)).toEqual([0]);
+  });
+
+  it("includes a line that a range reaches past offset 0 of", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "aaa" }, { kind: "text", text: "bbb" }];
+    expect(linesInSelection(make(doc, [0, 1], [1, 1])).map((l) => l.index)).toEqual([0, 1]);
+  });
+
   it("returns every line for AllSelection", () => {
     const s = EditorState.create({ doc: linesToDoc(DOC), plugins: [headerGuard] });
     const withAll = s.apply(s.tr.setSelection(new AllSelection(s.doc)));
@@ -290,11 +300,19 @@ describe("backspaceCommand", () => {
     expect(caret(r.state)).toEqual({ index: 2, offset: 3 });
   });
 
-  it("deletes an empty first line and puts the caret at the start of the line below", () => {
+  it("does nothing at the start of the document, even on an empty first line", () => {
     const doc: DocLine[] = [{ kind: "text", text: "" }, { kind: "text", text: "X" }];
     const r = run(make(doc, [0, 0]), backspaceCommand);
-    expect(lines(r.state)).toEqual([{ kind: "text", text: "X" }]);
+    expect(r.ok).toBe(true);
+    expect(lines(r.state)).toEqual(doc);
     expect(caret(r.state)).toEqual({ index: 0, offset: 0 });
+  });
+
+  it("does nothing at the start of a filled first line", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "Hi" }, { kind: "text", text: "X" }];
+    const r = run(make(doc, [0, 0]), backspaceCommand);
+    expect(r.ok).toBe(true);
+    expect(lines(r.state)).toEqual(doc);
   });
 
   it("turns a bullet into text at offset 0", () => {
@@ -395,6 +413,19 @@ describe("toggleMarkCommand and formatAt", () => {
     expect(formatAt(whole).bold).toBe(false);
   });
 
+  it("on a mixed range makes the whole range bold; a fully bold range toggles off", () => {
+    const doc: DocLine[] = [...HEADER, { kind: "text", text: "abcd", marks: [{ from: 0, to: 2, bold: true }] }];
+    const mixed = make(doc, [2, 0], [2, 4]);
+    expect(formatAt(mixed).bold).toBe(false);
+    const all = run(mixed, toggleMarkCommand("bold")).state;
+    expect(lines(all)[2].marks).toEqual([{ from: 0, to: 4, bold: true }]);
+    const selected = all.apply(all.tr.setSelection(TextSelection.create(all.doc, docPos(all.doc, 2, 0), docPos(all.doc, 2, 4))));
+    expect(formatAt(selected).bold).toBe(true);
+    const off = run(selected, toggleMarkCommand("bold")).state;
+    expect(lines(off)[2].marks).toBeUndefined();
+    expect(formatAt(off).bold).toBe(false);
+  });
+
   it("with a caret, toggles the stored marks and formatAt reports them", () => {
     const doc: DocLine[] = [...HEADER, { kind: "text", text: "Hello" }];
     const r = run(make(doc, [2, 3]), toggleMarkCommand("italic"));
@@ -437,6 +468,19 @@ describe("setSizeCommand", () => {
 });
 
 describe("setAlignCommand", () => {
+  it("a range that ends at offset 0 of the next line centers only the first line", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "aaa" }, { kind: "text", text: "bbb" }];
+    const r = run(make(doc, [0, 1], [1, 0]), setAlignCommand("center")).state;
+    expect(lines(r)[0].para).toEqual({ align: "center" });
+    expect(lines(r)[1].para).toBeUndefined();
+  });
+
+  it("a range that reaches past offset 0 of the next line centers both lines", () => {
+    const doc: DocLine[] = [{ kind: "text", text: "aaa" }, { kind: "text", text: "bbb" }];
+    const r = run(make(doc, [0, 1], [1, 1]), setAlignCommand("center")).state;
+    expect(lines(r).map((l) => l.para)).toEqual([{ align: "center" }, { align: "center" }]);
+  });
+
   it("aligns every line the selection touches; left removes the alignment", () => {
     const doc: DocLine[] = [...HEADER, { kind: "text", text: "A" }, { kind: "text", text: "B" }];
     const centered = run(make(doc, [2, 0], [3, 1]), setAlignCommand("center")).state;

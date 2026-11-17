@@ -24,7 +24,7 @@ const s = StyleSheet.create({
   rowLeft: { flexShrink: 1 },
   bullet: { flexDirection: "row", paddingLeft: 8 },
   bulletDot: { width: 10 },
-  bulletText: { flex: 1 },
+  bulletText: { flex: 1, lineHeight: 1.15 },
 });
 
 /** Most lines in one unbreakable entry group; longer groups may break across pages. */
@@ -42,6 +42,7 @@ function runNodes(text: string, marks: DocLine["marks"], caps: boolean): ReactEl
           fontStyle: run.italic ? "italic" : "normal",
           textDecoration: run.underline ? "underline" : "none",
           fontSize: run.size,
+          lineHeight: 1.15,
           ...(caps ? { textTransform: "uppercase" as const } : {}),
         },
       },
@@ -59,7 +60,7 @@ function pdfLine(line: DocLine, key: number): ReactElement {
     ...(para?.spaceBefore ? { marginTop: para.spaceBefore } : {}),
     ...(para?.rule ? s.rule : {}),
   };
-  const textStyle = { textAlign, ...(caps ? { textTransform: "uppercase" as const } : {}) };
+  const textStyle = { textAlign, lineHeight: 1.15, ...(caps ? { textTransform: "uppercase" as const } : {}) };
 
   if (line.kind === "bullet") {
     return h(
@@ -74,10 +75,12 @@ function pdfLine(line: DocLine, key: number): ReactElement {
     const right = line.right
       ? h(Text, { style: textStyle }, ...runNodes(line.right, line.rightMarks, caps))
       : null;
+    // An empty entry/role line still takes one line of height, like a blank text line.
+    const left = runNodes(line.text, line.marks, caps);
     return h(
       View,
       { key, style: [s.row, viewStyle] },
-      h(Text, { style: [s.rowLeft, textStyle] }, ...runNodes(line.text, line.marks, caps)),
+      h(Text, { style: [s.rowLeft, textStyle] }, ...(left.length ? left : [" "])),
       right,
     );
   }

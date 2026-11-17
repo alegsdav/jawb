@@ -55,5 +55,6 @@ function loginUrl(request: NextRequest, error?: string) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // fonts/ stays public: the signed-out pages (login, signup) load the Carlito font from there.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|fonts/).*)"],
 };

@@ -82,4 +82,42 @@ describe("ResumePdf", () => {
     expect(buffer.subarray(0, 4).toString("latin1")).toBe("%PDF");
     expect(buffer.length).toBeGreaterThan(2000);
   });
+
+  it("renders large runs, a bullet with a 14pt run, and an empty entry line", async () => {
+    const big: Resume = {
+      version: 3,
+      header: {
+        name: "Grace Hopper",
+        contact: "New York • grace@example.com",
+        marks: { name: [{ from: 0, to: 12, bold: true, size: 16 }] },
+        para: { name: { align: "center" }, contact: { align: "center" } },
+      },
+      sections: [
+        {
+          id: "exp",
+          title: "Experience",
+          items: [
+            {
+              id: "e1",
+              title: "",
+              subtitle: "",
+              location: "",
+              dates: "",
+              bullets: [
+                {
+                  id: "b1",
+                  text: "Led the compiler team to a 14pt milestone.",
+                  marks: [{ from: 0, to: 10, size: 14 }],
+                },
+              ],
+              para: { entry: {} },
+            },
+          ],
+        },
+      ],
+    };
+    const buffer = await renderToBuffer(ResumePdf({ resume: big }));
+    expect(buffer.subarray(0, 4).toString("latin1")).toBe("%PDF");
+    expect(buffer.length).toBeGreaterThan(1000);
+  });
 });

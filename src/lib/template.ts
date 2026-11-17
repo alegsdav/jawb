@@ -15,3 +15,10 @@ export const TEMPLATE = {
   heading: { format: { bold: true }, para: { rule: true, caps: true, spaceBefore: 6 } } satisfies Look,
   entry: { para: { spaceBefore: 3 } } satisfies { para: Para },
 };
+
+/**
+ * Whether an imported resume gets the template. Pasted text and uploaded .txt/.md files do (the AI output
+ * is plain, so the Harvard look is applied to it); an uploaded PDF does not, and comes in as plain text the
+ * user formats. A later "reformat to our template" button can apply the template on demand.
+ */
+export const templateForImport = (source: "pdf" | "text") => source === "text";

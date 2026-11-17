@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TEMPLATE } from "@/lib/template";
+import { TEMPLATE, templateForImport } from "@/lib/template";
 import { normalizeResume, RESUME_VERSION, resumeToPlainText, resumeToPromptText } from "@/lib/resume";
 import { buildDraftResume, emptyBuilder } from "@/lib/builder";
 
@@ -241,5 +241,12 @@ describe("the builder and the AI import get the template", () => {
     const r = normalizeResume({ ...(v2() as object), version: 2 });
     expect(r.header.para?.name).toEqual({ align: "center" });
     expect(r.sections[0].para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
+  });
+});
+
+describe("templateForImport", () => {
+  it("applies the template to pasted text and text uploads only, never to a PDF", () => {
+    expect(templateForImport("text")).toBe(true);
+    expect(templateForImport("pdf")).toBe(false);
   });
 });

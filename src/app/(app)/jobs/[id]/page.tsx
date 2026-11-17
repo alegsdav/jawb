@@ -1180,41 +1180,41 @@ export default function JobPage() {
         </MenuBarMenu>
         <MenuBarMenu label="Format">
         <MenuItem onSelect={() => commandsRef.current?.toggleMark("bold")} disabled={!formatState.active} shortcut="Ctrl+B">
-          <span className="flex items-center gap-1.5">{tick(formatState.bold)}Bold</span>
+          <span className="flex items-center gap-1.5">{tick(formatState.bold)}Bold{formatState.bold && <span className="sr-only">(on)</span>}</span>
         </MenuItem>
         <MenuItem onSelect={() => commandsRef.current?.toggleMark("italic")} disabled={!formatState.active} shortcut="Ctrl+I">
-          <span className="flex items-center gap-1.5">{tick(formatState.italic)}Italic</span>
+          <span className="flex items-center gap-1.5">{tick(formatState.italic)}Italic{formatState.italic && <span className="sr-only">(on)</span>}</span>
         </MenuItem>
         <MenuItem onSelect={() => commandsRef.current?.toggleMark("underline")} disabled={!formatState.active} shortcut="Ctrl+U">
-          <span className="flex items-center gap-1.5">{tick(formatState.underline)}Underline</span>
+          <span className="flex items-center gap-1.5">{tick(formatState.underline)}Underline{formatState.underline && <span className="sr-only">(on)</span>}</span>
         </MenuItem>
         <MenuSeparator />
         <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
         {FONT_SIZES.map((pt) => (
           <MenuItem key={pt} onSelect={() => commandsRef.current?.setSize(pt)} disabled={!formatState.active}>
-            <span className="flex items-center gap-1.5">{tick(formatState.size === pt)}{`${pt} pt`}</span>
+            <span className="flex items-center gap-1.5">{tick(formatState.size === pt)}{`${pt} pt`}{formatState.size === pt && <span className="sr-only">(current)</span>}</span>
           </MenuItem>
         ))}
         <MenuSeparator />
         {ALIGN_CHOICES.map(({ align, label, shortcut }) => (
           <MenuItem key={align} onSelect={() => commandsRef.current?.setAlign(align)} disabled={!formatState.active} shortcut={shortcut}>
-            <span className="flex items-center gap-1.5">{tick(formatState.align === align)}{label}</span>
+            <span className="flex items-center gap-1.5">{tick(formatState.align === align)}{label}{formatState.align === align && <span className="sr-only">(current)</span>}</span>
           </MenuItem>
         ))}
         <MenuSeparator />
         <MenuItem onSelect={() => commandsRef.current?.toggleRule()} disabled={!formatState.active}>
-          <span className="flex items-center gap-1.5">{tick(formatState.rule)}Line under</span>
+          <span className="flex items-center gap-1.5">{tick(formatState.rule)}Line under{formatState.rule && <span className="sr-only">(on)</span>}</span>
         </MenuItem>
         <MenuItem onSelect={() => commandsRef.current?.toggleCaps()} disabled={!formatState.active}>
-          <span className="flex items-center gap-1.5">{tick(formatState.caps)}All caps</span>
+          <span className="flex items-center gap-1.5">{tick(formatState.caps)}All caps{formatState.caps && <span className="sr-only">(on)</span>}</span>
         </MenuItem>
         <MenuItem onSelect={() => commandsRef.current?.toggleSpaceBefore()} disabled={!formatState.active}>
-          <span className="flex items-center gap-1.5">{tick(formatState.spaceBefore)}Space before line</span>
+          <span className="flex items-center gap-1.5">{tick(formatState.spaceBefore)}Space before line{formatState.spaceBefore && <span className="sr-only">(on)</span>}</span>
         </MenuItem>
         <MenuSeparator />
         {LINE_KIND_LABELS.map(({ kind, label, hint }) => (
           <MenuItem key={kind} onSelect={() => commandsRef.current?.setLineKind(kind)} disabled={!formatState.active} hint={hint}>
-            <span className="flex items-center gap-1.5">{tick(formatState.lineKind === kind)}{label}</span>
+            <span className="flex items-center gap-1.5">{tick(formatState.lineKind === kind)}{label}{formatState.lineKind === kind && <span className="sr-only">(current)</span>}</span>
           </MenuItem>
         ))}
         <MenuSeparator />

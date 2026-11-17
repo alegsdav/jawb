@@ -108,7 +108,9 @@ export function linesInSelection(state: EditorState): LineRef[] {
   for (let i = 0; i < doc.childCount; i++) {
     const node = doc.child(i);
     const end = pos + node.nodeSize;
-    const hit = from === to ? pos <= from && from < end : from < end && to > pos;
+    // A caret touches the line it is in. A range counts a line only when it reaches past the line's first
+    // content position, so a range that ends at offset 0 of the next line leaves that line out (as in Docs).
+    const hit = from === to ? pos <= from && from < end : from < end && to > pos + 1;
     if (hit) out.push({ index: i, pos, node });
     pos = end;
   }
@@ -250,6 +252,9 @@ export const backspaceCommand: Command = (state, dispatch) => {
 
   if (offset !== 0) return false;
 
+  // The start of the document: nothing to join or delete, even when the first line is empty (as in Docs).
+  if (index === 0) return true;
+
   // An empty line goes (unless it is the only line). The caret goes to the end of the line above,
   // or to the start of the next line when it was the first.
   if (line.textContent === "" && state.doc.childCount > 1) {
@@ -326,7 +331,8 @@ function setParaOf(tr: Transaction, lines: LineRef[], edit: (p: Para) => void): 
 
 /** Bold, italic or underline on the selection; with a caret, on what you type next. */
 export function toggleMarkCommand(name: MarkName): Command {
-  const cmd = toggleMark(docSchema.marks[name]);
+  // On a mixed range the mark is added to all of it (Docs); a range that is all marked loses it.
+  const cmd = toggleMark(docSchema.marks[name], null, { removeWhenPresent: false });
   return (state, dispatch) => {
     cmd(state, dispatch);
     return true;

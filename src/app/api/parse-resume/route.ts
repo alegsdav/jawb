@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/supabase/server";
 import { geminiJSON } from "@/lib/gemini";
 import { parseResumePrompt } from "@/lib/prompts";
 import { normalizeResume } from "@/lib/resume";
+import { templateForImport } from "@/lib/template";
 import { friendlyError } from "@/lib/api";
 import { budgetErrorResponse, withAiBudget } from "@/lib/aiBudget";
 
@@ -46,8 +47,12 @@ export async function POST(req: Request) {
         onUsage: meter.add,
       }),
     );
-    // v2 = Harvard defaults; normalizeResume turns them into explicit template formatting (see template.ts).
-    const resume = normalizeResume({ ...(parsed as object), version: 2 });
+    // Pasted text and .txt/.md files get the template: version 2 = Harvard defaults, which normalizeResume turns
+    // into explicit template formatting. An uploaded PDF gets none: version 3 keeps the fields exactly as the AI
+    // returned them (already in the v2 layout: title = organization, subtitle = role) with no formatting, and the
+    // user formats it. See templateForImport in template.ts.
+    const version = templateForImport(pdf ? "pdf" : "text") ? 2 : 3;
+    const resume = normalizeResume({ ...(parsed as object), version });
     if (!resume.sections.length) {
       return NextResponse.json({ error: "Couldn't find any resume sections in that file." }, { status: 422 });
     }

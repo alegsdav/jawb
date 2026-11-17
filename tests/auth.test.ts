@@ -9,7 +9,7 @@ const auth = vi.hoisted(() => ({
 vi.mock("@supabase/ssr", () => ({ createServerClient: vi.fn(() => ({ auth })) }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
 
-import { middleware } from "@/middleware";
+import { config, middleware } from "@/middleware";
 import { requireUser } from "@/lib/supabase/server";
 
 const signedInAs = (email: string | null, app_metadata: Record<string, unknown> = {}) =>
@@ -129,5 +129,16 @@ describe("middleware allow-list", () => {
     const res = await middleware(req("/signup?code=ABCD"));
     expect(res.status).toBe(200);
     expect(res.headers.get("location")).toBeNull();
+  });
+});
+
+describe("middleware matcher", () => {
+  it("runs on pages and API routes, but not on static assets or the public fonts folder", () => {
+    const re = new RegExp(`^${config.matcher[0]}$`);
+    expect(re.test("/login")).toBe(true);
+    expect(re.test("/api/analyze")).toBe(true);
+    expect(re.test("/fonts/Carlito-Regular.ttf")).toBe(false);
+    expect(re.test("/_next/static/chunk.js")).toBe(false);
+    expect(re.test("/favicon.ico")).toBe(false);
   });
 });
