@@ -255,7 +255,7 @@ Preserve the wording exactly; do not improve, correct or invent anything.
 
 Shape:
 {
-  "header": { "name": "the candidate's name", "contact": "one line: location • email • phone • links, as written" },
+  "header": { "name": "the candidate's name", "contact": "one line: location • email • phone • links, as written, with each link's label and address (e.g. LinkedIn (https://www.linkedin.com/in/x))" },
   "sections": [
     { "title": "section heading exactly as written (e.g. Education, Experience, Projects, Skills)",
       "items": [ {
@@ -272,6 +272,8 @@ Rules:
 - A line that is a single labelled list, such as "Languages: Python, SQL", is an item whose "title" is the label
   ("Languages"), whose "subtitle" is the value ("Python, SQL"), with "location": "", "dates": "" and "bullets": [].
 - Lines under an entry that start with a bullet glyph (•, -, *, ●) or are clearly separate points are its "bullets".
+- Keep every URL, email address and link label exactly as written, including a label followed by its address in
+  brackets such as "LinkedIn (https://www.linkedin.com/in/x)". Never drop, shorten or reword a link.
 - Keep [placeholders] exactly as written, brackets included.
 - Use "" for anything not stated. Return ONLY the JSON.
 

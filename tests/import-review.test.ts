@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildDoc, emptyDoc, paragraph, type FlatEntry } from "@/lib/doc/model";
+import type { DocInline, DocJSON } from "@/lib/doc/types";
 import { resumePlainText } from "@/lib/importReview";
 
 const bullet = (text: string, depth = 1): FlatEntry => ({ node: paragraph(text), listType: "bulletList", depth, bullet: true });
@@ -33,5 +34,43 @@ describe("resumePlainText", () => {
       { node: paragraph("Line one\nLine two"), listType: null, depth: 0, bullet: false },
     ]);
     expect(resumePlainText(doc)).toBe("Role — Place\nLine one\nLine two");
+  });
+
+  describe("links", () => {
+    const linkMark = (href: string) => ({ type: "link" as const, attrs: { href } });
+    const withRuns = (content: DocInline[], listType: FlatEntry["listType"] = null): DocJSON =>
+      buildDoc([{ node: { type: "paragraph", attrs: { id: "pa000001" }, content }, listType, depth: listType ? 1 : 0, bullet: !!listType }]);
+
+    it("writes a link whose text differs from its address as 'text (address)'", () => {
+      const doc = withRuns([
+        { type: "text", text: "Contact: " },
+        { type: "text", text: "LinkedIn", marks: [linkMark("https://www.linkedin.com/in/x")] },
+      ]);
+      expect(resumePlainText(doc)).toBe("Contact: LinkedIn (https://www.linkedin.com/in/x)");
+    });
+
+    it("leaves a link alone when its text already is the address", () => {
+      const doc = withRuns([
+        { type: "text", text: "https://github.com/x", marks: [linkMark("https://github.com/x")] },
+        { type: "text", text: " | " },
+        { type: "text", text: "www.example.org", marks: [linkMark("https://www.example.org")] },
+        { type: "text", text: " | " },
+        { type: "text", text: "ada@example.com", marks: [linkMark("mailto:ada@example.com")] },
+      ]);
+      expect(resumePlainText(doc)).toBe("https://github.com/x | www.example.org | ada@example.com");
+    });
+
+    it("keeps one link across runs with different marks", () => {
+      const doc = withRuns([
+        { type: "text", text: "Lin", marks: [linkMark("https://www.linkedin.com/in/x"), { type: "bold" }] },
+        { type: "text", text: "kedIn", marks: [linkMark("https://www.linkedin.com/in/x")] },
+      ]);
+      expect(resumePlainText(doc)).toBe("LinkedIn (https://www.linkedin.com/in/x)");
+    });
+
+    it("writes the address inside a list item too", () => {
+      const doc = withRuns([{ type: "text", text: "Demo", marks: [linkMark("https://demo.example.com")] }], "bulletList");
+      expect(resumePlainText(doc)).toBe("• Demo (https://demo.example.com)");
+    });
   });
 });

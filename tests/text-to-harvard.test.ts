@@ -119,3 +119,113 @@ describe("harvardFromParsed", () => {
     }
   });
 });
+
+/** The header lines of one item (between its section heading and its bullet "b"), for each combination of parts. */
+const headerOf = (x: Partial<Item>) =>
+  texts({
+    sections: [{ title: "Sec", items: [{ title: "", subtitle: "", location: "", dates: "", bullets: ["b"], ...x }] }],
+  }).slice(1, -1);
+
+type Item = { title: string; subtitle: string; location: string; dates: string };
+
+describe("item header lines", () => {
+  // Title (T), subtitle/role (S), location (L), dates (D). A line is never only a right-aligned part.
+  it.each<[string, Partial<Item>, string[]]>([
+    ["nothing", {}, []],
+    ["title only", { title: "T" }, ["T\t"]],
+    ["role only", { subtitle: "S" }, ["S\t"]],
+    ["location only", { location: "L" }, ["L\t"]],
+    ["dates only", { dates: "D" }, ["D\t"]],
+    ["title and role", { title: "T", subtitle: "S" }, ["T\t", "S\t"]],
+    ["title and location", { title: "T", location: "L" }, ["T\tL"]],
+    ["title and dates", { title: "T", dates: "D" }, ["T\tD"]],
+    ["role and location", { subtitle: "S", location: "L" }, ["L\t", "S\t"]],
+    ["role and dates", { subtitle: "S", dates: "D" }, ["S\tD"]],
+    ["location and dates", { location: "L", dates: "D" }, ["L\t", "D\t"]],
+    ["title, role, location", { title: "T", subtitle: "S", location: "L" }, ["T\tL", "S\t"]],
+    ["title, role, dates", { title: "T", subtitle: "S", dates: "D" }, ["T\t", "S\tD"]],
+    ["title, location, dates", { title: "T", location: "L", dates: "D" }, ["T\tL", "D\t"]],
+    ["role, location, dates", { subtitle: "S", location: "L", dates: "D" }, ["L\t", "S\tD"]],
+    ["all four", { title: "T", subtitle: "S", location: "L", dates: "D" }, ["T\tL", "S\tD"]],
+  ])("lays out %s", (_name, parts, expected) => {
+    expect(headerOf(parts)).toEqual(expected);
+  });
+
+  it("puts a project's title and dates on one line, with the dates at the right margin", () => {
+    expect(headerOf({ title: "CardSniffer", dates: "Aug. 2026 - Present" })).toEqual(["CardSniffer\tAug. 2026 - Present"]);
+    const [line] = flattenDoc(docOf({ sections: [{ title: "Projects", items: [{ title: "CardSniffer", dates: "Aug. 2026", bullets: ["x"] }] }] })).slice(1);
+    expect(line.node.content?.map((n) => n.type)).toEqual(["text", "tab", "text"]);
+  });
+
+  it("never emits a line that is only a right-aligned part or an empty line", () => {
+    const parts: (keyof Item)[] = ["title", "subtitle", "location", "dates"];
+    for (let mask = 1; mask < 16; mask++) {
+      const x: Partial<Item> = {};
+      parts.forEach((k, i) => {
+        if (mask & (1 << i)) x[k] = k.toUpperCase();
+      });
+      for (const line of headerOf(x)) {
+        expect(line.trim()).not.toBe("");
+        expect(line.startsWith("\t")).toBe(false);
+      }
+    }
+  });
+
+  it("adds the space above only to an item's first line", () => {
+    const paras = flattenDoc(docOf({
+      sections: [{ title: "Exp", items: [{ title: "A", subtitle: "S", bullets: ["x"] }, { title: "B", subtitle: "R", bullets: ["y"] }] }],
+    }));
+    expect(paras.find((p) => p.text === "B\t")?.node.attrs.spaceBefore).toBe(4);
+    expect(paras.find((p) => p.text === "R\t")?.node.attrs.spaceBefore ?? 0).toBe(0);
+  });
+});
+
+type Link = { text: string; href: string };
+
+/** Every link in the document, in order: its visible text and its address. */
+function linksOf(raw: unknown): Link[] {
+  const out: Link[] = [];
+  for (const p of flattenDoc(docOf(raw))) {
+    for (const n of p.node.content ?? []) {
+      if (n.type !== "text") continue;
+      for (const m of n.marks ?? []) if (m.type === "link") out.push({ text: n.text, href: m.attrs.href });
+    }
+  }
+  return out;
+}
+
+describe("links in the Harvard output", () => {
+  it("shows a 'Label (address)' pair as the label, linked to the address", () => {
+    const raw = { header: { name: "Ada", contact: "Boston • LinkedIn (https://www.linkedin.com/in/x) • GitHub (https://github.com/x)" } };
+    expect(texts(raw)[1]).toBe("Boston • LinkedIn • GitHub");
+    expect(linksOf(raw)).toEqual([
+      { text: "LinkedIn", href: "https://www.linkedin.com/in/x" },
+      { text: "GitHub", href: "https://github.com/x" },
+    ]);
+  });
+
+  it("links a bare http(s) or www. address, without the punctuation after it", () => {
+    const raw = { sections: [{ title: "Projects", items: [{ title: "Tool", bullets: ["See https://example.com/a. Also www.example.org/x"] }] }] };
+    expect(texts(raw)).toContain("See https://example.com/a. Also www.example.org/x");
+    expect(linksOf(raw)).toEqual([
+      { text: "https://example.com/a", href: "https://example.com/a" },
+      { text: "www.example.org/x", href: "https://www.example.org/x" },
+    ]);
+  });
+
+  it("links an email with mailto:", () => {
+    expect(linksOf({ header: { name: "Ada", contact: "ada@example.com" } })).toEqual([{ text: "ada@example.com", href: "mailto:ada@example.com" }]);
+  });
+
+  it("links a label before a host with a path, as the model may keep it", () => {
+    expect(linksOf({ header: { name: "Ada", contact: "LinkedIn (linkedin.com/in/x)" } })).toEqual([
+      { text: "LinkedIn", href: "https://linkedin.com/in/x" },
+    ]);
+  });
+
+  it("leaves text that is not an address alone", () => {
+    const raw = { sections: [{ title: "Skills", items: [{ title: "Stack", subtitle: "Python (3.11), Vue.js (v3)", bullets: ["Used javascript:alert(1) and data:x"] }] }] };
+    expect(linksOf(raw)).toEqual([]);
+    expect(texts(raw)).toContain("Python (3.11), Vue.js (v3)\t");
+  });
+});
