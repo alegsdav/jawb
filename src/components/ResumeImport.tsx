@@ -1,8 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Resume } from "@/lib/types";
 import { postApi } from "@/lib/api";
+
+const MAX_PDF_BYTES = 20 * 1024 * 1024; // read in the browser
+const MAX_SERVER_PDF_BYTES = 4 * 1024 * 1024; // the server fallback (its request limit)
+const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+
+/**
+ * Reads a PDF in the browser (pdf.js, loaded on demand). Resolves to the resume, to an error message when the PDF
+ * has no text, or to null when the browser could not read it at all (then the server tries).
+ */
+async function readPdfHere(file: File): Promise<{ resume: Resume } | { error: string } | null> {
+  try {
+    const { importPdfInBrowser, NoTextError } = await import("@/lib/import/importPdf");
+    try {
+      return { resume: await importPdfInBrowser(file) };
+    } catch (e) {
+      if (e instanceof NoTextError) return { error: e.message };
+      throw e;
+    }
+  } catch (e) {
+    console.error("Reading the PDF in the browser failed; trying the server.", e);
+    return null;
+  }
+}
 
 export function ResumeImport({
   onImported, onCancel, replaceWarning, mode = "both",
@@ -19,11 +42,25 @@ export function ResumeImport({
   const [error, setError] = useState("");
   const [busyKind, setBusyKind] = useState<"pdf" | "text">("pdf");
 
+  // Load pdf.js (and its worker) while the user is still looking, so the first drop is instant.
+  useEffect(() => {
+    if (mode !== "text") void import("@/lib/import/importPdf").catch(() => {});
+  }, [mode]);
+
   async function run(file?: File) {
     if (replaceWarning && !confirm("Replace your current master resume with the imported one? Your facts are kept.")) return;
     setBusy(true);
     setBusyKind(file && !/\.(txt|md)$/i.test(file.name) ? "pdf" : "text");
     setError("");
+    if (file && isPdf(file)) {
+      if (file.size > MAX_PDF_BYTES) return fail("That PDF is over 20 MB.");
+      const local = await readPdfHere(file);
+      if (local && "resume" in local) return done(local.resume);
+      if (local) return fail(local.error);
+      if (file.size > MAX_SERVER_PDF_BYTES) {
+        return fail("Couldn't read that file. Export it again as a text PDF, or paste the text.");
+      }
+    }
     let body: FormData | { text: string };
     if (file) {
       body = new FormData();
@@ -32,10 +69,19 @@ export function ResumeImport({
       body = { text };
     }
     const { data, error } = await postApi<{ resume: Resume }>("/api/parse-resume", body);
+    if (error || !data) return fail(error ?? "Import failed.");
+    done(data.resume);
+  }
+
+  function done(resume: Resume) {
     setBusy(false);
-    if (error || !data) return setError(error ?? "Import failed.");
-    onImported(data.resume);
+    onImported(resume);
     setText("");
+  }
+
+  function fail(message: string) {
+    setBusy(false);
+    setError(message);
   }
 
   return (
@@ -65,7 +111,7 @@ export function ResumeImport({
       >
         <span className="text-sm font-medium">{busy ? (busyKind === "pdf" ? "Opening your PDF…" : "Laying out your resume…") : "Drop your resume PDF here or tap to choose"}</span>
         <span className="text-xs text-muted">
-          A PDF opens exactly as it is: the same fonts, sizes, bold, lines and spacing, as text you can edit. No AI, no template. Up to 4 MB.
+          A PDF opens exactly as it is: the same fonts, sizes, bold, lines and spacing, as text you can edit. No AI, no template. Up to 20 MB.
           From Google Docs: File → Download → PDF. A .txt file is treated as pasted text.
         </span>
         <input

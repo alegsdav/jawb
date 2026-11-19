@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
-import { emptyResume, withDoc } from "@/lib/resume";
-import { flattenDoc } from "@/lib/doc/model";
-import type { DocJSON } from "@/lib/doc/types";
-import type { Resume } from "@/lib/types";
 import { friendlyError } from "@/lib/api";
 import { geminiJSON } from "@/lib/gemini";
 import { parseResumePrompt } from "@/lib/prompts";
 import { budgetErrorResponse, withAiBudget } from "@/lib/aiBudget";
-import { NoTextError, pdfToDoc } from "@/lib/import/pdfToDoc";
+import { NoTextError } from "@/lib/import/pdfToDoc";
+import { resumeFromPdf } from "@/lib/import/resumeFromPdf";
 import { harvardFromParsed } from "@/lib/import/textToHarvard";
 
 // AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
@@ -17,11 +14,10 @@ export const maxDuration = 120;
 const MAX_FILE_BYTES = 4 * 1024 * 1024; // Vercel caps request bodies at ~4.5 MB
 const MAX_TEXT_CHARS = 60_000;
 
-const hasText = (doc: DocJSON) => flattenDoc(doc).some((p) => p.text.trim());
-
 /**
  * Accepts JSON {text} or multipart form-data with a "file" (PDF or .txt/.md). Returns {resume}, a version 4 resume.
- * A PDF is imported exactly as it is (no AI): its document keeps its fonts, sizes, lines and margins.
+ * A PDF is imported exactly as it is (no AI): its document keeps its fonts, sizes, lines and margins. The browser
+ * normally reads PDFs itself (see lib/import/importPdf); this path is the fallback.
  * Pasted text and .txt/.md files have no formatting, so the AI works out the structure and the result is laid out
  * in the Harvard template (the look of the guided builder).
  */
@@ -54,8 +50,7 @@ export async function POST(req: Request) {
 
   if (pdf) {
     try {
-      const { doc, page } = await pdfToDoc(pdf);
-      return resumeResponse(withDoc({ ...emptyResume(), page }, doc), doc);
+      return NextResponse.json({ resume: await resumeFromPdf(pdf) });
     } catch (e) {
       if (e instanceof NoTextError) return NextResponse.json({ error: e.message }, { status: 422 });
       console.error("parse-resume failed:", e);
@@ -88,9 +83,4 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
-}
-
-function resumeResponse(resume: Resume, doc: DocJSON) {
-  if (!hasText(doc)) return NextResponse.json({ error: "Couldn't find any text in that file." }, { status: 422 });
-  return NextResponse.json({ resume });
 }

@@ -16,8 +16,8 @@ export const NO_TEXT_MESSAGE =
 
 /** The PDF has no text to import (a scan or an image-only page). */
 export class NoTextError extends Error {
-  constructor() {
-    super(NO_TEXT_MESSAGE);
+  constructor(message = NO_TEXT_MESSAGE) {
+    super(message);
     this.name = "NoTextError";
   }
 }
