@@ -31,10 +31,20 @@ const SPACE_EM = 0.28; // a space is about this wide, in em (for turning a left-
 const MARGIN_TOLERANCE = 0.05; // a line ends at the right margin when within this share of the content width
 const PITCH = 1.2; // a normal line pitch, in em
 const WRAP_PITCH = 1.6; // a line this close below the previous one continues its paragraph
+const TIGHT_PITCH = 1.25; // a wrapped line sits this close (em) below the one it continues: no space between paragraphs
+const WRAP_FILL = 0.85; // a line this full (share of the content width) is one a paragraph wrapped from
 const MAX_SPACE_BEFORE = 24;
+/** A wrapped bullet line starts at the bullet's text: within this much (em) of the estimated text start. */
+const BULLET_TEXT_TOLERANCE = 0.6;
 const RULE_MIN_WIDTH = 0.5; // a rule must span this share of the content width
 const RULE_MAX_HEIGHT = 2.5; // points: a filled rectangle this thin is a rule
+const UNDERLINE_MAX_DROP = 0.25; // a rule within this many em below a baseline underlines the text over it
+const UNDERLINE_SLACK = 0.5; // points: a character this close to an underline's ends is under it
 const PT_PER_INCH = 72;
+const FOOTER_ZONE = 0.12; // the bottom share of a page where a footer sits
+const HEADER_ZONE = 0.08; // the top share of a page where a page-number header sits
+const FOOTER_GAP = 2.5; // a footer is this many line pitches below the body text above it
+const FOOTER_SHORT = 0.6; // a footer is shorter than this share of the content width
 
 /** Bullet glyphs (incl. the Symbol-font bullet and a middle dot) followed by a space, at the start of a line. */
 const BULLET_RE = /^\s*[•●▪◦‣⁃·\-–*o§]\s+/;
@@ -44,6 +54,11 @@ const SUBSET_PREFIX = /^[A-Z]{6}\+/;
 const STYLE_SUFFIX = /(Bold|Italic|Oblique|Regular|Semibold|Black|Heavy|Medium|Light|Demi)+$/;
 const BOLD_NAME = /bold|black|heavy|semibold|demi/i;
 const ITALIC_NAME = /italic|oblique/i;
+/** LaTeX fonts (Latin Modern and Computer Modern) by their name: the bold extended, italic and slanted faces. */
+const TEX_BOLD_NAME = /^CMBX/;
+const TEX_ITALIC_NAME = /^(CMTI|CMSL|LMRomanSlant)/;
+const TEX_ROMAN_NAME = /^(LMRoman|CMR|CMBX|CMTI|CMSL|SFRM)/;
+const TEX_SANS_NAME = /^(LMSans|CMSS)/;
 
 export type FontInfo = { family?: string; bold: boolean; italic: boolean };
 
@@ -65,19 +80,32 @@ export function fontInfo(rawName: string, flags: { bold?: boolean; italic?: bool
   const base = name.split(/[-,]/)[0].replace(/(PSMT|MT|PS)$/, "").replace(STYLE_SUFFIX, "");
   const spaced = base.replace(/([a-z])([A-Z])/g, "$1 $2").trim();
   // The standard PDF names for the system fonts a resume was typed in.
-  const family = FAMILY_ALIASES[spaced.toLowerCase()] ?? spaced;
+  const family = texFamily(base) ?? FAMILY_ALIASES[spaced.toLowerCase()] ?? spaced;
   return {
     family: family && !GENERATED_NAME.test(name) ? family : undefined,
-    bold: !!flags.bold || BOLD_NAME.test(name),
-    italic: !!flags.italic || ITALIC_NAME.test(name),
+    bold: !!flags.bold || BOLD_NAME.test(name) || TEX_BOLD_NAME.test(base),
+    italic: !!flags.italic || ITALIC_NAME.test(name) || TEX_ITALIC_NAME.test(base),
   };
+}
+
+/**
+ * The family of a LaTeX font by its base name ("LMRoman12", "CMBX10"): Latin Modern Roman for the roman faces,
+ * Latin Modern Sans for the sans ones. Undefined for any other name.
+ */
+function texFamily(base: string): string | undefined {
+  if (TEX_ROMAN_NAME.test(base)) return "Latin Modern Roman";
+  if (TEX_SANS_NAME.test(base)) return "Latin Modern Sans";
+  return undefined;
 }
 
 /** The look of a run of text: its font and size in points. */
 type Style = FontInfo & { size: number };
 
-/** A run of text on a line, with where it starts and how wide it is. A tab is the piece "\t". href: a link over it. */
-type Piece = { text: string; style: Style; x: number; w: number; href?: string };
+/**
+ * A run of text on a line, with where it starts and how wide it is. A tab is the piece "\t". href: a link over it.
+ * underline: a rule is drawn under it.
+ */
+type Piece = { text: string; style: Style; x: number; w: number; href?: string; underline?: boolean };
 
 /** One text item from pdf.js, in top-down page coordinates. Whitespace-only items are kept for their gaps. */
 type TextItem = { str: string; x: number; y: number; w: number; style: Style; ws: boolean };
@@ -114,10 +142,10 @@ export async function pdfToDoc(data: Uint8Array): Promise<{ doc: DocJSON; page: 
   });
   try {
     const pdf = await task.promise;
-    const pages: PageText[] = [];
-    for (let i = 1; i <= pdf.numPages; i++) pages.push(await readPage(await pdf.getPage(i)));
-    const lines = pages.flatMap((p) => p.lines);
-    if (!lines.length) throw new NoTextError();
+    const raw: PageText[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) raw.push(await readPage(await pdf.getPage(i)));
+    if (!raw.some((p) => p.lines.length)) throw new NoTextError();
+    const pages = withoutFurniture(raw);
     const items = pages.flatMap((p) => pageItems(p));
     return { doc: docFromItems(items), page: pageSetupOf(pages) };
   } finally {
@@ -149,7 +177,7 @@ async function readPage(page: PDFPageProxy): Promise<PageText> {
     });
   }
   // Rules come out in PDF space (y up), like the text transforms; flip them to top-down like the lines.
-  const rules = rulesOf(ops).map((r) => ({ ...r, y: height - r.y }));
+  const rules = rulesSafely(ops).map((r) => ({ ...r, y: height - r.y }));
   const links = linksOf((await page.getAnnotations()) as LinkAnnotation[], height);
   return { width, height, lines: linkLines(linesOf(items), links), rules };
 }
@@ -213,9 +241,9 @@ function occurrences(text: string, needle: string): [number, number][] {
 
 /**
  * The href of each character of a piece. A link whose shown text is its address is found in the piece's text, so
- * its characters are exact. Otherwise each character takes the link whose box holds its centre (proportional
- * widths inside the piece: close, not exact, for a label that differs from the address). A zero-width piece (a space)
- * counts only strictly inside a box, so the space after a link is not part of it.
+ * its characters are exact. Otherwise a character takes the link whose box holds its centre (widths inside the piece
+ * are proportional, so this is close, not exact, for a label that differs from the address). A zero-width piece (a
+ * space) counts only strictly inside a box, so the space after a link is not part of it.
  */
 function hrefsOf(p: Piece, line: Line, links: LinkBox[]): (string | undefined)[] {
   const n = p.text.length;
@@ -232,40 +260,143 @@ function hrefsOf(p: Piece, line: Line, links: LinkBox[]): (string | undefined)[]
     }
     for (let i = 0; i < n; i++) {
       const x = p.w === 0 ? p.x : p.x + ((i + 0.5) / n) * p.w;
-      const inBox = p.w === 0 ? x > l.x0 + 0.5 && x < l.x1 - 0.5 : x >= l.x0 - 0.5 && x <= l.x1 + 0.5;
+      const inBox = p.w === 0 ? x > l.x0 + 0.5 && x < l.x1 - 0.5 : x >= l.x0 && x <= l.x1;
       if (inBox) out[i] ??= l.href;
     }
   }
   return out;
 }
 
-/** The lines with each piece split where its link changes: a link covers exactly the characters found above. */
+/** Punctuation that separates items ("Email | LinkedIn", "Home · Work"): a link never starts or ends with one. */
+const SEPARATOR_RE = /^[|·•●▪◦‣⁃,;:/\\–—-]$/;
+
+/**
+ * Moves the link off the whitespace and the standalone separators at each end of a link. A separator is standalone
+ * when it has a space (or the line's edge) on both sides, so "example.com/" keeps its slash. Mutates `hrefs`, which
+ * has one entry per character of the line's text.
+ */
+function trimLinkEdges(text: string, hrefs: (string | undefined)[]): void {
+  const trimmable = (i: number) => {
+    const ch = text[i];
+    if (/\s/.test(ch)) return true;
+    const standalone = (i === 0 || /\s/.test(text[i - 1])) && (i === text.length - 1 || /\s/.test(text[i + 1]));
+    return SEPARATOR_RE.test(ch) && standalone;
+  };
+  for (let s = 0; s < hrefs.length; ) {
+    if (!hrefs[s]) {
+      s++;
+      continue;
+    }
+    let e = s;
+    while (e < hrefs.length && hrefs[e] === hrefs[s]) e++;
+    let a = s;
+    let b = e;
+    while (a < b && trimmable(a)) a++;
+    while (b > a && trimmable(b - 1)) b--;
+    for (let i = s; i < e; i++) if (i < a || i >= b) hrefs[i] = undefined;
+    s = e;
+  }
+}
+
+/** The pieces split where the href changes; a tab and an unlinked piece keep their shape. */
+function splitByHref(pieces: Piece[], hrefs: (string | undefined)[]): Piece[] {
+  const out: Piece[] = [];
+  let at = 0;
+  for (const p of pieces) {
+    const n = p.text.length;
+    const own = hrefs.slice(at, at + n);
+    at += n;
+    if (p.text === "\t" || own.every((h) => h === own[0])) {
+      out.push(own[0] ? { ...p, href: own[0] } : p);
+      continue;
+    }
+    let start = 0;
+    for (let i = 1; i <= n; i++) {
+      if (i < n && own[i] === own[start]) continue;
+      const piece: Piece = {
+        text: p.text.slice(start, i),
+        style: p.style,
+        x: p.x + (start / n) * p.w,
+        w: (p.w * (i - start)) / n,
+      };
+      if (own[start]) piece.href = own[start];
+      out.push(piece);
+      start = i;
+    }
+  }
+  return out;
+}
+
+/** The lines with each link on exactly its characters: found by centre, then trimmed of its edge spaces and separators. */
 function linkLines(lines: Line[], links: LinkBox[]): Line[] {
   if (!links.length) return lines;
-  return lines.map((line) => ({
-    ...line,
-    pieces: line.pieces.flatMap((p) => {
-      if (p.text === "\t") return [p];
-      const n = p.text.length;
-      const hrefs = hrefsOf(p, line, links);
-      if (hrefs.every((h) => !h)) return [p];
-      const out: Piece[] = [];
-      let start = 0;
-      for (let i = 1; i <= n; i++) {
-        if (i < n && hrefs[i] === hrefs[start]) continue;
-        const piece: Piece = {
-          text: p.text.slice(start, i),
-          style: p.style,
-          x: p.x + (start / n) * p.w,
-          w: (p.w * (i - start)) / n,
-        };
-        if (hrefs[start]) piece.href = hrefs[start];
-        out.push(piece);
-        start = i;
-      }
-      return out;
-    }),
-  }));
+  return lines.map((line) => {
+    const hrefs = line.pieces.flatMap((p) => (p.text === "\t" ? [undefined] : hrefsOf(p, line, links)));
+    trimLinkEdges(lineText(line), hrefs);
+    return { ...line, pieces: splitByHref(line.pieces, hrefs) };
+  });
+}
+
+/**
+ * The text a rule underlines is marked underline: a rule just under a line's baseline, spanning some of its characters.
+ * Linked text is skipped, as viewers draw links underlined and the link already shows that. Rules here are the short
+ * ones only: a full-width rule is a paragraph border or a rule block, never an underline.
+ */
+function underlineLines(lines: Line[], rules: Rule[]): Line[] {
+  if (!rules.length) return lines;
+  return lines.map((line) => {
+    const under = rules.filter((r) => {
+      const drop = r.y - line.y;
+      return drop > 0 && drop <= UNDERLINE_MAX_DROP * line.size;
+    });
+    if (!under.length) return line;
+    return { ...line, pieces: line.pieces.flatMap((p) => underlinedPieces(p, under)) };
+  });
+}
+
+/** The piece split where its characters' underline changes. A character is under a rule when its centre is in its span. */
+function underlinedPieces(p: Piece, rules: Rule[]): Piece[] {
+  if (p.text === "\t" || p.href) return [p];
+  const n = p.text.length;
+  const flags = Array.from({ length: n }, (_, i) => {
+    const x = p.w === 0 ? p.x : p.x + ((i + 0.5) / n) * p.w;
+    return rules.some((r) => x >= r.x0 - UNDERLINE_SLACK && x <= r.x1 + UNDERLINE_SLACK);
+  });
+  trimEdgeSpaces(p.text, flags);
+  if (!flags.some(Boolean)) return [p];
+  const out: Piece[] = [];
+  let start = 0;
+  for (let i = 1; i <= n; i++) {
+    if (i < n && flags[i] === flags[start]) continue;
+    out.push({
+      text: p.text.slice(start, i),
+      style: p.style,
+      x: p.x + (start / n) * p.w,
+      w: (p.w * (i - start)) / n,
+      ...(p.href ? { href: p.href } : {}),
+      ...(flags[start] ? { underline: true } : {}),
+    });
+    start = i;
+  }
+  return out;
+}
+
+/** Clears the flags of the whitespace at each end of every flagged run: an underline starts and ends on a word. */
+function trimEdgeSpaces(text: string, flags: boolean[]): void {
+  for (let s = 0; s < flags.length; ) {
+    if (!flags[s]) {
+      s++;
+      continue;
+    }
+    let e = s;
+    while (e < flags.length && flags[e]) e++;
+    let a = s;
+    let b = e;
+    while (a < b && /\s/.test(text[a])) a++;
+    while (b > a && /\s/.test(text[b - 1])) b--;
+    for (let i = s; i < e; i++) if (i < a || i >= b) flags[i] = false;
+    s = e;
+  }
 }
 
 /** The font's family and style. pdf.js knows the name of an embedded font; a standard font has only its loaded name. */
@@ -349,9 +480,13 @@ function mul(a: Matrix, b: Matrix): Matrix {
 /** Path segment operators in pdf.js's path data, with how many numbers each takes. */
 const PATH_ARGS: Record<number, number> = { 0: 2, 1: 2, 2: 6, 3: 4, 4: 0 };
 
-/** The points of a path (after the current transform), from pdf.js's flat path data. */
-function pathPoints(data: number[], ctm: Matrix): [number, number][] {
+/**
+ * The points of a path (after the current transform), from pdf.js's flat path data (a typed array). pdf.js can give
+ * no data for a path (null or missing), which has no points.
+ */
+function pathPoints(data: ArrayLike<number> | null | undefined, ctm: Matrix): [number, number][] {
   const pts: [number, number][] = [];
+  if (!data) return pts;
   for (let i = 0; i < data.length; ) {
     const n = PATH_ARGS[data[i++]] ?? 0;
     for (let k = 0; k < n; k += 2) {
@@ -383,8 +518,8 @@ function rulesOf(ops: { fnArray: number[]; argsArray: unknown[] }): Rule[] {
     else if (op === OPS.transform) ctm = mul(args as Matrix, ctm);
     else if (op === OPS.setLineWidth) lineWidth = (args as number[])[0];
     else if (op === OPS.constructPath) {
-      const paint = (args as [number, number[][]])[0];
-      const rule = ruleOf(pathPoints((args as [number, number[][]])[1][0], ctm), {
+      const [paint, data] = args as [number, [ArrayLike<number> | null] | null];
+      const rule = ruleOf(pathPoints(data?.[0], ctm), {
         stroke: strokes.has(paint) && lineWidth <= 3,
         fill: fills.has(paint),
       });
@@ -392,6 +527,18 @@ function rulesOf(ops: { fnArray: number[]; argsArray: unknown[] }): Rule[] {
     }
   });
   return rules;
+}
+
+/**
+ * The rules of a page, or none when they cannot be read. A rule is decoration: a drawing this reader does not
+ * understand must not make the whole import fail, so the page's text still comes out, without borders.
+ */
+export function rulesSafely(ops: { fnArray: number[]; argsArray: unknown[] }): Rule[] {
+  try {
+    return rulesOf(ops);
+  } catch {
+    return [];
+  }
 }
 
 function ruleOf(pts: [number, number][], paint: { stroke: boolean; fill: boolean }): Rule | null {
@@ -463,8 +610,51 @@ function continues(para: Para, line: Line, right: number, width: number): boolea
   if (!(pitch > 0 && pitch <= WRAP_PITCH * line.size) || Math.abs(line.size - last.size) > 0.5) return false;
   // A line with a tab is a "Company ⇥ City" row, not wrapped text.
   if (hasTab(last) || hasTab(line)) return false;
-  if (para.bullet) return Math.abs(line.x0 - para.textX) <= 2;
-  return Math.abs(line.x0 - para.lines[0].x0) <= 2 && last.x1 >= right - 0.05 * width;
+  // The text start is estimated inside a run that also holds the glyph, so it is only about right.
+  if (para.bullet) return Math.abs(line.x0 - para.textX) <= BULLET_TEXT_TOLERANCE * line.size;
+  if (Math.abs(line.x0 - para.lines[0].x0) > 2) return false;
+  // A new labelled item ("Languages: ...") or a new bold-led item is not wrapped text, even when the line before it is full.
+  if (startsLabelled(line) && startsLabelled(para.lines[0])) return false;
+  if (line.pieces[0]?.style.bold && !last.pieces[last.pieces.length - 1]?.style.bold) return false;
+  if (last.x1 >= right - 0.05 * width) return true;
+  return pitch <= TIGHT_PITCH * line.size && !startsNewItem(last, line) && (wouldWrap(last, line, right) || isFull(last, right, width));
+}
+
+/** A label at the start of a line: a lead of up to 33 characters ending in a colon ("Frameworks: ", "Frontend & Backend: "). */
+const LABEL_RE = /^[^\s:][^:]{0,32}:\s/;
+
+function startsLabelled(line: Line): boolean {
+  return LABEL_RE.test(lineText(line).trim());
+}
+
+/** Whether the previous line ends a sentence and this one starts with a capital: a new item, not a wrapped line. */
+function startsNewItem(last: Line, line: Line): boolean {
+  return /[.!?:]["'”’)\]]?$/.test(lineText(last).trim()) && /^[A-Z]/.test(lineText(line).trim());
+}
+
+/** Whether the previous line is nearly the full content width: a line a paragraph wrapped from. */
+function isFull(last: Line, right: number, width: number): boolean {
+  return (last.x1 - (right - width)) / width >= WRAP_FILL;
+}
+
+/**
+ * The standard word-wrap test: the next line's first word would not have fitted at the end of the previous line, so
+ * the line break was forced by that word.
+ */
+function wouldWrap(last: Line, line: Line, right: number): boolean {
+  return last.x1 + SPACE_EM * line.size + firstWordWidth(line) > right;
+}
+
+/** The width of the first word of a line, estimated inside its first run (the run's width is exact). */
+function firstWordWidth(line: Line): number {
+  let w = 0;
+  for (const p of line.pieces) {
+    if (p.text === "\t") break;
+    const at = p.text.search(/\s/);
+    if (at >= 0) return w + (p.w * at) / p.text.length;
+    w += p.w;
+  }
+  return w;
 }
 
 /**
@@ -560,12 +750,15 @@ function spaceBeforeOf(prev: Para | undefined, para: Para): number | undefined {
 function pageItems(page: PageText): Item[] {
   const left = Math.min(...page.lines.map((l) => l.x0));
   const right = contentRight(page.lines, left, page.width);
-  const paras = paragraphsOf(page.lines.map((l) => resolveTabs(l, right, right - left)), right, right - left);
+  const width = right - left;
+  const shortRules = page.rules.filter((r) => r.x1 - r.x0 < RULE_MIN_WIDTH * width);
+  const lines = underlineLines(page.lines.map((l) => resolveTabs(l, right, width)), shortRules);
+  const paras = paragraphsOf(lines, right, width);
   assignDepths(paras);
   const borders = new Set<Para>();
   const lineItems: Item[] = [];
   for (const rule of page.rules) {
-    if (rule.x1 - rule.x0 < RULE_MIN_WIDTH * (right - left)) continue;
+    if (rule.x1 - rule.x0 < RULE_MIN_WIDTH * width) continue;
     const above = paras.filter((p) => p.lines[p.lines.length - 1].y < rule.y);
     const near = above[above.length - 1];
     const gap = near ? rule.y - near.lines[near.lines.length - 1].y : Infinity;
@@ -600,11 +793,12 @@ function nodeOf(
   return { type: "paragraph", attrs, content };
 }
 
-/** The marks of a run: bold, italic, and the size and family as textStyle. Sizes round to half points. */
-function marksOf(s: Style, href?: string): DocMark[] {
+/** The marks of a run: bold, italic, underline, the size and family as textStyle, and a link. Sizes round to half points. */
+function marksOf(s: Style, href?: string, underline?: boolean): DocMark[] {
   const marks: DocMark[] = [];
   if (s.bold) marks.push({ type: "bold" });
   if (s.italic) marks.push({ type: "italic" });
+  if (underline) marks.push({ type: "underline" });
   const attrs: { fontSize: string; fontFamily?: string } = { fontSize: `${Math.round(s.size * 2) / 2}pt` };
   if (s.family) attrs.fontFamily = s.family;
   marks.push({ type: "textStyle", attrs });
@@ -622,7 +816,7 @@ function inlineOf(pieces: Piece[]): DocInline[] {
       prevKey = "";
       continue;
     }
-    const marks = marksOf(p.style, p.href);
+    const marks = marksOf(p.style, p.href, p.underline);
     const key = JSON.stringify(marks);
     const last = out[out.length - 1];
     if (last?.type === "text" && key === prevKey) last.text += p.text;
@@ -642,6 +836,70 @@ function docFromItems(items: Item[]): DocJSON {
   return normalizeDoc(buildDoc(items.map((item) => item.entry)));
 }
 
+// ---- headers and footers ----
+
+/** A line that is only a page number: "3", "Page 3", "Page 3 of 7", "3 / 7". */
+const PAGE_NUMBER_RE = /^(page\s*)?\d+(\s*(of|\/)\s*\d+)?$/i;
+
+/**
+ * The pages without their headers and footers, which are not body text. A page number (in the top or the bottom
+ * zone) is dropped. A short line set well below the body in the bottom zone is a footer; it is dropped when the same
+ * text is a footer on another page too (a repeated footer). Any other line stays, as a lone short last line may be
+ * real content. When nothing is left, the pages are kept as they are.
+ */
+function withoutFurniture(pages: PageText[]): PageText[] {
+  const pitch = medianPitch(pages);
+  const width = contentWidthOf(pages);
+  const footers = pages.map((p) => footerLines(p, pitch, width));
+  const pagesWithText = new Map<string, number>();
+  for (const set of footers) for (const text of new Set([...set].map(textOf))) pagesWithText.set(text, (pagesWithText.get(text) ?? 0) + 1);
+  const cleaned = pages.map((p, i) => ({
+    ...p,
+    lines: p.lines.filter((l) => {
+      const text = textOf(l);
+      if (footers[i].has(l)) return !PAGE_NUMBER_RE.test(text) && (pagesWithText.get(text) ?? 0) < 2;
+      return !(PAGE_NUMBER_RE.test(text) && l.y < HEADER_ZONE * p.height);
+    }),
+  }));
+  return cleaned.some((p) => p.lines.length) ? cleaned : pages;
+}
+
+function textOf(line: Line): string {
+  return lineText(line).trim();
+}
+
+/** The median gap between consecutive lines of the document: a normal line pitch in points. */
+function medianPitch(pages: PageText[]): number {
+  const gaps = pages.flatMap((p) => p.lines.slice(1).map((l, i) => l.y - p.lines[i].y)).filter((g) => g > 0).sort((a, b) => a - b);
+  return gaps.length ? gaps[Math.floor(gaps.length / 2)] : Infinity;
+}
+
+/** The width of the content over all pages. */
+function contentWidthOf(pages: PageText[]): number {
+  const lines = pages.flatMap((p) => p.lines);
+  const left = Math.min(...lines.map((l) => l.x0));
+  return contentRight(lines, left, pages[0].width) - left;
+}
+
+/**
+ * The lines of a page that are footers: after the body text, far below it (a gap of several line pitches), in the
+ * bottom zone and short. Lines below a footer line are compared with the last body line, so a two-line footer is one.
+ */
+function footerLines(page: PageText, pitch: number, width: number): Set<Line> {
+  const out = new Set<Line>();
+  let body: Line | undefined;
+  for (const line of page.lines) {
+    const footer =
+      !!body &&
+      line.y > (1 - FOOTER_ZONE) * page.height &&
+      line.y - body.y > FOOTER_GAP * pitch &&
+      line.x1 - line.x0 < FOOTER_SHORT * width;
+    if (footer) out.add(line);
+    else body = line;
+  }
+  return out;
+}
+
 // ---- page setup ----
 
 /**
@@ -652,7 +910,7 @@ function docFromItems(items: Item[]): DocJSON {
  * wider right margin than the original would rewrap every line.
  */
 function pageSetupOf(pages: PageText[]): PageSetup {
-  const first = pages[0];
+  const first = pages.find((p) => p.lines.length) ?? pages[0];
   const lines = pages.flatMap((p) => p.lines);
   const left = Math.min(...lines.map((l) => l.x0));
   const right = contentRight(lines, left, first.width);

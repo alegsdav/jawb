@@ -72,6 +72,32 @@ function bullet(text: string) {
   );
 }
 
+/**
+ * Bullets whose first line is one text run with its glyph ("• Built ..."), as some exporters write them: the glyph is
+ * not a text item of its own. Each wrapped line hangs at the text's left edge (a negative text indent on the first
+ * line), so the text starts about a glyph and a space in from the bullet.
+ */
+export function hangingBulletPdf(): Promise<Buffer> {
+  const hang = { marginLeft: 12, textIndent: -12 };
+  const second =
+    "Shipped a small report generator for the planning committee, which cut the monthly preparation time by half " +
+    "across three teams and removed a manual copy step that had caused most of the corrections.";
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: s.page },
+        h(Text, { style: s.bold }, "EXPERIENCE"),
+        h(Text, { style: hang }, `• ${LONG_BULLET}`),
+        h(Text, { style: hang }, `• ${second}`),
+        h(Text, { style: s.bold }, "PROJECTS"),
+      ),
+    ),
+  );
+}
+
 /** A second document in Helvetica: a bold left-aligned name and a plain line. */
 export function helveticaPdf(): Promise<Buffer> {
   return renderToBuffer(
@@ -127,6 +153,126 @@ export function linkedPdf(): Promise<Buffer> {
           h(Link, { src: "mailto:jane@example.com" }, "jane@example.com"),
         ),
         h(Text, null, "Plain text with no link."),
+      ),
+    ),
+  );
+}
+
+/**
+ * A centered contact line of four links separated by " | " in one text run, as a resume's header writes them. The
+ * separators and the spaces around each label are not part of its link.
+ */
+export function linkSeparatorsPdf(): Promise<Buffer> {
+  const link = (label: string, src: string) => h(Link, { src }, label);
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: s.page },
+        h(
+          Text,
+          { style: s.center },
+          link("Email", "mailto:jane@example.com"),
+          " | ",
+          link("LinkedIn", "https://linkedin.com/in/jane"),
+          " | ",
+          link("GitHub", "https://github.com/jane"),
+          " | ",
+          link("Portfolio", "https://jane.example.com/"),
+        ),
+      ),
+    ),
+  );
+}
+
+/**
+ * A line with an underlined phrase, a plain phrase, and an underlined link; then a heading with a full-width rule.
+ * The underlines are drawn by the viewer's text decoration, so they are thin rules under the text.
+ */
+export function underlinePdf(): Promise<Buffer> {
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: s.page },
+        h(
+          Text,
+          null,
+          "Plain then ",
+          h(Text, { style: { textDecoration: "underline" } }, "Underlined phrase"),
+          " and ",
+          h(Link, { src: "https://example.com/" }, h(Text, { style: { textDecoration: "underline" } }, "linked")),
+          " end.",
+        ),
+        h(View, { style: s.heading }, h(Text, { style: s.bold }, "SUMMARY")),
+      ),
+    ),
+  );
+}
+
+/**
+ * Two pages with a page number at the top, and at the bottom a page number ("Page 1 of 2") above a repeated line
+ * ("Jane Doe resume"). The body is three lines a page; the furniture is drawn in the header and footer zones.
+ */
+export function pagedPdf(): Promise<Buffer> {
+  const pageNumber = ({ pageNumber: n }: { pageNumber: number }) => String(n);
+  const pageOf = ({ pageNumber: n, totalPages: t }: { pageNumber: number; totalPages: number }) => `Page ${n} of ${t}`;
+  const page = (n: number) =>
+    h(
+      Page,
+      { key: n, size: "LETTER", style: s.page },
+      h(Text, { fixed: true, render: pageNumber, style: { position: "absolute", top: 20, left: PAD_SIDES, fontSize: 8 } }),
+      h(Text, null, `Body line one on page ${n}.`),
+      h(Text, null, `Body line two on page ${n}.`),
+      h(Text, null, `Body line three on page ${n}.`),
+      h(Text, { fixed: true, render: pageOf, style: { position: "absolute", bottom: 36, left: PAD_SIDES, fontSize: 8 } }),
+      h(Text, { fixed: true, style: { position: "absolute", bottom: 22, left: PAD_SIDES, fontSize: 8 } }, "Jane Doe resume"),
+    );
+  return renderToBuffer(h(Document, null, page(1), page(2)));
+}
+
+/**
+ * A paragraph in a box narrower than the page's content, which ends at a right-aligned date: its lines wrap inside
+ * the box, so each line ends short of the date's edge. A new sentence after it starts a new paragraph.
+ */
+export function wrappedPdf(): Promise<Buffer> {
+  const body =
+    "Relevant coursework includes compilers, distributed systems, databases, operating systems, machine learning, " +
+    "and numerical methods, taught in small seminars over several terms.";
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: { paddingTop: PAD_TOP_BOTTOM, paddingLeft: PAD_SIDES, paddingRight: PAD_SIDES, fontFamily: "Times-Roman", fontSize: 10 } },
+        h(Text, { style: { textAlign: "right" } }, "May 2025"),
+        h(View, { style: { width: 480 } }, h(Text, null, body)),
+        h(Text, null, "Another entry follows."),
+      ),
+    ),
+  );
+}
+
+/**
+ * Two full-width "Label: list" lines at normal pitch, under a right-aligned date: each is a separate item, not one
+ * wrapped paragraph, though the line above each one runs nearly to the edge.
+ */
+export function labelledLinesPdf(): Promise<Buffer> {
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: { paddingTop: PAD_TOP_BOTTOM, paddingLeft: PAD_SIDES, paddingRight: PAD_SIDES, fontFamily: "Times-Roman", fontSize: 10 } },
+        h(Text, { style: { textAlign: "right" } }, "May 2025"),
+        h(View, { style: { width: 500 } }, h(Text, null, "Languages: Python, Java, C++, JavaScript, TypeScript, SQL, Go, Rust, Kotlin, Swift, Bash, MATLAB, R, Scala, Haskell")),
+        h(View, { style: { width: 500 } }, h(Text, null, "Frameworks: React, Node.js, Django, FastAPI, Spring Boot, Flask, Express, Next.js, Tailwind, Vue")),
       ),
     ),
   );

@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { flattenDoc, paragraphText } from "@/lib/doc/model";
 import { isValidDoc } from "@/lib/doc/extensions";
 import type { DocInline, DocJSON, DocMark, DocParagraph, DocText } from "@/lib/doc/types";
-import { NO_TEXT_MESSAGE, NoTextError, fontInfo, pdfToDoc } from "@/lib/import/pdfToDoc";
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
+import { NO_TEXT_MESSAGE, NoTextError, fontInfo, pdfToDoc, rulesSafely } from "@/lib/import/pdfToDoc";
 import {
-  PAD_SIDES, PAD_TOP_BOTTOM, embeddedFontPdf, harvardPdf, helveticaPdf, imageOnlyPdf, linkedPdf, ruledPdf, shortLinesPdf,
+  PAD_SIDES, PAD_TOP_BOTTOM, embeddedFontPdf, hangingBulletPdf, harvardPdf, helveticaPdf, imageOnlyPdf, linkedPdf, ruledPdf,
+  labelledLinesPdf, linkSeparatorsPdf, pagedPdf, shortLinesPdf, underlinePdf, wrappedPdf,
 } from "./import-fixtures";
 
 const bytes = (b: Buffer) => new Uint8Array(b);
@@ -49,6 +51,41 @@ describe("fontInfo", () => {
   it("does not split DejaVu into Deja Vu", () => {
     expect(fontInfo("DejaVuSerif").family).toBe("DejaVu Serif");
     expect(fontInfo("DejaVuSans-Bold")).toEqual({ family: "DejaVu Sans", bold: true, italic: false });
+  });
+
+  it("names the Latin Modern and Computer Modern roman faces Latin Modern Roman, with their style", () => {
+    const roman = { family: "Latin Modern Roman" };
+    expect(fontInfo("LMRoman12-Bold")).toEqual({ ...roman, bold: true, italic: false });
+    expect(fontInfo("ABCDEF+LMRoman10-BoldItalic")).toEqual({ ...roman, bold: true, italic: true });
+    expect(fontInfo("LMRoman10-Regular")).toEqual({ ...roman, bold: false, italic: false });
+    expect(fontInfo("LMRomanSlant10-Regular")).toEqual({ ...roman, bold: false, italic: true });
+    expect(fontInfo("LMRomanCaps10-Regular")).toEqual({ ...roman, bold: false, italic: false });
+    expect(fontInfo("CMR10")).toEqual({ ...roman, bold: false, italic: false });
+    expect(fontInfo("CMBX10")).toEqual({ ...roman, bold: true, italic: false });
+    expect(fontInfo("CMTI10")).toEqual({ ...roman, bold: false, italic: true });
+    expect(fontInfo("CMSL10").italic).toBe(true);
+    expect(fontInfo("SFRM1000").family).toBe("Latin Modern Roman");
+  });
+
+  it("names the Latin Modern and Computer Modern sans faces Latin Modern Sans", () => {
+    expect(fontInfo("LMSans10-Bold")).toEqual({ family: "Latin Modern Sans", bold: true, italic: false });
+    expect(fontInfo("CMSS10")).toEqual({ family: "Latin Modern Sans", bold: false, italic: false });
+  });
+});
+
+describe("rulesSafely: a drawing is decoration, never a reason to fail", () => {
+  const { OPS } = pdfjs;
+
+  it("skips a path with no path data (null or missing), and keeps the rules around it", () => {
+    const rules = rulesSafely({
+      fnArray: [OPS.constructPath, OPS.constructPath, OPS.constructPath],
+      argsArray: [[OPS.stroke, [null]], [OPS.stroke, null], [OPS.stroke, [[0, 10, 100, 1, 300, 100]]]],
+    });
+    expect(rules).toEqual([{ y: 100, x0: 10, x1: 300 }]);
+  });
+
+  it("gives no rules for a page whose drawing cannot be read at all", () => {
+    expect(rulesSafely({ fnArray: null as unknown as number[], argsArray: [] })).toEqual([]);
   });
 });
 
@@ -148,6 +185,18 @@ describe("pdfToDoc: a Harvard-style resume keeps its layout", () => {
   });
 });
 
+describe("pdfToDoc: wrapped bullets whose first line is one run", () => {
+  it("joins each wrapped line to its bullet, and does not join the heading after them", async () => {
+    const { doc } = await pdfToDoc(bytes(await hangingBulletPdf()));
+    const bullets = flattenDoc(doc).filter((p) => p.listType === "bulletList");
+    expect(bullets.map((p) => p.text)).toEqual([
+      "Built a forecasting model for regional housing prices using twelve years of county records, cutting the mean error of the quarterly estimates by a third and presenting the method to the planning committee each spring.",
+      "Shipped a small report generator for the planning committee, which cut the monthly preparation time by half across three teams and removed a manual copy step that had caused most of the corrections.",
+    ]);
+    expect(flattenDoc(doc).find((p) => p.text === "PROJECTS")?.listType).toBeNull();
+  });
+});
+
 describe("pdfToDoc: other documents and edge cases", () => {
   it("reads another font family by its name", async () => {
     const { doc, page } = await pdfToDoc(bytes(await helveticaPdf()));
@@ -198,9 +247,10 @@ describe("pdfToDoc: margins and alignment of short lines", () => {
   });
 });
 
-describe("pdfToDoc: links", () => {
-  const linkOf = (n: DocInline): string | undefined => (n.type === "text" ? n.marks?.find((m) => m.type === "link") : undefined)?.attrs.href;
+const hasUnderline = (n: DocText): boolean => !!n.marks?.some((m) => m.type === "underline");
+const linkOf = (n: DocInline): string | undefined => (n.type === "text" ? n.marks?.find((m) => m.type === "link") : undefined)?.attrs.href;
 
+describe("pdfToDoc: links", () => {
   it("puts a link mark on exactly the link text, and leaves the rest of the line plain", async () => {
     const { doc } = await pdfToDoc(bytes(await linkedPdf()));
     const contact = paraNamed(doc, "London");
@@ -220,5 +270,86 @@ describe("pdfToDoc: links", () => {
     expect(hasMark(marksOfText(paraNamed(doc, "Jane Doe"), "Jane Doe"), "bold")).toBe(true);
     const plain = paraNamed(doc, "Plain text");
     expect((plain.content ?? []).some((n) => n.type === "text" && n.marks?.some((m) => m.type === "link"))).toBe(false);
+  });
+});
+
+describe("pdfToDoc: link text is exactly the label, not the separators around it", () => {
+  it("links each label of a separated contact line and nothing else", async () => {
+    const { doc } = await pdfToDoc(bytes(await linkSeparatorsPdf()));
+    const nodes = (paraNamed(doc, "Email").content ?? []).filter((n): n is DocText => n.type === "text");
+    const linked = nodes.filter((n) => linkOf(n)).map((n) => [n.text, linkOf(n)]);
+    expect(linked).toEqual([
+      ["Email", "mailto:jane@example.com"],
+      ["LinkedIn", "https://linkedin.com/in/jane"],
+      ["GitHub", "https://github.com/jane"],
+      ["Portfolio", "https://jane.example.com/"],
+    ]);
+    expect(nodes.filter((n) => !linkOf(n)).map((n) => n.text).join("").replace(/\s+/g, "")).toBe("|||");
+  });
+});
+
+describe("pdfToDoc: underline", () => {
+  it("underlines the text a thin rule runs under, and not the text around it", async () => {
+    const { doc } = await pdfToDoc(bytes(await underlinePdf()));
+    const body = paraNamed(doc, "Plain then");
+    const runs = (body.content ?? []).filter((n): n is DocText => n.type === "text").map((n) => [n.text, hasUnderline(n)]);
+    expect(runs.find(([t]) => t === "Underlined phrase")?.[1]).toBe(true);
+    expect(runs.filter(([, under]) => under).map(([t]) => t)).toEqual(["Underlined phrase"]);
+  });
+
+  it("leaves linked text as a link, without an underline", async () => {
+    const { doc } = await pdfToDoc(bytes(await underlinePdf()));
+    const linked = (paraNamed(doc, "Plain then").content ?? []).find((n): n is DocText => n.type === "text" && linkOf(n) !== undefined);
+    expect(linked?.text).toBe("linked");
+    expect(hasUnderline(linked!)).toBe(false);
+  });
+
+  it("keeps a full-width rule as the heading's border, not an underline", async () => {
+    const { doc } = await pdfToDoc(bytes(await underlinePdf()));
+    const heading = paraNamed(doc, "SUMMARY");
+    expect(heading.attrs.borderBottom).toBe(true);
+    expect((heading.content ?? []).some((n) => n.type === "text" && hasUnderline(n))).toBe(false);
+  });
+});
+
+describe("pdfToDoc: headers and footers are not body text", () => {
+  it("drops the page numbers and the repeated footer of each page, and keeps the body", async () => {
+    const { doc } = await pdfToDoc(bytes(await pagedPdf()));
+    expect(flattenDoc(doc).map((p) => p.text)).toEqual([
+      "Body line one on page 1.",
+      "Body line two on page 1.",
+      "Body line three on page 1.",
+      "Body line one on page 2.",
+      "Body line two on page 2.",
+      "Body line three on page 2.",
+    ]);
+  });
+
+  it("takes the bottom margin from the last body line, not from the dropped footer", async () => {
+    const { page } = await pdfToDoc(bytes(await pagedPdf()));
+    // The body ends far above the footer, so the bottom margin is capped at the top margin (the fixture's padding).
+    expect(page.marginBottom).toBe(page.marginTop);
+    expect(page.marginTop).toBeCloseTo(PAD_TOP_BOTTOM / PT, 1);
+  });
+});
+
+describe("pdfToDoc: a wrapped paragraph that ends short of the right edge", () => {
+  it("joins its lines into one paragraph, and keeps the next sentence as a new one", async () => {
+    const { doc } = await pdfToDoc(bytes(await wrappedPdf()));
+    expect(flattenDoc(doc).map((p) => p.text)).toEqual([
+      "May 2025",
+      "Relevant coursework includes compilers, distributed systems, databases, operating systems, machine learning, and numerical methods, taught in small seminars over several terms.",
+      "Another entry follows.",
+    ]);
+  });
+});
+
+describe("pdfToDoc: labelled lines stay separate items", () => {
+  it("keeps two full-width Label: lines as two paragraphs", async () => {
+    const { doc } = await pdfToDoc(bytes(await labelledLinesPdf()));
+    const texts = flattenDoc(doc).map((p) => p.text);
+    expect(texts).toHaveLength(3);
+    expect(texts[1].startsWith("Languages: ")).toBe(true);
+    expect(texts[2].startsWith("Frameworks: ")).toBe(true);
   });
 });
