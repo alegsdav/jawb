@@ -4,7 +4,7 @@ import { EMPTY_PDF_MESSAGE, resumeFromPdf } from "@/lib/import/resumeFromPdf";
 import { NO_TEXT_MESSAGE, NoTextError } from "@/lib/import/pdfToDoc";
 import { importPdfInBrowser } from "@/lib/import/importPdf";
 import { HARVARD_PAGE } from "@/lib/template";
-import { harvardPdf, imageOnlyPdf } from "./import-fixtures";
+import { harvardPdf, imageOnlyPdf, indentedBulletPdf } from "./import-fixtures";
 
 const bytes = (b: Buffer) => new Uint8Array(b);
 
@@ -26,6 +26,12 @@ describe("resumeFromPdf: the shared PDF to resume helper", () => {
     const text = flattenDoc(resume.doc!).map((p) => p.text);
     expect(text).toContain("Ada Lovelace");
     expect(text.some((t) => t.startsWith("Harvard University"))).toBe(true);
+  });
+
+  it("keeps the indent of a bulleted list in the resume, so its items wrap where the original's do", async () => {
+    const resume = await resumeFromPdf(bytes(await indentedBulletPdf(14)));
+    const list = resume.doc!.content.find((b) => b.type === "bulletList");
+    expect(list?.type === "bulletList" && Math.abs((list.attrs?.indentPt ?? NaN) - 14) <= 1.5).toBe(true);
   });
 
   it("a PDF with no text is refused with the export hint", async () => {

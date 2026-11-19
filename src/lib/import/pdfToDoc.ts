@@ -9,7 +9,8 @@
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { buildDoc, newId, normalizeDoc, type FlatEntry } from "@/lib/doc/model";
-import type { DocInline, DocJSON, DocMark, DocParagraph, PageSetup, ParagraphAttrs } from "@/lib/doc/types";
+import { clampIndentPt } from "@/lib/doc/types";
+import type { DocInline, DocJSON, DocList, DocMark, DocParagraph, PageSetup, ParagraphAttrs } from "@/lib/doc/types";
 
 export const NO_TEXT_MESSAGE =
   "This PDF has no selectable text (it may be a scan). Export it again as a text PDF, or paste the text.";
@@ -124,8 +125,11 @@ type PageText = { width: number; height: number; lines: Line[]; rules: Rule[] };
 /** A paragraph being assembled from one line (a bullet or plain) and any wrapped lines that continue it. */
 type Para = { bullet: boolean; lines: Line[]; pieces: Piece[]; textX: number; depth: number };
 
-/** Paragraphs and horizontal lines in reading order. A line is an empty paragraph with a bottom border. */
-type Item = { y: number; entry: FlatEntry };
+/**
+ * Paragraphs and horizontal lines in reading order. A line is an empty paragraph with a bottom border. indent: a
+ * bullet's distance (points) from the page's left edge to its text.
+ */
+type Item = { y: number; entry: FlatEntry; indent?: number };
 
 /**
  * The document and page setup of a PDF. Throws NoTextError when the PDF has no text.
@@ -699,6 +703,8 @@ function paragraphsOf(lines: Line[], right: number, width: number): Para[] {
       continue;
     }
     cur.lines.push(line);
+    // The first wrapped line starts at the text itself, so it replaces the estimate of where the text starts.
+    if (cur.bullet && cur.lines.length === 2) cur.textX = line.x0;
     cur.pieces = [...cur.pieces, { text: " ", style: cur.pieces[cur.pieces.length - 1].style, x: line.x0, w: 0 }, ...line.pieces];
   }
   return out;
@@ -755,6 +761,7 @@ function pageItems(page: PageText): Item[] {
   const lines = underlineLines(page.lines.map((l) => resolveTabs(l, right, width)), shortRules);
   const paras = paragraphsOf(lines, right, width);
   assignDepths(paras);
+  const textStarts = bulletTextStarts(paras);
   const borders = new Set<Para>();
   const lineItems: Item[] = [];
   for (const rule of page.rules) {
@@ -775,9 +782,27 @@ function pageItems(page: PageText): Item[] {
     const entry: FlatEntry = para.bullet
       ? { node, listType: "bulletList", depth: para.depth, bullet: true }
       : { node, listType: null, depth: 0, bullet: false };
-    return [{ y: para.lines[0].y, entry }];
+    return [{ y: para.lines[0].y, entry, indent: para.bullet ? textStarts.get(para)! - left : undefined }];
   });
   return [...items, ...lineItems].sort((a, b) => a.y - b.y);
+}
+
+/**
+ * Where each bullet's text starts. A bullet with a wrapped line has it exactly (the wrapped line starts at the text).
+ * A single-line bullet is estimated from its glyph run, which is a few points off when the glyph and the text share
+ * one run, so it takes the page's exact start for its depth when there is one: a list indents its items alike.
+ */
+function bulletTextStarts(paras: Para[]): Map<Para, number> {
+  const exact = new Map<number, number[]>();
+  for (const p of paras) {
+    if (p.bullet && p.lines.length > 1) exact.set(p.depth, [...(exact.get(p.depth) ?? []), p.textX]);
+  }
+  const out = new Map<Para, number>();
+  for (const p of paras) {
+    const known = exact.get(p.depth);
+    out.set(p, p.bullet && p.lines.length === 1 && known ? median(known) : p.textX);
+  }
+  return out;
 }
 
 function nodeOf(
@@ -831,9 +856,43 @@ function lineEntry(): FlatEntry {
   return { node: { type: "paragraph", attrs: { id: newId(), borderBottom: true } }, listType: null, depth: 0, bullet: false };
 }
 
-/** The document from the items in reading order. */
+/**
+ * The document from the items in reading order. The list indents are set after normalizing, which keeps only the
+ * attributes the model knows, so they are not lost on the way.
+ */
 function docFromItems(items: Item[]): DocJSON {
-  return normalizeDoc(buildDoc(items.map((item) => item.entry)));
+  const doc = normalizeDoc(buildDoc(items.map((item) => item.entry)));
+  const indents = new Map<string, number>();
+  for (const item of items) if (item.indent !== undefined) indents.set(item.entry.node.attrs.id, item.indent);
+  setListIndents(doc, indents);
+  return doc;
+}
+
+/**
+ * Sets the indent of each bulleted list: the median distance from the page's left edge to its own items' text, so
+ * the items wrap where the original's do. A nested list is measured from its own items. A list with no measured item
+ * keeps the editor's default.
+ */
+function setListIndents(doc: DocJSON, indents: Map<string, number>): void {
+  const visit = (list: DocList): void => {
+    const own = list.content.flatMap((item) => item.content).flatMap((c) => (c.type === "paragraph" ? [indents.get(c.attrs.id)] : []));
+    const measured = own.filter((v): v is number => v !== undefined);
+    if (list.type === "bulletList" && measured.length) list.attrs = { indentPt: medianIndentPt(measured) };
+    for (const item of list.content) for (const child of item.content) if (child.type !== "paragraph") visit(child);
+  };
+  for (const b of doc.content) if (b.type !== "paragraph") visit(b);
+}
+
+/** The median of a non-empty list of numbers. */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const k = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[k] : (sorted[k - 1] + sorted[k]) / 2;
+}
+
+/** A list's indent in points: the median of its items' indents, to the half point and within the list indent range. */
+function medianIndentPt(values: number[]): number {
+  return clampIndentPt(Math.round(median(values) * 2) / 2);
 }
 
 // ---- headers and footers ----

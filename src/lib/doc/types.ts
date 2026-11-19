@@ -50,9 +50,24 @@ export type ParagraphAttrs = {
 
 export type DocParagraph = { type: "paragraph"; attrs: ParagraphAttrs; content?: DocInline[] };
 export type DocListItem = { type: "listItem"; content: (DocParagraph | DocList)[] };
+
+/** How an ordered list numbers its items (CSS list-style-type): decimal, lower/upper letters, lower/upper roman. */
+export const LIST_NUMBER_TYPES = ["1", "a", "A", "i", "I"] as const;
+export type ListNumberType = (typeof LIST_NUMBER_TYPES)[number];
+
+/** The range an indentPt is clamped to, in points. */
+export const LIST_INDENT_RANGE_PT = { min: 6, max: 144 } as const;
+export const clampIndentPt = (pt: number): number =>
+  Math.min(LIST_INDENT_RANGE_PT.max, Math.max(LIST_INDENT_RANGE_PT.min, pt));
+
+/**
+ * Attributes a list keeps. indentPt is the distance in points from the content's left edge to the start of the
+ * items' text (the marker hangs to its left); null or absent = the default indent. start and type are ordered only.
+ */
+export type ListAttrs = { start?: number; type?: ListNumberType | null; indentPt?: number | null };
 export type DocList =
-  | { type: "bulletList"; content: DocListItem[] }
-  | { type: "orderedList"; attrs?: { start?: number; type?: string | null }; content: DocListItem[] };
+  | { type: "bulletList"; attrs?: { indentPt?: number | null }; content: DocListItem[] }
+  | { type: "orderedList"; attrs?: ListAttrs; content: DocListItem[] };
 export type DocBlock = DocParagraph | DocList;
 export type DocJSON = { type: "doc"; content: DocBlock[] };
 
@@ -76,6 +91,8 @@ export type FlatParagraph = {
   /** Plain text; a tab is "\t", a hard break is "\n". */
   text: string;
   listType: "bulletList" | "orderedList" | null;
+  /** The attributes of the list the paragraph is in (see ListAttrs); absent when it has none. */
+  listAttrs?: ListAttrs;
   depth: number;
   bullet: boolean;
 };

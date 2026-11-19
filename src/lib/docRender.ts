@@ -9,16 +9,20 @@ import {
   DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
   PAGE_DEFAULTS,
+  clampIndentPt,
   type DocInline,
   type DocJSON,
   type DocList,
   type DocMark,
   type DocParagraph,
+  type ListNumberType,
   type PageSetup,
 } from "./doc/types";
 
-/** Left indent of each list level: a quarter inch. */
+/** Left indent of each list level when the list has no indentPt: a quarter inch. */
 export const LIST_INDENT_PT = 18;
+/** The gap between a right-aligned (custom indent) marker and the text after it. */
+const MARKER_GAP_PT = 5;
 const BULLETS = ["•", "◦", "▪"];
 
 export type RunStyle = { bold: boolean; italic: boolean; underline: boolean; sizePt: number; fontFamily: string };
@@ -29,8 +33,12 @@ export type Run = { text: string; style: RunStyle; href?: string; tab?: true };
  * tab, `right` is the text after the last tab, right-aligned.
  */
 export type RenderLine = { left: Run[]; right: Run[] | null };
-/** A bullet or number at x (points from the left margin); the paragraph's text starts at textIndentPt. */
-export type RenderMarker = { text: string; x: number; style: RunStyle };
+/**
+ * A bullet or number in the indent, from x (points from the left margin) to the paragraph's text. A default marker is
+ * left-aligned at the start of its level's indent; one in a list with its own indentPt is right-aligned, `gapPt` before
+ * the text, and starts at the content's left edge.
+ */
+export type RenderMarker = { text: string; x: number; style: RunStyle; align: "left" | "right"; gapPt: number };
 export type RenderParagraph = {
   kind: "paragraph";
   align: "left" | "center" | "right" | "justify";
@@ -181,11 +189,66 @@ function linesOf(content: DocInline[] | undefined): RenderLine[] {
   });
 }
 
-/** Position of a paragraph inside a list: its level (1 = top), its type, and whether it is the item's first paragraph. */
-type ListPos = { depth: number; ordered: boolean; bullet: boolean; number: number };
+const ROMAN: [number, string][] = [
+  [1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"],
+  [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"],
+];
+
+/**
+ * The marker of an ordered list item in its numbering style, with its full stop: "3.", "c.", "iii.", "AA." (letters
+ * run a..z, aa..az, ba.. as in a spreadsheet's column names; roman numerals go to 3999). A number the style cannot
+ * write (zero, negative, fractional, too big for roman) is written in decimal.
+ */
+export function orderedMarker(n: number, type: ListNumberType | null | undefined): string {
+  const whole = Number.isInteger(n) && n >= 1;
+  if (type === "a" || type === "A") {
+    if (!whole) return `${n}.`;
+    let letters = "";
+    for (let v = n; v > 0; v = Math.floor((v - 1) / 26)) {
+      letters = String.fromCharCode(97 + ((v - 1) % 26)) + letters;
+    }
+    return `${type === "A" ? letters.toUpperCase() : letters}.`;
+  }
+  if ((type === "i" || type === "I") && whole && n <= 3999) {
+    let roman = "";
+    let v = n;
+    for (const [value, symbol] of ROMAN) {
+      while (v >= value) {
+        roman += symbol;
+        v -= value;
+      }
+    }
+    return `${type === "I" ? roman.toUpperCase() : roman}.`;
+  }
+  return `${n}.`;
+}
+
+/**
+ * Position of a paragraph inside a list: its level (1 = top), whether it is numbered (and in what style), whether it is
+ * the item's first paragraph, where its text starts (points from the left margin), and whether the list has its own indent.
+ */
+type ListPos = {
+  depth: number;
+  ordered: boolean;
+  type: ListNumberType | null;
+  bullet: boolean;
+  number: number;
+  textPt: number;
+  custom: boolean;
+};
 
 function markerText(list: ListPos): string {
-  return list.ordered ? `${list.number}.` : BULLETS[Math.min(list.depth, BULLETS.length) - 1];
+  return list.ordered ? orderedMarker(list.number, list.type) : BULLETS[Math.min(list.depth, BULLETS.length) - 1];
+}
+
+/**
+ * The marker of a list item's first paragraph: right-aligned at the content's edge for a custom indent, else hung in
+ * its level's indent.
+ */
+function markerOf(list: ListPos, style: RunStyle): RenderMarker {
+  const text = markerText(list);
+  if (list.custom) return { text, x: 0, style, align: "right", gapPt: MARKER_GAP_PT };
+  return { text, x: Math.max(0, list.textPt - LIST_INDENT_PT), style, align: "left", gapPt: 0 };
 }
 
 /**
@@ -206,7 +269,7 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
     if (!l.left.length && !l.right) l.left.push({ text: " ", style });
   }
 
-  const level = list && !inline ? list.depth : 0;
+  const textIndentPt = list && !inline ? list.textPt : 0;
   return {
     kind: "paragraph",
     align,
@@ -215,8 +278,8 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
     sizePt,
     lineHeight: a?.lineHeight ?? DEFAULT_LINE_HEIGHT,
     rule: a?.borderBottom === true,
-    textIndentPt: level * LIST_INDENT_PT,
-    marker: list?.bullet ? { text: markerText(list), x: Math.max(0, level - 1) * LIST_INDENT_PT, style } : null,
+    textIndentPt,
+    marker: list?.bullet ? markerOf(list, style) : null,
     markerInline: list?.bullet === true && inline,
     lines,
   };
@@ -238,16 +301,25 @@ export function linesWithMarker(p: RenderParagraph, glyph: (text: string) => str
   return [{ ...first, left: [marker, ...first.left] }, ...rest];
 }
 
-/** A list's items in order, nested lists one level deeper. Only an item's first paragraph carries the marker. */
-function walkList(list: DocList, depth: number, out: RenderParagraph[]): void {
+/**
+ * A list's items in order, nested lists one level deeper. Only an item's first paragraph carries the marker. A list
+ * with an indentPt starts its text there; one without starts it LIST_INDENT_PT past its parent's text (so a list
+ * nested in a default list sits where it always did). `parentPt` is where the enclosing list's text starts.
+ */
+function walkList(list: DocList, depth: number, parentPt: number, out: RenderParagraph[]): void {
+  const own = list.attrs?.indentPt;
+  const custom = typeof own === "number" && Number.isFinite(own);
+  const textPt = custom ? clampIndentPt(own) : parentPt + LIST_INDENT_PT;
+  const ordered = list.type === "orderedList";
   const start = list.type === "orderedList" ? (list.attrs?.start ?? 1) : 1;
+  const type = list.type === "orderedList" ? (list.attrs?.type ?? null) : null;
   list.content.forEach((item, i) => {
     item.content.forEach((child, j) => {
       if (child.type === "paragraph") {
-        const pos = { depth, ordered: list.type === "orderedList", bullet: j === 0, number: start + i };
+        const pos: ListPos = { depth, ordered, type, bullet: j === 0, number: start + i, textPt, custom };
         out.push(paragraphBlock(child, pos));
       } else {
-        walkList(child, depth + 1, out);
+        walkList(child, depth + 1, textPt, out);
       }
     });
   });
@@ -258,7 +330,7 @@ export function renderBlocks(doc: DocJSON): RenderParagraph[] {
   const out: RenderParagraph[] = [];
   for (const b of doc.content ?? []) {
     if (b.type === "paragraph") out.push(paragraphBlock(b, null));
-    else walkList(b, 1, out);
+    else walkList(b, 1, 0, out);
   }
   return out;
 }

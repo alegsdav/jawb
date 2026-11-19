@@ -9,7 +9,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { paragraphSizePt, tabGapPx } from "../docRender";
 import { cssFontStack } from "./fonts";
 import { normalizeHref } from "./model";
-import { DEFAULT_FONT_SIZE_PT, type DocJSON } from "./types";
+import { DEFAULT_FONT_SIZE_PT, type DocJSON, clampIndentPt } from "./types";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -82,6 +82,9 @@ function idFixTransaction(state: EditorState): Transaction | null {
 
 const idKey = new PluginKey("paragraphIds");
 const sizeKey = new PluginKey("paragraphSize");
+const listIndentKey = new PluginKey("listIndent");
+/** The indent of a list level the CSS gives it (.doc-content ul/ol: 0.5in), in points. */
+const EDITOR_LIST_STEP_PT = 36;
 
 const ParagraphFormat = Extension.create({
   name: "paragraphFormat",
@@ -189,6 +192,73 @@ export function sizeDecorations(doc: PMNode): DecorationSet {
   });
   return DecorationSet.create(doc, decos);
 }
+
+const isList = (node: PMNode): boolean => node.type.name === "bulletList" || node.type.name === "orderedList";
+
+/**
+ * Inline padding on the lists that set indentPt, so the items' text starts that far from the content's left edge. A
+ * nested list's padding is measured from its parent's text, so the nesting is subtracted: the editor's CSS padding
+ * of the other lists then adds up to the same place. `parentPt` is where the enclosing list's text starts.
+ */
+export function listIndentDecorations(doc: PMNode): DecorationSet {
+  const decos: Decoration[] = [];
+  const walk = (list: PMNode, pos: number, parentPt: number) => {
+    const own = list.attrs.indentPt;
+    const custom = typeof own === "number" && Number.isFinite(own);
+    const pt = custom ? clampIndentPt(own) : parentPt + EDITOR_LIST_STEP_PT;
+    if (custom) decos.push(Decoration.node(pos, pos + list.nodeSize, { style: `padding-left: ${Math.max(0, pt - parentPt)}pt` }));
+    list.forEach((item, itemOffset) => {
+      const itemPos = pos + 1 + itemOffset;
+      item.forEach((child, childOffset) => {
+        if (isList(child)) walk(child, itemPos + 1 + childOffset, pt);
+      });
+    });
+  };
+  doc.forEach((node, offset) => {
+    if (isList(node)) walk(node, offset, 0);
+  });
+  return DecorationSet.create(doc, decos);
+}
+
+/**
+ * The list attributes the editor adds to the schema: indentPt (see ListAttrs). It is drawn by listIndentDecorations,
+ * not as an HTML attribute, so copying the list does not carry the indent. The numbering type is TipTap's own `type`
+ * attribute on ol; the CSS for it is in globals.css (.doc-content ol[type]).
+ */
+const DocListIndent = Extension.create({
+  name: "docListIndent",
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["bulletList", "orderedList"],
+        attributes: {
+          indentPt: {
+            // undefined, not null: an unset indent is left out of the JSON, as the other list attrs are.
+            default: undefined,
+            parseHTML: () => null,
+            renderHTML: () => ({}),
+          },
+        },
+      },
+    ];
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: listIndentKey,
+        state: {
+          init: (_config, state) => listIndentDecorations(state.doc),
+          apply: (tr, set, _old, newState) => (tr.docChanged ? listIndentDecorations(newState.doc) : set),
+        },
+        props: {
+          decorations: (state) => listIndentKey.getState(state),
+        },
+      }),
+    ];
+  },
+});
 
 /** Sets the given attributes on every paragraph the selection touches. */
 function setParagraphAttrs(attrs: Record<string, unknown>): Command {
@@ -455,6 +525,7 @@ export const docExtensions: Extensions = [
   DocFontFamily,
   TextAlign.configure({ types: ["paragraph"] }),
   ParagraphFormat,
+  DocListIndent,
   Tab,
 ];
 

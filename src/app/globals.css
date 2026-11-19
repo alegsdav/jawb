@@ -172,6 +172,11 @@ body {
 .doc-content ul ul { list-style-type: circle; }
 .doc-content ul ul ul { list-style-type: square; }
 .doc-content ol { list-style-type: decimal; }
+/* The numbering style of an ordered list is its type attribute (TipTap writes it on the ol; "1" is not written). */
+.doc-content ol[type="a"] { list-style-type: lower-alpha; }
+.doc-content ol[type="A"] { list-style-type: upper-alpha; }
+.doc-content ol[type="i"] { list-style-type: lower-roman; }
+.doc-content ol[type="I"] { list-style-type: upper-roman; }
 .doc-content li > p { display: inline; }
 .doc-content li > p + p { display: block; }
 .doc-tab { display: inline-block; }

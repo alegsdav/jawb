@@ -109,7 +109,16 @@ function ParagraphView({ p }: { p: RenderParagraph }) {
     >
       <div style={{ display: "flex", paddingLeft: pt(marker ? marker.x : p.textIndentPt) }}>
         {marker && (
-          <span style={{ ...styleCss(marker.style), flex: "none", width: pt(p.textIndentPt - marker.x) }}>
+          <span
+            style={{
+              ...styleCss(marker.style),
+              flex: "none",
+              boxSizing: "border-box",
+              width: pt(p.textIndentPt - marker.x),
+              textAlign: marker.align,
+              paddingRight: pt(marker.gapPt),
+            }}
+          >
             {marker.text}
           </span>
         )}

@@ -98,6 +98,34 @@ export function hangingBulletPdf(): Promise<Buffer> {
   );
 }
 
+/**
+ * Bullets whose text starts `indent` points from the margin, the glyph in its own column (as a Word export with a
+ * hanging indent writes them). One bullet wraps, so its wrapped line shows where the text starts.
+ */
+export function indentedBulletPdf(indent = 14): Promise<Buffer> {
+  const item = (text: string) =>
+    h(
+      View,
+      { style: { flexDirection: "row" } },
+      h(Text, { style: { width: indent } }, "•"),
+      h(Text, { style: { flex: 1 } }, text),
+    );
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: s.page },
+        h(Text, { style: s.bold }, "EXPERIENCE"),
+        item("Graduated with highest honors"),
+        item(LONG_BULLET),
+        h(Text, { style: s.bold }, "PROJECTS"),
+      ),
+    ),
+  );
+}
+
 /** A second document in Helvetica: a bold left-aligned name and a plain line. */
 export function helveticaPdf(): Promise<Buffer> {
   return renderToBuffer(

@@ -242,7 +242,13 @@ export function applyPull(copy: Resume, master: Resume): { resume: Resume } & Pu
 }
 
 /** A master paragraph as a document entry (with its list placement). */
-const entryOf = (p: FlatParagraph): FlatEntry => ({ node: p.node, listType: p.listType, depth: p.depth, bullet: p.bullet });
+const entryOf = (p: FlatParagraph): FlatEntry => ({
+  node: p.node,
+  listType: p.listType,
+  listAttrs: p.listAttrs,
+  depth: p.depth,
+  bullet: p.bullet,
+});
 
 /** Add one new master section, entry or bullet (all its lines) to the copy, in the master's place. Unchanged if it's gone. */
 export function addFromMaster(copy: Resume, master: Resume, add: Pick<PullAddition, "id">): Resume {

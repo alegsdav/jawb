@@ -2,17 +2,21 @@
  * Pure, immutable helpers over the resume document (DocJSON, see ./types). No TipTap, no DOM.
  * Inputs are never mutated; every helper returns new objects (or the same object when nothing changes).
  */
-import type {
-  DocBlock,
-  DocInline,
-  DocJSON,
-  DocList,
-  DocListItem,
-  DocMark,
-  DocParagraph,
-  DocText,
-  FlatParagraph,
-  ParagraphAttrs,
+import {
+  LIST_NUMBER_TYPES,
+  clampIndentPt,
+  type DocBlock,
+  type DocInline,
+  type DocJSON,
+  type DocList,
+  type DocListItem,
+  type DocMark,
+  type DocParagraph,
+  type DocText,
+  type FlatParagraph,
+  type ListAttrs,
+  type ListNumberType,
+  type ParagraphAttrs,
 } from "./types";
 
 /** An 8-character random id (same alphabet and style as uid() in resume.ts). */
@@ -23,7 +27,13 @@ export const newId = (): string => {
 };
 
 /** One paragraph in document order, with the list it sits in (see FlatParagraph). */
-export type FlatEntry = { node: DocParagraph; listType: FlatParagraph["listType"]; depth: number; bullet: boolean };
+export type FlatEntry = {
+  node: DocParagraph;
+  listType: FlatParagraph["listType"];
+  listAttrs?: ListAttrs;
+  depth: number;
+  bullet: boolean;
+};
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
@@ -86,8 +96,37 @@ export function paragraphText(p: DocParagraph): string {
   return out;
 }
 
+/**
+ * The list attributes the model keeps, cleaned: an unknown numbering type, a start below 1 and a non-finite indent are
+ * dropped and the indent is clamped. Only ordered lists keep type and start. Undefined when nothing is left.
+ */
+export function cleanListAttrs(raw: unknown, ordered: boolean): ListAttrs | undefined {
+  const a = isObj(raw) ? raw : {};
+  const out: ListAttrs = {};
+  if (ordered) {
+    if (typeof a.type === "string" && (LIST_NUMBER_TYPES as readonly string[]).includes(a.type)) {
+      out.type = a.type as ListNumberType;
+    }
+    if (typeof a.start === "number" && Number.isInteger(a.start) && a.start >= 1) out.start = a.start;
+  }
+  if (typeof a.indentPt === "number" && Number.isFinite(a.indentPt)) out.indentPt = clampIndentPt(a.indentPt);
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Whether two cleaned list attrs say the same (absent and null are the same). */
+function sameListAttrs(a: ListAttrs | undefined, b: ListAttrs | undefined): boolean {
+  return (
+    (a?.type ?? null) === (b?.type ?? null) &&
+    (a?.start ?? null) === (b?.start ?? null) &&
+    (a?.indentPt ?? null) === (b?.indentPt ?? null)
+  );
+}
+
 /** Paragraph id, tolerant of data without attrs. */
 const idOfPara = (p: DocParagraph): string => p.attrs?.id ?? "";
+
+/** The cleaned attrs of a list (see cleanListAttrs). */
+const listAttrsOf = (list: DocList): ListAttrs | undefined => cleanListAttrs(list.attrs, list.type === "orderedList");
 
 /** The document as a sequence of paragraphs (with list info), in order. */
 function seqOf(doc: DocJSON): FlatEntry[] {
@@ -97,7 +136,7 @@ function seqOf(doc: DocJSON): FlatEntry[] {
       let first = true;
       for (const child of li.content ?? []) {
         if (child.type === "paragraph") {
-          out.push({ node: child, listType: list.type, depth, bullet: first });
+          out.push({ node: child, listType: list.type, listAttrs: listAttrsOf(list), depth, bullet: first });
           first = false;
         } else if (child.type === "bulletList" || child.type === "orderedList") {
           walkList(child, depth + 1);
@@ -112,10 +151,19 @@ function seqOf(doc: DocJSON): FlatEntry[] {
   return out;
 }
 
+/** A list of the given type and attrs, with no items yet. */
+function newList(listType: DocList["type"], raw: unknown): DocList {
+  const list = { type: listType, content: [] } as DocList;
+  const cleaned = cleanListAttrs(raw, listType === "orderedList");
+  if (cleaned) list.attrs = cleaned;
+  return list;
+}
+
 /**
  * Rebuild a document from the sequence. A list entry at depth d goes into the list at level d; a list of another
- * type at that level closes it; bullet:true starts a new list item, bullet:false continues the current one, and a
- * deeper entry nests inside the current item. A non-list paragraph closes all lists.
+ * type or with other attrs (numbering, start, indent) at that level closes it; bullet:true starts a new list item,
+ * bullet:false continues the current one, and a deeper entry nests inside the current item. A non-list paragraph
+ * closes all lists. A list level created on the way down gets the attrs of the entry only at the entry's own depth.
  */
 function buildSeq(seq: FlatEntry[]): DocJSON {
   type Level = { list: DocList; item?: DocListItem };
@@ -131,10 +179,10 @@ function buildSeq(seq: FlatEntry[]): DocJSON {
     }
     const d = Math.max(1, e.depth);
     stack.length = Math.min(stack.length, d);
-    if (stack.length === d && stack[d - 1].list.type !== e.listType) stack.length = d - 1;
+    if (stack.length === d && !sameList(stack[d - 1].list, e)) stack.length = d - 1;
     while (stack.length < d) {
       const level = stack.length + 1;
-      const list = { type: e.listType, content: [] } as DocList;
+      const list = newList(e.listType, level === d ? e.listAttrs : undefined);
       if (level === 1) {
         content.push(list);
       } else {
@@ -157,6 +205,11 @@ function buildSeq(seq: FlatEntry[]): DocJSON {
   return content.length ? { type: "doc", content } : emptyDoc();
 }
 
+/** Whether an open list can take the entry: the same type and the same attrs. */
+function sameList(list: DocList, e: FlatEntry): boolean {
+  return list.type === e.listType && sameListAttrs(listAttrsOf(list), cleanListAttrs(e.listAttrs, e.listType === "orderedList"));
+}
+
 /** Paragraphs in document order, including those in nested lists. */
 export function flattenDoc(doc: DocJSON): FlatParagraph[] {
   const out: FlatParagraph[] = [];
@@ -166,6 +219,7 @@ export function flattenDoc(doc: DocJSON): FlatParagraph[] {
       node: e.node,
       text: paragraphText(e.node),
       listType: e.listType,
+      ...(e.listAttrs ? { listAttrs: e.listAttrs } : {}),
       depth: e.depth,
       bullet: e.listType ? e.bullet : false,
     });
@@ -402,11 +456,8 @@ function listItemFrom(li: Record<string, unknown>): DocListItem {
 function listFrom(n: Record<string, unknown>): DocBlock[] {
   const items = arr(n.content).filter(isObj).map(listItemFrom);
   if (!items.length) return [];
-  if (n.type !== "orderedList") return [{ type: "bulletList", content: items }];
-  const start = isObj(n.attrs) ? n.attrs.start : undefined;
-  const list: DocList = { type: "orderedList", content: items };
-  if (typeof start === "number" && Number.isInteger(start) && start >= 1) list.attrs = { start };
-  return [list];
+  const ordered = n.type === "orderedList";
+  return [{ ...newList(ordered ? "orderedList" : "bulletList", n.attrs), content: items } as DocList];
 }
 
 function blockFrom(n: unknown): DocBlock[] {
@@ -462,8 +513,10 @@ function canon(v: unknown): unknown {
       const x = (v as Record<string, unknown>)[k];
       if (x === null || x === undefined) continue;
       if ((k === "content" || k === "marks") && Array.isArray(x) && x.length === 0) continue;
-      if (k === "attrs" && isObj(x) && Object.keys(x).length === 0) continue;
-      out[k] = canon(x);
+      const c = canon(x);
+      // Attrs with only null or unset values are no attrs (TipTap writes an attrs object on every list node).
+      if (k === "attrs" && isObj(c) && Object.keys(c).length === 0) continue;
+      out[k] = c;
     }
     return out;
   }

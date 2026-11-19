@@ -24,6 +24,8 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <w:pPr><w:pBdr><w:bottom w:val="nil"/></w:pBdr></w:pPr></w:style>
   <w:style w:type="paragraph" w:styleId="Entry"><w:name w:val="Entry"/><w:basedOn w:val="Normal"/>
     <w:pPr><w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs></w:pPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Indented"><w:name w:val="Indented"/><w:basedOn w:val="Normal"/>
+    <w:pPr><w:ind w:left="1440"/></w:pPr></w:style>
   <w:style w:type="table" w:styleId="RuledTable"><w:name w:val="Ruled table"/>
     <w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/></w:pBdr></w:pPr></w:style>
 </w:styles>`;
@@ -52,6 +54,14 @@ const NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <w:num w:numId="4"><w:abstractNumId w:val="3"/></w:num>
   <w:num w:numId="5"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="3"/></w:lvlOverride></w:num>
   <w:num w:numId="6"><w:abstractNumId w:val="4"/></w:num>
+  <w:abstractNum w:abstractNumId="5">
+    <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/><w:pPr><w:ind w:left="360" w:hanging="360"/></w:pPr></w:lvl>
+  </w:abstractNum>
+  <w:abstractNum w:abstractNumId="6">
+    <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1."/><w:pPr><w:ind w:left="540" w:hanging="360"/></w:pPr></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="7"><w:abstractNumId w:val="5"/></w:num>
+  <w:num w:numId="8"><w:abstractNumId w:val="6"/></w:num>
 </w:numbering>`;
 
 const THEME = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -518,5 +528,38 @@ describe("headers and footers", () => {
     const parts = { "word/header1.xml": PART("hdr", "<w:p/>") };
     const { doc } = docxToDoc(makeDocx(`${TEXT_P("Body")}${SECT_WITH_PARTS}`, { parts }));
     expect(blockTexts(doc)).toEqual(["Body"]);
+  });
+});
+
+describe("list indents from the numbering level and the paragraph", () => {
+  const listsOf = (body: string) => (plain(docxToDoc(makeDocx(body)).doc) as { content: { type: string; attrs?: Record<string, unknown> }[] }).content;
+  /** A list item of a numbering (numId), with optional paragraph properties (pPr) inside its own pPr. */
+  const item = (numId: number, text: string, pPr = "") =>
+    `<w:p><w:pPr>${pPr}<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+
+  it("takes the indent of a list from its level's text indent: 360 twips (0.25 in) is 18 points", () => {
+    expect(listsOf(item(7, "a"))[0].attrs).toEqual({ indentPt: 18 });
+  });
+
+  it("lets the paragraph's own indent override the level's: 720 twips is 36 points", () => {
+    expect(listsOf(item(7, "a", '<w:ind w:left="720" w:hanging="360"/>'))[0].attrs).toEqual({ indentPt: 36 });
+  });
+
+  it("does not let a paragraph style's indent override the level's, as Word takes the indent from the numbering", () => {
+    const styled = `<w:p><w:pPr><w:pStyle w:val="Indented"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr></w:pPr><w:r><w:t>b</w:t></w:r></w:p>`;
+    expect(listsOf(styled)[0].attrs).toEqual({ indentPt: 18 });
+  });
+
+  it("takes the median of its items' indents, so one item with a larger own indent does not move the list", () => {
+    const body = item(7, "a") + item(7, "b") + item(7, "c", '<w:ind w:left="720" w:hanging="360"/>');
+    expect(listsOf(body)[0].attrs).toEqual({ indentPt: 18 });
+  });
+
+  it("keeps the type and start of a numbered list with its indent: a lowercase list at 540 twips is 27 points", () => {
+    expect(listsOf(item(8, "a"))[0].attrs).toEqual({ type: "a", indentPt: 27 });
+  });
+
+  it("gives no indent when neither the paragraph nor its level sets one", () => {
+    expect(listsOf(item(1, "a"))[0].attrs).toBeUndefined();
   });
 });

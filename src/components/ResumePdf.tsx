@@ -80,21 +80,28 @@ function lineNode(line: RenderLine, p: RenderParagraph, key: number): ReactEleme
 }
 
 /**
- * A hanging bullet or number, as wide as the indent before the text. "◦" and "▪" are drawn as shapes (a hollow and
- * a solid dot), centred on the x-height of the first line.
+ * A hanging bullet or number, as wide as the indent before the text. A default marker is left-aligned in its box; one
+ * with a custom indent is right-aligned, `gapPt` before the text. "◦" and "▪" are drawn as shapes (a hollow and a solid
+ * dot), centred on the x-height of the first line, at the same side of the box.
  */
 function markerNode(marker: RenderMarker, width: number, lineHeight: number): ReactElement {
   const sizePt = marker.style.sizePt;
   const lineHeightPt = sizePt * lineHeight;
+  const right = marker.align === "right";
   if (!SHAPE_MARKERS.has(marker.text)) {
-    return h(Text, { style: { ...fontProps(marker.style, lineHeight), width } }, marker.text);
+    return h(
+      Text,
+      { style: { ...fontProps(marker.style, lineHeight), width, textAlign: marker.align, paddingRight: marker.gapPt } },
+      marker.text,
+    );
   }
   const d = sizePt * 0.32;
   const shape = marker.text === "◦" ? { borderWidth: 0.6, borderColor: "#000", borderRadius: d / 2 } : { backgroundColor: "#000" };
+  const marginLeft = right ? width - marker.gapPt - d : 0;
   return h(
     View,
     { style: { width, height: lineHeightPt } },
-    h(View, { style: { marginTop: lineHeightPt * 0.58 - d / 2, width: d, height: d, ...shape } }),
+    h(View, { style: { marginTop: lineHeightPt * 0.58 - d / 2, marginLeft, width: d, height: d, ...shape } }),
   );
 }
 

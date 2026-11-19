@@ -106,7 +106,8 @@ const realistic: DocJSON = {
 describe("docSchema", () => {
   it("accepts a realistic document and round-trips it through TipTap's JSON", () => {
     expect(isValidDoc(realistic)).toBe(true);
-    expect(docFromJSON(realistic).toJSON()).toEqual(realistic);
+    // A list node always has an attrs object in TipTap's JSON (indentPt is unset), so compare as docEquals does.
+    expect(docEquals(docFromJSON(realistic).toJSON() as DocJSON, realistic)).toBe(true);
   });
 
   it("writes every paragraph attr, with null for unset ones", () => {

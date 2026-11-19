@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { flattenDoc, paragraphText } from "@/lib/doc/model";
 import { isValidDoc } from "@/lib/doc/extensions";
-import type { DocInline, DocJSON, DocMark, DocParagraph, DocText } from "@/lib/doc/types";
+import type { DocInline, DocJSON, DocList, DocMark, DocParagraph, DocText } from "@/lib/doc/types";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { NO_TEXT_MESSAGE, NoTextError, fontInfo, pdfToDoc, rulesSafely } from "@/lib/import/pdfToDoc";
 import {
   PAD_SIDES, PAD_TOP_BOTTOM, embeddedFontPdf, hangingBulletPdf, harvardPdf, helveticaPdf, imageOnlyPdf, linkedPdf, ruledPdf,
-  labelledLinesPdf, linkSeparatorsPdf, pagedPdf, shortLinesPdf, underlinePdf, wrappedPdf,
+  indentedBulletPdf, labelledLinesPdf, linkSeparatorsPdf, pagedPdf, shortLinesPdf, underlinePdf, wrappedPdf,
 } from "./import-fixtures";
 
 const bytes = (b: Buffer) => new Uint8Array(b);
@@ -351,5 +351,37 @@ describe("pdfToDoc: labelled lines stay separate items", () => {
     expect(texts).toHaveLength(3);
     expect(texts[1].startsWith("Languages: ")).toBe(true);
     expect(texts[2].startsWith("Frameworks: ")).toBe(true);
+  });
+});
+
+describe("pdfToDoc: the indent of a bulleted list is where its text starts", () => {
+  /** The top-level lists of a document. */
+  const listsOf = (doc: DocJSON): DocList[] => doc.content.filter((b): b is DocList => b.type !== "paragraph");
+  const within = (value: number | null | undefined, expected: number) => Math.abs((value ?? NaN) - expected) <= 1.5;
+
+  it("sets the indent of a list whose text starts 14 points from the margin", async () => {
+    const { doc } = await pdfToDoc(bytes(await indentedBulletPdf(14)));
+    const lists = listsOf(doc);
+    expect(lists).toHaveLength(1);
+    expect(within(lists[0].attrs?.indentPt, 14)).toBe(true);
+  });
+
+  it("takes the indent of a bullet whose glyph and text share one run from its wrapped line", async () => {
+    // The text starts 12 points in (a hanging indent): the first line's estimate is off, its wrapped line is exact.
+    const { doc } = await pdfToDoc(bytes(await hangingBulletPdf()));
+    expect(within(listsOf(doc)[0].attrs?.indentPt, 12)).toBe(true);
+  });
+
+  it("reads the Harvard fixture's bullets, whose text sits 20 points in (a 10-point glyph and a 10-point pad)", async () => {
+    const { doc } = await pdfToDoc(bytes(await harvardPdf()));
+    expect(within(listsOf(doc)[0].attrs?.indentPt, 20)).toBe(true);
+  });
+
+  it("keeps the indent within the list indent range", async () => {
+    const { doc } = await pdfToDoc(bytes(await indentedBulletPdf(14)));
+    const pt = listsOf(doc)[0].attrs?.indentPt ?? 0;
+    expect(pt).toBeGreaterThanOrEqual(6);
+    expect(pt).toBeLessThanOrEqual(144);
+    expect(Number.isInteger(pt * 2)).toBe(true);
   });
 });

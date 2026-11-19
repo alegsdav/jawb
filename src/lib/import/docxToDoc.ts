@@ -9,6 +9,7 @@
  */
 import { unzipSync, strFromU8 } from "fflate";
 import { newId, normalizeDoc, normalizeHref, buildDoc, type FlatEntry } from "@/lib/doc/model";
+import { clampIndentPt } from "@/lib/doc/types";
 import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE_PT,
@@ -225,6 +226,9 @@ function readPPr(el: XNode | undefined): PProps {
 /** The list format a paragraph's list needs beyond bullet or number: the HTML type ("a", "I", ...) and the start. */
 type ListFormat = { type?: string; start?: number };
 
+/** A numbering level: its number format, its start and the left indent of its text, in twips. */
+type LevelDef = { fmt: string; start?: number; indent?: number };
+
 type Ctx = {
   theme: Theme;
   docR: RProps;
@@ -235,8 +239,8 @@ type Ctx = {
   nums: Map<string, string>;
   /** numId:ilvl -> start, from a num's level override */
   starts: Map<string, number>;
-  /** abstractNumId -> ilvl -> the level's number format and start */
-  levels: Map<string, Map<number, { fmt: string; start?: number }>>;
+  /** abstractNumId -> ilvl -> the level's number format, start and text indent (twips, from the margin) */
+  levels: Map<string, Map<number, LevelDef>>;
   /** Relationship id -> external target (hyperlinks). */
   rels: Map<string, string>;
   /** Relationship id -> package path of a header or footer part of the document. */
@@ -313,13 +317,17 @@ function readContext(files: Record<string, Uint8Array>): { ctx: Ctx; body: XNode
   const numberingEl = part("word/numbering.xml");
   const nums = new Map<string, string>();
   const starts = new Map<string, number>();
-  const levels = new Map<string, Map<number, { fmt: string; start?: number }>>();
+  const levels = new Map<string, Map<number, LevelDef>>();
   for (const a of kidsOf(numberingEl, "abstractNum")) {
     const abs = attr(a, "abstractNumId") ?? "";
-    const byLevel = new Map<number, { fmt: string; start?: number }>();
+    const byLevel = new Map<number, LevelDef>();
     for (const lvl of kidsOf(a, "lvl")) {
       const ilvl = num(attr(lvl, "ilvl")) ?? 0;
-      byLevel.set(ilvl, { fmt: attr(kid(lvl, "numFmt"), "val") ?? "decimal", start: num(attr(kid(lvl, "start"), "val")) });
+      byLevel.set(ilvl, {
+        fmt: attr(kid(lvl, "numFmt"), "val") ?? "decimal",
+        start: num(attr(kid(lvl, "start"), "val")),
+        indent: readPPr(kid(lvl, "pPr")).indentLeft,
+      });
     }
     levels.set(abs, byLevel);
   }
@@ -510,18 +518,20 @@ function mergeText(nodes: DocInline[]): DocInline[] {
   return out;
 }
 
-type Parts = { inline: DocInline[]; pp: PProps };
+/** ind: the paragraph's own left indent (twips), which overrides the list level's. */
+type Parts = { inline: DocInline[]; pp: PProps; ind?: number };
 
 /** The inline content of a w:p and its paragraph properties, with the paragraph style applied. */
 function paragraphParts(p: XNode, ctx: Ctx): Parts {
   const pPrEl = kid(p, "pPr");
   const styleId = attr(kid(pPrEl, "pStyle"), "val") ?? ctx.defaultPara;
   const chain = styleChain(styleId, ctx);
-  const pp = merged<PProps>(ctx.docP, ...chain.map((s) => s.p), readPPr(pPrEl));
+  const own = readPPr(pPrEl);
+  const pp = merged<PProps>(ctx.docP, ...chain.map((s) => s.p), own);
   const base = merged<RProps>(ctx.docR, ...chain.map((s) => s.r));
   const inline: DocInline[] = [];
   collectRuns(p, base, undefined, ctx, inline);
-  return { inline: mergeText(inline), pp };
+  return { inline: mergeText(inline), pp, ind: own.indentLeft };
 }
 
 function paragraphAttrs(pp: PProps): ParagraphAttrs {
@@ -551,21 +561,31 @@ function orderedFormat(fmt: string, start: number | undefined): ListFormat {
   return format;
 }
 
+/** Word measures indents in twips: 20 per point. */
+const TWIPS_PER_PT = 20;
+
 /**
  * The list a paragraph belongs to (bullet or numbered, by the numbering level's format), with the format a numbered
- * list needs, or null when the paragraph is not in a list.
+ * list needs and the indent of its text in points, or null when the paragraph is not in a list. The paragraph's own
+ * indent wins over the level's; a paragraph style's indent does not, as Word takes it from the numbering.
  */
-function listOf(pp: PProps, ctx: Ctx): { listType: "bulletList" | "orderedList"; depth: number; format: ListFormat } | null {
+function listOf(
+  pp: PProps,
+  ownIndent: number | undefined,
+  ctx: Ctx,
+): { listType: "bulletList" | "orderedList"; depth: number; format: ListFormat; indentPt?: number } | null {
   if (!pp.numId || pp.numId === "0") return null;
   const ilvl = pp.ilvl ?? 0;
   const abs = ctx.nums.get(pp.numId);
   const level = abs !== undefined ? ctx.levels.get(abs)?.get(ilvl) : undefined;
   const ordered = level !== undefined && level.fmt !== "bullet" && level.fmt !== "none";
   const start = ctx.starts.get(`${pp.numId}:${ilvl}`) ?? level?.start;
+  const twips = ownIndent ?? level?.indent;
   return {
     listType: ordered ? "orderedList" : "bulletList",
     depth: clamp(ilvl + 1, 1, 9),
     format: ordered ? orderedFormat(level.fmt, start) : {},
+    indentPt: twips === undefined ? undefined : twips / TWIPS_PER_PT,
   };
 }
 
@@ -626,16 +646,16 @@ function columnTabs(inline: DocInline[], rightStop: boolean): DocInline[] {
   return mergeText(inline.map((n): DocInline => (n.type === "tab" ? { type: "text", text: "    " } : n)));
 }
 
-/** A list entry or a paragraph, with the list format a numbered list needs (see ListFormat). */
-type ImportEntry = FlatEntry & { format?: ListFormat };
+/** A list entry or a paragraph, with the list format a numbered list needs (see ListFormat) and its text indent (points). */
+type ImportEntry = FlatEntry & { format?: ListFormat; indentPt?: number };
 
 function walkBody(nodes: XNode[], ctx: Ctx, out: ImportEntry[]): void {
   // The last paragraph of the open bordered group, whose rule is the only one Word draws for the group.
   let group: { entry: ImportEntry; key: string } | undefined;
   for (const n of nodes) {
     if (n.tag === "p") {
-      const { inline, pp } = paragraphParts(n, ctx);
-      const entry = entryOf(columnTabs(inline, pp.rightTab === true), pp, ctx);
+      const { inline, pp, ind } = paragraphParts(n, ctx);
+      const entry = entryOf(columnTabs(inline, pp.rightTab === true), pp, ctx, ind);
       const key = ruleGroupKey(pp);
       if (key !== undefined && group?.key === key) delete group.entry.node.attrs?.borderBottom;
       group = key === undefined ? undefined : { entry, key };
@@ -664,13 +684,13 @@ function textBoxEntries(p: XNode, ctx: Ctx): ImportEntry[] {
   return out;
 }
 
-function entryOf(inline: DocInline[], pp: PProps, ctx: Ctx): ImportEntry {
+function entryOf(inline: DocInline[], pp: PProps, ctx: Ctx, ownIndent?: number): ImportEntry {
   const node: DocParagraph = inline.length
     ? { type: "paragraph", attrs: paragraphAttrs(pp), content: inline }
     : { type: "paragraph", attrs: paragraphAttrs(pp) };
-  const list = listOf(pp, ctx);
+  const list = listOf(pp, ownIndent, ctx);
   return list
-    ? { node, listType: list.listType, depth: list.depth, bullet: true, format: list.format }
+    ? { node, listType: list.listType, depth: list.depth, bullet: true, format: list.format, indentPt: list.indentPt }
     : { node, listType: null, depth: 0, bullet: false };
 }
 
@@ -710,31 +730,39 @@ function pageOf(body: XNode): PageSetup {
 }
 
 /**
- * Sets the type and start of each numbered list. buildDoc does not carry them, so a list takes the format of the
- * first paragraph it holds at its own level (the paragraph of its first item that is not inside a nested list).
+ * Sets the type and start of each numbered list, and the indent of each list. buildDoc carries neither, so a numbered
+ * list takes the format of the first paragraph it holds at its own level (not one inside a nested list), and every
+ * list takes the median indent of its own items.
  */
 function applyListFormats(doc: DocJSON, entries: ImportEntry[]): void {
   const formats = new Map<string, ListFormat>();
+  const indents = new Map<string, number>();
   for (const e of entries) {
     if (e.format && Object.keys(e.format).length) formats.set(e.node.attrs.id, e.format);
+    if (e.indentPt !== undefined) indents.set(e.node.attrs.id, e.indentPt);
   }
-  const firstOwnId = (list: DocList): string | undefined => {
-    for (const item of list.content) {
-      for (const child of item.content) if (child.type === "paragraph") return child.attrs.id;
-    }
-    return undefined;
-  };
   const visit = (list: DocList): void => {
-    if (list.type === "orderedList") {
-      const id = firstOwnId(list);
-      const format = id !== undefined ? formats.get(id) : undefined;
-      if (format) list.attrs = { ...format };
-    }
+    const own = list.content.flatMap((item) => item.content).flatMap((c) => (c.type === "paragraph" ? [c.attrs.id] : []));
+    const format = list.type === "orderedList" && own.length ? formats.get(own[0]) : undefined;
+    const measured = own.flatMap((id) => {
+      const v = indents.get(id);
+      return v === undefined ? [] : [v];
+    });
+    const attrs = { ...format, ...(measured.length ? { indentPt: medianIndentPt(measured) } : {}) };
+    if (Object.keys(attrs).length) list.attrs = attrs;
     for (const item of list.content) {
       for (const child of item.content) if (child.type !== "paragraph") visit(child);
     }
   };
   for (const b of doc.content) if (b.type !== "paragraph") visit(b);
+}
+
+/** The median of a non-empty list of numbers, in points to the half point and within the list indent range. */
+function medianIndentPt(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const k = Math.floor(sorted.length / 2);
+  const mid = sorted.length % 2 ? sorted[k] : (sorted[k - 1] + sorted[k]) / 2;
+  return clampIndentPt(Math.round(mid * 2) / 2);
 }
 
 /**

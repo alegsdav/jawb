@@ -232,6 +232,8 @@ export function insertCoachedBullet(
   const entry: FlatEntry = {
     node: paragraph(text, { marks: firstMarks(last), attrs: { id: newId } }),
     listType: last?.listType ?? "bulletList",
+    // The same list attributes (indent, numbering style) as its neighbours, so it joins their list.
+    listAttrs: last?.listAttrs,
     depth: last?.depth ?? 1,
     bullet: true,
   };
