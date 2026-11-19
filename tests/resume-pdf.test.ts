@@ -5,7 +5,8 @@ import { ResumePdf } from "@/components/ResumePdf";
 import { pdfFontFor } from "@/lib/pdfFonts";
 import { hangingMarkerOf, linesWithMarker, renderBlocks, type RenderParagraph } from "@/lib/docRender";
 import { paragraph } from "@/lib/doc/model";
-import type { DocJSON, DocList, DocListItem, DocMark, DocParagraph, ParagraphAttrs } from "@/lib/doc/types";
+import { pdfToDoc } from "@/lib/import/pdfToDoc";
+import type { DocJSON, DocList, DocListItem, DocMark, DocParagraph, DocText, ParagraphAttrs } from "@/lib/doc/types";
 import { emptyResume, withDoc } from "@/lib/resume";
 
 const bold: DocMark = { type: "bold" };
@@ -165,5 +166,57 @@ describe("ResumePdf", () => {
     expect(text.split("Wrote the first algorithm").length - 1).toBe(1);
     expect(text).toContain("Set in Times New Roman");
     await task.destroy();
+  });
+});
+
+/** A paragraph with two links: a web link and a mailto link, among plain text. */
+const linked: DocJSON = {
+  type: "doc",
+  content: [
+    {
+      type: "paragraph",
+      attrs: { id: "link-line-1", textAlign: "center" },
+      content: [
+        { type: "text", text: "Jane Doe • " },
+        { type: "text", text: "linkedin.com/in/jane", marks: [{ type: "link", attrs: { href: "https://linkedin.com/in/jane" } }] },
+        { type: "text", text: " • " },
+        { type: "text", text: "jane@example.com", marks: [{ type: "link", attrs: { href: "mailto:jane@example.com" } }] },
+      ],
+    },
+  ],
+};
+const linkedResume = withDoc(emptyResume(), linked);
+
+describe("links in the read-only layout and the PDF", () => {
+  it("carries the href on the runs of a linked text", () => {
+    const [line] = renderBlocks(linked)[0].lines;
+    const runs = [...line.left, ...(line.right ?? [])];
+    expect(runs.filter((r) => r.href).map((r) => [r.text, r.href])).toEqual([
+      ["linkedin.com/in/jane", "https://linkedin.com/in/jane"],
+      ["jane@example.com", "mailto:jane@example.com"],
+    ]);
+    expect(runs[0].href).toBeUndefined();
+  });
+
+  it("writes a Link annotation with each URL into the PDF", async () => {
+    const buffer = await renderToBuffer(ResumePdf({ resume: linkedResume }));
+    const task = getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false });
+    const pdf = await task.promise;
+    const annots = await (await pdf.getPage(1)).getAnnotations();
+    const urls = annots.filter((a) => a.subtype === "Link").map((a) => a.url ?? a.unsafeUrl);
+    expect(urls).toEqual(["https://linkedin.com/in/jane", "mailto:jane@example.com"]);
+    await task.destroy();
+  });
+
+  it("keeps the same link marks on the same text after ResumePdf and pdfToDoc", async () => {
+    const buffer = await renderToBuffer(ResumePdf({ resume: linkedResume }));
+    const { doc } = await pdfToDoc(new Uint8Array(buffer));
+    const nodes = doc.content
+      .flatMap((b) => (b.type === "paragraph" ? (b.content ?? []) : []))
+      .filter((n): n is DocText => n.type === "text" && !!n.marks?.some((m) => m.type === "link"));
+    expect(nodes.map((n) => [n.text, n.marks?.find((m) => m.type === "link")])).toEqual([
+      ["linkedin.com/in/jane", { type: "link", attrs: { href: "https://linkedin.com/in/jane" } }],
+      ["jane@example.com", { type: "link", attrs: { href: "mailto:jane@example.com" } }],
+    ]);
   });
 });

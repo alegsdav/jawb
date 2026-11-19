@@ -31,7 +31,7 @@ function runNodes(runs: Run[], lineHeight: number): ReactElement[] {
     const underline = run.href || run.style.underline;
     const style = {
       ...fontProps(run.style, lineHeight),
-      textDecoration: underline ? "underline" : "none",
+      textDecoration: (underline ? "underline" : "none") as "underline" | "none",
       ...(run.href ? { color: LINK_COLOR } : {}),
     };
     if (!run.href) return h(Text, { key: i, style }, run.text);

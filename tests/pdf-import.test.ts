@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { flattenDoc, paragraphText } from "@/lib/doc/model";
 import { isValidDoc } from "@/lib/doc/extensions";
-import type { DocJSON, DocMark, DocParagraph, DocText } from "@/lib/doc/types";
+import type { DocInline, DocJSON, DocMark, DocParagraph, DocText } from "@/lib/doc/types";
 import { NO_TEXT_MESSAGE, NoTextError, fontInfo, pdfToDoc } from "@/lib/import/pdfToDoc";
-import { PAD_SIDES, PAD_TOP_BOTTOM, harvardPdf, helveticaPdf, imageOnlyPdf, ruledPdf } from "./import-fixtures";
+import {
+  PAD_SIDES, PAD_TOP_BOTTOM, embeddedFontPdf, harvardPdf, helveticaPdf, imageOnlyPdf, linkedPdf, ruledPdf, shortLinesPdf,
+} from "./import-fixtures";
 
 const bytes = (b: Buffer) => new Uint8Array(b);
 const PT = 72;
@@ -42,6 +44,11 @@ describe("fontInfo", () => {
 
   it("has no family for a name pdf.js made up", () => {
     expect(fontInfo("g_d0_f1").family).toBeUndefined();
+  });
+
+  it("does not split DejaVu into Deja Vu", () => {
+    expect(fontInfo("DejaVuSerif").family).toBe("DejaVu Serif");
+    expect(fontInfo("DejaVuSans-Bold")).toEqual({ family: "DejaVu Sans", bold: true, italic: false });
   });
 });
 
@@ -167,5 +174,51 @@ describe("pdfToDoc: other documents and edge cases", () => {
 
   it("rejects bytes that are not a PDF", async () => {
     await expect(pdfToDoc(new TextEncoder().encode("not a pdf"))).rejects.toThrow();
+  });
+});
+
+describe("pdfToDoc: embedded fonts", () => {
+  it("keeps bold, italic and the family of an embedded subset font", async () => {
+    const { doc } = await pdfToDoc(bytes(await embeddedFontPdf()));
+    const bold = marksOfText(paraNamed(doc, "Bold Carlito"), "Bold Carlito line");
+    expect(hasMark(bold, "bold")).toBe(true);
+    expect(textStyle(bold).fontFamily).toBe("Carlito");
+    const italic = marksOfText(paraNamed(doc, "Italic Carlito"), "Italic Carlito line");
+    expect(hasMark(italic, "italic")).toBe(true);
+    expect(hasMark(marksOfText(paraNamed(doc, "Plain Carlito"), "Plain Carlito line"), "bold")).toBe(false);
+  });
+});
+
+describe("pdfToDoc: margins and alignment of short lines", () => {
+  it("keeps a centered name centered and the margins symmetric when every line is short", async () => {
+    const { doc, page } = await pdfToDoc(bytes(await shortLinesPdf()));
+    expect(paraNamed(doc, "Ada Lovelace").attrs.textAlign).toBe("center");
+    expect(paraNamed(doc, "Skills").attrs.textAlign).toBeUndefined();
+    expect(page.marginRight).toBe(page.marginLeft);
+  });
+});
+
+describe("pdfToDoc: links", () => {
+  const linkOf = (n: DocInline): string | undefined => (n.type === "text" ? n.marks?.find((m) => m.type === "link") : undefined)?.attrs.href;
+
+  it("puts a link mark on exactly the link text, and leaves the rest of the line plain", async () => {
+    const { doc } = await pdfToDoc(bytes(await linkedPdf()));
+    const contact = paraNamed(doc, "London");
+    const nodes = (contact.content ?? []).filter((n): n is DocText => n.type === "text");
+    const linked = nodes.filter((n) => linkOf(n)).map((n) => [n.text, linkOf(n)]);
+    expect(linked).toEqual([
+      ["linkedin.com/in/jane", "https://linkedin.com/in/jane"],
+      ["jane@example.com", "mailto:jane@example.com"],
+    ]);
+    const plain = nodes.filter((n) => !linkOf(n)).map((n) => n.text).join("");
+    expect(plain.replace(/\s+/g, " ").trim()).toBe("London • •");
+  });
+
+  it("keeps the other formatting of a linked line, and leaves an unlinked line plain", async () => {
+    const { doc } = await pdfToDoc(bytes(await linkedPdf()));
+    expect(paraNamed(doc, "Jane Doe").attrs.textAlign).toBe("center");
+    expect(hasMark(marksOfText(paraNamed(doc, "Jane Doe"), "Jane Doe"), "bold")).toBe(true);
+    const plain = paraNamed(doc, "Plain text");
+    expect((plain.content ?? []).some((n) => n.type === "text" && n.marks?.some((m) => m.type === "link"))).toBe(false);
   });
 });

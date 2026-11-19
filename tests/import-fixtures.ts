@@ -5,7 +5,8 @@
  * margin, so the page margins are the fixture's padding.
  */
 import { createElement as h } from "react";
-import { Document, Image, Link, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import { join } from "node:path";
+import { Document, Font, Image, Link, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
 
 export const PAD_TOP_BOTTOM = 36; // points (0.5 in)
 export const PAD_SIDES = 43; // points (about 0.6 in)
@@ -126,6 +127,58 @@ export function linkedPdf(): Promise<Buffer> {
           h(Link, { src: "mailto:jane@example.com" }, "jane@example.com"),
         ),
         h(Text, null, "Plain text with no link."),
+      ),
+    ),
+  );
+}
+
+let carlitoRegistered = false;
+
+/** Carlito (regular, bold, italic) from public/fonts, so the PDF embeds a real subset font, as Word and Docs do. */
+function registerCarlito(): void {
+  if (carlitoRegistered) return;
+  const dir = join(process.cwd(), "public", "fonts");
+  Font.register({
+    family: "Carlito",
+    fonts: [
+      { src: join(dir, "carlito-400.woff") },
+      { src: join(dir, "carlito-700.woff"), fontWeight: 700 },
+      { src: join(dir, "carlito-400-italic.woff"), fontStyle: "italic" },
+    ],
+  });
+  carlitoRegistered = true;
+}
+
+/** Three lines in an embedded font: bold, italic and plain. */
+export function embeddedFontPdf(): Promise<Buffer> {
+  registerCarlito();
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: { paddingTop: PAD_TOP_BOTTOM, paddingLeft: PAD_SIDES, paddingRight: PAD_SIDES, fontFamily: "Carlito", fontSize: 11 } },
+        h(Text, { style: { fontWeight: 700 } }, "Bold Carlito line"),
+        h(Text, { style: { fontStyle: "italic" } }, "Italic Carlito line"),
+        h(Text, null, "Plain Carlito line"),
+      ),
+    ),
+  );
+}
+
+/** A resume whose lines are all short: a centered name and short left-aligned lines, no full-width line. */
+export function shortLinesPdf(): Promise<Buffer> {
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: s.page },
+        h(Text, { style: s.name }, "Ada Lovelace"),
+        h(Text, null, "Skills"),
+        h(Text, null, "SQL"),
       ),
     ),
   );

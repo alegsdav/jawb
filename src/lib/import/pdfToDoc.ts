@@ -44,7 +44,13 @@ const ITALIC_NAME = /italic|oblique/i;
 
 export type FontInfo = { family?: string; bold: boolean; italic: boolean };
 
-const FAMILY_ALIASES: Record<string, string> = { times: "Times New Roman", "times roman": "Times New Roman" };
+/** Names that camel-case splitting would break ("DejaVuSerif" would read "Deja Vu Serif"), and the standard names. */
+const FAMILY_ALIASES: Record<string, string> = {
+  times: "Times New Roman",
+  "times roman": "Times New Roman",
+  "deja vu serif": "DejaVu Serif",
+  "deja vu sans": "DejaVu Sans",
+};
 
 /**
  * The family, bold and italic of a PDF font from its name (e.g. "ABCDEF+Calibri-Bold", "TimesNewRomanPSMT",
@@ -99,6 +105,8 @@ export async function pdfToDoc(data: Uint8Array): Promise<{ doc: DocJSON; page: 
     data,
     useWorkerFetch: false,
     disableFontFace: true,
+    // Without this pdf.js 6 leaves only the loaded name on an embedded font: no bold, italic or family.
+    fontExtraProperties: true,
     verbosity: pdfjs.VerbosityLevel.ERRORS,
   });
   try {
@@ -181,21 +189,54 @@ function linksOf(annots: LinkAnnotation[], height: number): LinkBox[] {
   return out;
 }
 
-/**
- * The link covering a point (the baseline sits inside the box; a little slack for the descent). A zero-width piece
- * (a space) counts only strictly inside the box, so the space after a link is not part of it.
- */
-function linkAt(x: number, baseline: number, size: number, links: LinkBox[], zeroWidth: boolean): string | undefined {
-  const slack = 0.3 * size;
-  const across = (l: LinkBox) =>
-    zeroWidth ? x > l.x0 + 0.5 && x < l.x1 - 0.5 : x >= l.x0 - 0.5 && x <= l.x1 + 0.5;
-  return links.find((l) => across(l) && baseline >= l.top - slack && baseline <= l.bottom + slack)?.href;
+/** Whether the box's vertical span holds the line's baseline (a hair of slack; a neighbouring line sits outside it). */
+function onLine(l: LinkBox, line: Line): boolean {
+  const slack = 0.1 * line.size;
+  return line.y >= l.top - slack && line.y <= l.bottom + slack;
+}
+
+/** The text a link box usually shows: the address without its scheme ("linkedin.com/in/jane", "jane@x.com"). */
+function shownForms(href: string): string[] {
+  const bare = href.replace(/^https?:\/\//i, "").replace(/^mailto:/i, "").replace(/\/$/, "");
+  return [...new Set([bare, href])];
+}
+
+/** The start and end (exclusive) of each occurrence of `needle` in `text`. */
+function occurrences(text: string, needle: string): [number, number][] {
+  const out: [number, number][] = [];
+  for (let at = text.indexOf(needle); at >= 0 && needle; at = text.indexOf(needle, at + 1)) out.push([at, at + needle.length]);
+  return out;
 }
 
 /**
- * The lines with each piece split at the link boxes: a character takes the link whose box holds its centre, so a
- * link covers exactly the characters inside its rectangle. A piece without any link is kept as it is.
+ * The href of each character of a piece. A link whose shown text is its address is found in the piece's text, so
+ * its characters are exact. Otherwise each character takes the link whose box holds its centre (proportional
+ * widths inside the piece: close, not exact, for a label that differs from the address). A zero-width piece (a space)
+ * counts only strictly inside a box, so the space after a link is not part of it.
  */
+function hrefsOf(p: Piece, line: Line, links: LinkBox[]): (string | undefined)[] {
+  const n = p.text.length;
+  const out: (string | undefined)[] = Array.from({ length: n }, () => undefined);
+  const center = (s: number, e: number) => p.x + (((s + e) / 2) / n) * p.w;
+  for (const l of links) {
+    if (!onLine(l, line)) continue;
+    const found = shownForms(l.href)
+      .flatMap((f) => occurrences(p.text, f))
+      .find(([s, e]) => p.w > 0 && center(s, e) >= l.x0 && center(s, e) <= l.x1);
+    if (found) {
+      for (let i = found[0]; i < found[1]; i++) out[i] ??= l.href;
+      continue;
+    }
+    for (let i = 0; i < n; i++) {
+      const x = p.w === 0 ? p.x : p.x + ((i + 0.5) / n) * p.w;
+      const inBox = p.w === 0 ? x > l.x0 + 0.5 && x < l.x1 - 0.5 : x >= l.x0 - 0.5 && x <= l.x1 + 0.5;
+      if (inBox) out[i] ??= l.href;
+    }
+  }
+  return out;
+}
+
+/** The lines with each piece split where its link changes: a link covers exactly the characters found above. */
 function linkLines(lines: Line[], links: LinkBox[]): Line[] {
   if (!links.length) return lines;
   return lines.map((line) => ({
@@ -203,9 +244,7 @@ function linkLines(lines: Line[], links: LinkBox[]): Line[] {
     pieces: line.pieces.flatMap((p) => {
       if (p.text === "\t") return [p];
       const n = p.text.length;
-      const hrefs = Array.from({ length: n }, (_, i) =>
-        linkAt(p.x + ((i + 0.5) / n) * p.w, line.y, line.size, links, p.w === 0),
-      );
+      const hrefs = hrefsOf(p, line, links);
       if (hrefs.every((h) => !h)) return [p];
       const out: Piece[] = [];
       let start = 0;
@@ -456,6 +495,14 @@ function assignDepths(paras: Para[]): void {
 
 // ---- alignment, spacing and rules into document items ----
 
+/**
+ * The right edge of the content. Resumes use symmetric margins, so the right edge is at least the mirror of the left
+ * one: a page whose widest line is short (a centered name, short lines) must not read as a right-aligned page.
+ */
+function contentRight(lines: Line[], left: number, width: number): number {
+  return Math.max(Math.max(...lines.map((l) => l.x1)), width - left);
+}
+
 /** Center or right when the line sits there; left (no textAlign) otherwise. Bullets are always left. */
 function alignOf(line: Line, left: number, right: number): ParagraphAttrs["textAlign"] {
   const width = right - left;
@@ -477,7 +524,7 @@ function spaceBeforeOf(prev: Para | undefined, para: Para): number | undefined {
 /** Items of one page in reading order. Each rule either borders the paragraph just above it or is a rule block. */
 function pageItems(page: PageText): Item[] {
   const left = Math.min(...page.lines.map((l) => l.x0));
-  const right = Math.max(...page.lines.map((l) => l.x1));
+  const right = contentRight(page.lines, left, page.width);
   const paras = paragraphsOf(page.lines, right, right - left);
   assignDepths(paras);
   const borders = new Set<Para>();
@@ -573,7 +620,7 @@ function pageSetupOf(pages: PageText[]): PageSetup {
   const first = pages[0];
   const lines = pages.flatMap((p) => p.lines);
   const left = Math.min(...lines.map((l) => l.x0));
-  const right = Math.max(...lines.map((l) => l.x1));
+  const right = contentRight(lines, left, first.width);
   const top = Math.min(...first.lines.map((l) => l.y - 0.8 * l.size));
   const bottom = first.height - Math.max(...first.lines.map((l) => l.y));
   const inches = (pt: number) => Math.min(1.5, Math.max(0.2, Math.round((pt / PT_PER_INCH) * 20) / 20));
