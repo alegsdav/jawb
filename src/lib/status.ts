@@ -1,6 +1,8 @@
 import type { Job, JobStatus, Resume } from "./types";
 import { applyDates } from "./dates";
 import { countPlaceholders, plural } from "./facts";
+import { flattenDoc } from "./doc/model";
+import { resumeDoc } from "./resume";
 import { INTERVIEW_STATUSES, shouldOfferUnsubmit, shouldSnapshot, snapshotPatch, unsubmitPatch } from "./outcomes";
 
 export const UNSUBMIT_QUESTION = "Clear the submitted copy and applied date?";
@@ -11,18 +13,11 @@ export const placeholderQuestion = (n: number) =>
   `${n === 1 ? "It" : "They"}'ll be frozen into the version you sent. Mark it anyway?`;
 
 /**
- * Every visible text field of a resume (what an employer sees; never facts or baseline). The one
+ * Every visible paragraph of a resume's document (what an employer sees; never facts or baseline). The one
  * helper for this: pdfDownload's `resumeTexts` is the same function.
  */
 export function visibleTexts(r: Resume): string[] {
-  return [
-    r.header.name,
-    r.header.contact,
-    ...r.sections.flatMap((s) => [
-      s.title,
-      ...s.items.flatMap((it) => [it.title, it.subtitle, it.location, it.dates, ...it.bullets.map((b) => b.text)]),
-    ]),
-  ];
+  return flattenDoc(resumeDoc(r)).map((p) => p.text);
 }
 
 export type StatusChangeInput = {

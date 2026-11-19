@@ -2,13 +2,14 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { Resume } from "@/lib/types";
-import { resumeToPlainText } from "@/lib/resume";
+import { docPlainText } from "@/lib/doc/model";
+import { resumeDoc } from "@/lib/resume";
 import { downloadResumePdf } from "./pdfDownload";
 import { CopyIcon, DownloadIcon } from "./icons";
 import { IconButton } from "./DocToolbar";
 
-/** What gets printed or copied: never the master-only `facts`. */
-const printable = (r: Resume): Resume => ({ version: r.version, header: r.header, sections: r.sections });
+/** What gets printed or copied: the document and page setup, never the master-only `facts` or the baseline. */
+const printable = (r: Resume): Resume => ({ version: r.version, doc: r.doc, page: r.page, header: r.header, sections: r.sections });
 
 /**
  * "Download PDF" and "Copy as text" as reusable actions (toolbar buttons, menu items, or the compact
@@ -36,7 +37,7 @@ export function useResumeActions(full: Resume, fileName: string) {
   const copy = useCallback(async () => {
     setError("");
     try {
-      await navigator.clipboard.writeText(resumeToPlainText(resume));
+      await navigator.clipboard.writeText(docPlainText(resumeDoc(resume)));
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {

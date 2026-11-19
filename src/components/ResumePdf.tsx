@@ -1,129 +1,119 @@
-import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { Document, Page, Text, View } from "@react-pdf/renderer";
 import { createElement as h, type ReactElement } from "react";
-import type { DocLine } from "@/lib/docLineTypes";
-import { resumeToLines } from "@/lib/docLines";
-import { PDF_FONT, registerPdfFonts } from "@/lib/pdfFonts";
-import { DEFAULT_SIZE, toRuns, type Run } from "@/lib/richText";
+import { pdfFontFor, registerPdfFonts } from "@/lib/pdfFonts";
+import {
+  hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, type Run, type RenderBlock, type RenderLine, type RenderMarker,
+  type RenderParagraph, type RunStyle,
+} from "@/lib/docRender";
+import { resumeDoc } from "@/lib/resume";
 import type { Resume } from "@/lib/types";
 
-// The page setup is the only fixed look: US Letter, 0.2in top and bottom, 0.42in left and right (points),
-// Calibri (Carlito) 11pt. Everything else comes from the resume's own marks and paragraph formatting.
-// Built with createElement (not JSX) so the test runner can import this file (tsconfig sets jsx: preserve).
-const s = StyleSheet.create({
-  page: {
-    paddingTop: 14.4,
-    paddingBottom: 14.4,
-    paddingLeft: 30.24,
-    paddingRight: 30.24,
-    fontFamily: PDF_FONT,
-    fontSize: DEFAULT_SIZE,
-    lineHeight: 1.15,
-  },
-  rule: { borderBottomWidth: 0.75, borderBottomColor: "#000", paddingBottom: 1 },
-  row: { flexDirection: "row", justifyContent: "space-between" },
-  rowLeft: { flexShrink: 1 },
-  bullet: { flexDirection: "row", paddingLeft: 8 },
-  bulletDot: { width: 10 },
-  bulletText: { flex: 1, lineHeight: 1.15 },
-});
+const POINTS_PER_INCH = 72;
+const RULE = { borderBottomWidth: 0.75, borderBottomColor: "#000" };
+/** Carlito has no "◦" or "▪": those markers are drawn as shapes, and inline ones use an en dash. */
+const SHAPE_MARKERS = new Set(["◦", "▪"]);
+const inlineGlyph = (text: string): string => (SHAPE_MARKERS.has(text) ? "–" : text);
 
-/** Most lines in one unbreakable entry group; longer groups may break across pages. */
-const MAX_UNBROKEN_LINES = 10;
+/** The font props of a run style (family, weight, italic), its size and line spacing (react-pdf: a multiplier). */
+function fontProps(s: RunStyle, lineHeight: number) {
+  return { ...pdfFontFor(s.fontFamily, s.bold, s.italic), fontSize: s.sizePt, lineHeight };
+}
 
-/** One text part as nested Text runs: bold / italic / underline / size, plus ALL CAPS when the line asks. */
-function runNodes(text: string, marks: DocLine["marks"], caps: boolean): ReactElement[] {
-  return toRuns(text, marks).map((run: Run, i) =>
+/** Runs as nested Text, each with its own font, size and underline. */
+function runNodes(runs: Run[], lineHeight: number): ReactElement[] {
+  return runs.map((run, i) =>
     h(
       Text,
-      {
-        key: i,
-        style: {
-          fontWeight: run.bold ? 700 : 400,
-          fontStyle: run.italic ? "italic" : "normal",
-          textDecoration: run.underline ? "underline" : "none",
-          fontSize: run.size,
-          lineHeight: 1.15,
-          ...(caps ? { textTransform: "uppercase" as const } : {}),
-        },
-      },
+      { key: i, style: { ...fontProps(run.style, lineHeight), textDecoration: run.style.underline ? "underline" : "none" } },
       run.text,
     ),
   );
 }
 
-/** One line of the document: its paragraph formatting as View/Text styles, its runs as nested Text. */
-function pdfLine(line: DocLine, key: number): ReactElement {
-  const para = line.para;
-  const caps = !!para?.caps;
-  const textAlign: "left" | "center" | "right" | "justify" = para?.align ?? "left";
-  const viewStyle = {
-    ...(para?.spaceBefore ? { marginTop: para.spaceBefore } : {}),
-    ...(para?.rule ? s.rule : {}),
-  };
-  const textStyle = { textAlign, lineHeight: 1.15, ...(caps ? { textTransform: "uppercase" as const } : {}) };
-
-  if (line.kind === "bullet") {
-    return h(
-      View,
-      { key, style: [s.bullet, viewStyle] },
-      h(Text, { style: s.bulletDot }, "•"),
-      h(Text, { style: [s.bulletText, { textAlign }] }, ...runNodes(line.text, line.marks, caps)),
-    );
-  }
-
-  if (line.kind === "entry" || line.kind === "role") {
-    const right = line.right
-      ? h(Text, { style: textStyle }, ...runNodes(line.right, line.rightMarks, caps))
-      : null;
-    // An empty entry/role line still takes one line of height, like a blank text line.
-    const left = runNodes(line.text, line.marks, caps);
-    return h(
-      View,
-      { key, style: [s.row, viewStyle] },
-      h(Text, { style: [s.rowLeft, textStyle] }, ...(left.length ? left : [" "])),
-      right,
-    );
-  }
-
-  const nodes = runNodes(line.text, line.marks, caps);
-  return h(View, { key, style: viewStyle }, h(Text, { style: textStyle }, ...(nodes.length ? nodes : [" "])));
+/** A line: its text, or the text before a tab at the left and after it at the right margin. */
+function lineNode(line: RenderLine, p: RenderParagraph, key: number): ReactElement {
+  const textStyle = { textAlign: p.align };
+  if (!line.right) return h(Text, { key, style: textStyle }, ...runNodes(line.left, p.lineHeight));
+  return h(
+    View,
+    { key, style: { flexDirection: "row", justifyContent: "space-between" } },
+    h(Text, { style: { ...textStyle, flexShrink: 1 } }, ...runNodes(line.left, p.lineHeight)),
+    h(Text, { style: { textAlign: "right" } }, ...runNodes(line.right, p.lineHeight)),
+  );
 }
 
 /**
- * Lines that belong together and should not split across a page break: an entry with its role line and
- * bullets. Anything else is its own group.
+ * A hanging bullet or number, as wide as the indent before the text. "◦" and "▪" are drawn as shapes (a hollow and
+ * a solid dot), centred on the x-height of the first line.
  */
-function groupLines(lines: DocLine[]): DocLine[][] {
-  const groups: DocLine[][] = [];
-  let open: DocLine[] | null = null;
-  for (const line of lines) {
-    if (line.kind === "entry") {
-      open = [line];
-      groups.push(open);
-    } else if ((line.kind === "role" || line.kind === "bullet") && open) {
-      open.push(line);
-    } else {
-      open = null;
-      groups.push([line]);
-    }
+function markerNode(marker: RenderMarker, width: number, lineHeight: number): ReactElement {
+  const sizePt = marker.style.sizePt;
+  const lineHeightPt = sizePt * lineHeight;
+  if (!SHAPE_MARKERS.has(marker.text)) {
+    return h(Text, { style: { ...fontProps(marker.style, lineHeight), width } }, marker.text);
   }
-  return groups;
+  const d = sizePt * 0.32;
+  const shape = marker.text === "◦" ? { borderWidth: 0.6, borderColor: "#000", borderRadius: d / 2 } : { backgroundColor: "#000" };
+  return h(
+    View,
+    { style: { width, height: lineHeightPt } },
+    h(View, { style: { marginTop: lineHeightPt * 0.58 - d / 2, width: d, height: d, ...shape } }),
+  );
 }
 
+function paragraphNode(p: RenderParagraph, key: number): ReactElement {
+  const lines = h(View, { style: { flex: 1 } }, ...linesWithMarker(p, inlineGlyph).map((line, i) => lineNode(line, p, i)));
+  const m = hangingMarkerOf(p);
+  const row = h(
+    View,
+    { style: { flexDirection: "row", paddingLeft: m ? m.x : p.textIndentPt } },
+    ...(m ? [markerNode(m, p.textIndentPt - m.x, p.lineHeight)] : []),
+    lines,
+  );
+  return h(
+    View,
+    {
+      key,
+      style: {
+        marginTop: p.spaceBeforePt,
+        marginBottom: p.spaceAfterPt,
+        ...(p.rule ? { ...RULE, paddingBottom: 1 } : {}),
+      },
+    },
+    row,
+  );
+}
+
+function blockNode(b: RenderBlock, key: number): ReactElement {
+  return b.kind === "rule"
+    ? h(View, { key, style: { ...RULE, marginTop: 4, marginBottom: 4 } })
+    : paragraphNode(b, key);
+}
+
+/**
+ * The resume as a PDF, laid out from the same model as the read-only page (see src/lib/docRender.ts): US Letter
+ * with the page setup's margins. Built with createElement (not JSX) so the test runner can import this file
+ * (tsconfig sets jsx: preserve).
+ */
 export function ResumePdf({ resume }: { resume: Resume }) {
   registerPdfFonts();
-  const groups = groupLines(resumeToLines(resume));
+  const page = pageOf(resume);
+  const blocks = renderBlocks(resumeDoc(resume));
   return h(
     Document,
     { title: `${resume.header.name} Resume`, author: resume.header.name },
     h(
       Page,
-      { size: "LETTER", style: s.page },
-      ...groups.map((group, g) => {
-        const children = group.map((line, i) => pdfLine(line, i));
-        const keepTogether = group.length > 1 && group.length <= MAX_UNBROKEN_LINES;
-        return h(View, { key: g, wrap: !keepTogether }, ...children);
-      }),
+      {
+        size: "LETTER",
+        style: {
+          paddingTop: page.marginTop * POINTS_PER_INCH,
+          paddingBottom: page.marginBottom * POINTS_PER_INCH,
+          paddingLeft: page.marginLeft * POINTS_PER_INCH,
+          paddingRight: page.marginRight * POINTS_PER_INCH,
+        },
+      },
+      ...blocks.map(blockNode),
     ),
   );
 }

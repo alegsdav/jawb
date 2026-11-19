@@ -37,7 +37,10 @@ export type RenderParagraph = {
   rule: boolean;
   /** Left edge of the text in points (list levels indent it). */
   textIndentPt: number;
+  /** The bullet or number of a list item's first paragraph. */
   marker: RenderMarker | null;
+  /** True for a centered or right-aligned marker: it goes inline before the first line's text (see linesWithMarker). */
+  markerInline: boolean;
   lines: RenderLine[];
 };
 export type RenderRule = { kind: "rule" };
@@ -97,7 +100,7 @@ function markerText(list: ListPos): string {
 
 /**
  * A left-aligned list paragraph hangs its marker in the indent before the text. A centered or right-aligned bullet
- * puts the marker inline before the text, with one normal space, and takes no indent.
+ * is marked inline (see linesWithMarker) and takes no indent.
  */
 function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph {
   const a = p.attrs;
@@ -107,18 +110,12 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
   const firstRun = lines.flatMap((l) => [...l.left, ...(l.right ?? [])])[0];
   const style = firstRun?.style ?? DEFAULT_STYLE;
 
-  let marker: RenderMarker | null = null;
-  if (list?.bullet) {
-    const text = markerText(list);
-    if (inline) lines[0].left.unshift({ text: `${text} `, style });
-    else marker = { text, x: (list.depth - 1) * LIST_INDENT_PT, style };
-  }
   // An empty line still takes one line of height, like a blank line in a document.
   for (const l of lines) {
     if (!l.left.length && !l.right) l.left.push({ text: " ", style });
   }
 
-  const indented = list !== null && !inline;
+  const level = list && !inline ? list.depth : 0;
   return {
     kind: "paragraph",
     align,
@@ -126,10 +123,27 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
     spaceAfterPt: a?.spaceAfter ?? 0,
     lineHeight: a?.lineHeight ?? DEFAULT_LINE_HEIGHT,
     rule: a?.borderBottom === true,
-    textIndentPt: indented ? list.depth * LIST_INDENT_PT : 0,
-    marker,
+    textIndentPt: level * LIST_INDENT_PT,
+    marker: list?.bullet ? { text: markerText(list), x: Math.max(0, level - 1) * LIST_INDENT_PT, style } : null,
+    markerInline: list?.bullet === true && inline,
     lines,
   };
+}
+
+/** The marker drawn hanging in the indent (null when it is inline or absent). */
+export function hangingMarkerOf(p: RenderParagraph): RenderMarker | null {
+  return p.markerInline ? null : p.marker;
+}
+
+/**
+ * The lines with an inline marker put before the first line's text, with one normal space after it. `glyph` maps
+ * the marker to what the target can draw.
+ */
+export function linesWithMarker(p: RenderParagraph, glyph: (text: string) => string = (t) => t): RenderLine[] {
+  if (!p.markerInline || !p.marker) return p.lines;
+  const [first, ...rest] = p.lines;
+  const marker = { text: `${glyph(p.marker.text)} `, style: p.marker.style };
+  return [{ ...first, left: [marker, ...first.left] }, ...rest];
 }
 
 /** A list's items in order, nested lists one level deeper. Only an item's first paragraph carries the marker. */
