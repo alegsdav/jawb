@@ -8,7 +8,7 @@ import { TextAlign } from "@tiptap/extension-text-align";
 import StarterKit from "@tiptap/starter-kit";
 import { paragraphStrutPt, tabGapPx, tabGapsPxFor } from "../docRender";
 import { cssFontStack } from "./fonts";
-import { formatTabStops, normalizeHref, parseTabStops } from "./model";
+import { cleanTabStops, formatTabStops, normalizeHref, parseTabStops } from "./model";
 import { DEFAULT_FONT_SIZE_PT, type DocJSON, type TabStop, clampIndentPt } from "./types";
 
 declare module "@tiptap/core" {
@@ -19,6 +19,8 @@ declare module "@tiptap/core" {
       setSpaceAfter: (pt: number | null) => ReturnType;
       /** Line spacing multiplier (1, 1.15, 1.5, 2). null = default. */
       setLineHeight: (multiple: number | null) => ReturnType;
+      /** Tab stops for every paragraph the selection touches; null = none (tabs use the default rule). */
+      setTabStops: (stops: TabStop[] | null) => ReturnType;
       toggleBorderBottom: () => ReturnType;
     };
     docFontFamily: {
@@ -139,6 +141,8 @@ const ParagraphFormat = Extension.create({
       setSpaceBefore: (pt) => setParagraphAttrs({ spaceBefore: pt }),
       setSpaceAfter: (pt) => setParagraphAttrs({ spaceAfter: pt }),
       setLineHeight: (multiple) => setParagraphAttrs({ lineHeight: multiple }),
+      // Cleaned here too, so a command can never store stops the schema would not keep.
+      setTabStops: (stops) => setParagraphAttrs({ tabStops: stops ? (cleanTabStops(stops) ?? null) : null }),
       toggleBorderBottom: () => toggleParagraphBorder(),
     };
   },

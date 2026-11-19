@@ -2,6 +2,7 @@ import type { Editor } from "@tiptap/react";
 import type { EditorState } from "@tiptap/pm/state";
 import type { Mark } from "@tiptap/pm/model";
 import { outlineFromDoc, outlineGroups } from "@/lib/doc/outline";
+import { cleanTabStops } from "@/lib/doc/model";
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_PT, DEFAULT_LINE_HEIGHT, type DocJSON } from "@/lib/doc/types";
 import type { Align, FormatState, ListKind, DocSelection } from "./editorTypes";
 
@@ -57,6 +58,7 @@ export function formatAt(editor: Editor): Omit<FormatState, "active"> {
     list,
     lineHeight: (attrs.lineHeight as number | null) ?? DEFAULT_LINE_HEIGHT,
     borderBottom: !!attrs.borderBottom,
+    tabStops: cleanTabStops(attrs.tabStops) ?? null,
     link: linkHref(state),
     canUndo: editor.can().undo(),
     canRedo: editor.can().redo(),

@@ -169,6 +169,7 @@ function commandsFor(editor: Editor, openLink: () => void): DocCommands {
     indent: () => chain().sinkListItem("listItem").run(),
     outdent: () => chain().liftListItem("listItem").run(),
     setLineHeight: (multiple) => chain().setLineHeight(multiple).run(),
+    setTabStops: (stops) => chain().setTabStops(stops).run(),
     adjustSpaceBefore: (delta) => adjust("spaceBefore", delta),
     adjustSpaceAfter: (delta) => adjust("spaceAfter", delta),
     toggleBorderBottom: () => chain().toggleBorderBottom().run(),
@@ -248,7 +249,7 @@ const NO_CARET: CaretState = { id: null, text: "", sel: null };
 /** The formatting state before the editor exists (without `active`). */
 const EMPTY_FMT: Omit<FormatState, "active"> = {
   bold: false, italic: false, underline: false, fontFamily: EMPTY_FORMAT_STATE.fontFamily, fontSize: EMPTY_FORMAT_STATE.fontSize,
-  align: "left", list: null, lineHeight: EMPTY_FORMAT_STATE.lineHeight, borderBottom: false, link: null, canUndo: false, canRedo: false,
+  align: "left", list: null, lineHeight: EMPTY_FORMAT_STATE.lineHeight, borderBottom: false, tabStops: null, link: null, canUndo: false, canRedo: false,
 };
 
 export function ResumeDocument({

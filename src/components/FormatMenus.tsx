@@ -1,8 +1,10 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { MenuItem, MenuSeparator } from "./Menu";
 import { MenuBarMenu, docEdit } from "./DocToolbar";
+import { TabStopsDialog } from "./TabStopsDialog";
 import type { Align, DocCommands, FormatState } from "./editorTypes";
 
 /** Sizes in the Format menu (the toolbar keeps the full list). */
@@ -28,63 +30,82 @@ function Tick({ on, children }: { on: boolean; children: React.ReactNode }) {
 
 type MenuProps = { commandsRef: RefObject<DocCommands | null>; fmt: FormatState };
 
-/** Format menu: text style, size, alignment, lists, spacing, rule, clear. Kept short; the popup scrolls. */
+/**
+ * Format menu: text style, size, alignment, lists, spacing, tab stops, rule, clear. Kept short; the popup scrolls.
+ * The tab stops dialog lives here, outside the menu, so it stays open after the menu closes on pick.
+ */
 export function FormatMenu({ commandsRef, fmt }: MenuProps) {
+  const [tabsOpen, setTabsOpen] = useState(false);
   const run = (f: (c: DocCommands) => void) => () => {
     if (commandsRef.current) f(commandsRef.current);
   };
   const off = !fmt.active;
   return (
-    <MenuBarMenu label="Format">
-      <MenuItem onSelect={run((c) => c.toggleMark("bold"))} disabled={off} shortcut="Ctrl+B">
-        <Tick on={fmt.bold}>Bold</Tick>
-      </MenuItem>
-      <MenuItem onSelect={run((c) => c.toggleMark("italic"))} disabled={off} shortcut="Ctrl+I">
-        <Tick on={fmt.italic}>Italic</Tick>
-      </MenuItem>
-      <MenuItem onSelect={run((c) => c.toggleMark("underline"))} disabled={off} shortcut="Ctrl+U">
-        <Tick on={fmt.underline}>Underline</Tick>
-      </MenuItem>
-      <MenuItem onSelect={run((c) => c.openLink())} disabled={off} shortcut="Ctrl+K">
-        Insert link…
-      </MenuItem>
-      <MenuSeparator />
-      <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
-      {MENU_SIZES.map((pt) => (
-        <MenuItem key={pt} onSelect={run((c) => c.setSize(pt))} disabled={off}>
-          <Tick on={fmt.fontSize === pt}>{`${pt} pt`}</Tick>
+    <>
+      <MenuBarMenu label="Format">
+        <MenuItem onSelect={run((c) => c.toggleMark("bold"))} disabled={off} shortcut="Ctrl+B">
+          <Tick on={fmt.bold}>Bold</Tick>
         </MenuItem>
-      ))}
-      <MenuSeparator />
-      {ALIGN_CHOICES.map(({ align, label, shortcut }) => (
-        <MenuItem key={align} onSelect={run((c) => c.setAlign(align))} disabled={off} shortcut={shortcut}>
-          <Tick on={fmt.align === align}>{label}</Tick>
+        <MenuItem onSelect={run((c) => c.toggleMark("italic"))} disabled={off} shortcut="Ctrl+I">
+          <Tick on={fmt.italic}>Italic</Tick>
         </MenuItem>
-      ))}
-      <MenuSeparator />
-      <MenuItem onSelect={run((c) => c.toggleList("bullet"))} disabled={off}>
-        <Tick on={fmt.list === "bullet"}>Bulleted list</Tick>
-      </MenuItem>
-      <MenuItem onSelect={run((c) => c.toggleList("ordered"))} disabled={off}>
-        <Tick on={fmt.list === "ordered"}>Numbered list</Tick>
-      </MenuItem>
-      <MenuSeparator />
-      <div className="float-muted px-2 pt-1 text-[11px]">Line spacing</div>
-      {LINE_SPACINGS.map((n) => (
-        <MenuItem key={n} onSelect={run((c) => c.setLineHeight(n))} disabled={off}>
-          <Tick on={Math.abs(fmt.lineHeight - n) < 0.01}>{String(n)}</Tick>
+        <MenuItem onSelect={run((c) => c.toggleMark("underline"))} disabled={off} shortcut="Ctrl+U">
+          <Tick on={fmt.underline}>Underline</Tick>
         </MenuItem>
-      ))}
-      <MenuSeparator />
-      <MenuItem onSelect={run((c) => c.toggleBorderBottom())} disabled={off}>
-        <Tick on={fmt.borderBottom}>Paragraph border below</Tick>
-      </MenuItem>
-      <MenuItem onSelect={run((c) => c.insertHorizontalLine())} disabled={off}>Horizontal line</MenuItem>
-      <MenuSeparator />
-      <MenuItem onSelect={run((c) => c.clearFormatting())} disabled={off} shortcut="Ctrl+\">
-        Clear formatting
-      </MenuItem>
-    </MenuBarMenu>
+        <MenuItem onSelect={run((c) => c.openLink())} disabled={off} shortcut="Ctrl+K">
+          Insert link…
+        </MenuItem>
+        <MenuSeparator />
+        <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
+        {MENU_SIZES.map((pt) => (
+          <MenuItem key={pt} onSelect={run((c) => c.setSize(pt))} disabled={off}>
+            <Tick on={fmt.fontSize === pt}>{`${pt} pt`}</Tick>
+          </MenuItem>
+        ))}
+        <MenuSeparator />
+        {ALIGN_CHOICES.map(({ align, label, shortcut }) => (
+          <MenuItem key={align} onSelect={run((c) => c.setAlign(align))} disabled={off} shortcut={shortcut}>
+            <Tick on={fmt.align === align}>{label}</Tick>
+          </MenuItem>
+        ))}
+        <MenuSeparator />
+        <MenuItem onSelect={run((c) => c.toggleList("bullet"))} disabled={off}>
+          <Tick on={fmt.list === "bullet"}>Bulleted list</Tick>
+        </MenuItem>
+        <MenuItem onSelect={run((c) => c.toggleList("ordered"))} disabled={off}>
+          <Tick on={fmt.list === "ordered"}>Numbered list</Tick>
+        </MenuItem>
+        <MenuSeparator />
+        <div className="float-muted px-2 pt-1 text-[11px]">Line spacing</div>
+        {LINE_SPACINGS.map((n) => (
+          <MenuItem key={n} onSelect={run((c) => c.setLineHeight(n))} disabled={off}>
+            <Tick on={Math.abs(fmt.lineHeight - n) < 0.01}>{String(n)}</Tick>
+          </MenuItem>
+        ))}
+        <MenuSeparator />
+        <MenuItem onSelect={() => setTabsOpen(true)} disabled={off}>
+          Tab stops…
+        </MenuItem>
+        <MenuSeparator />
+        <MenuItem onSelect={run((c) => c.toggleBorderBottom())} disabled={off}>
+          <Tick on={fmt.borderBottom}>Paragraph border below</Tick>
+        </MenuItem>
+        <MenuItem onSelect={run((c) => c.insertHorizontalLine())} disabled={off}>Horizontal line</MenuItem>
+        <MenuSeparator />
+        <MenuItem onSelect={run((c) => c.clearFormatting())} disabled={off} shortcut="Ctrl+\">
+          Clear formatting
+        </MenuItem>
+      </MenuBarMenu>
+      {tabsOpen &&
+        createPortal(
+          <TabStopsDialog
+            stops={fmt.tabStops}
+            onApply={(stops) => commandsRef.current?.setTabStops(stops)}
+            onClose={() => setTabsOpen(false)}
+          />,
+          document.body,
+        )}
+    </>
   );
 }
 

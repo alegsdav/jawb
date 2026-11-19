@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_PT, DEFAULT_LINE_HEIGHT } from "@/lib/doc/types";
+import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_PT, DEFAULT_LINE_HEIGHT, type TabStop } from "@/lib/doc/types";
 
 /**
  * Contract between the resume editor (ResumeDocument) and the pages that host it.
@@ -27,6 +27,8 @@ export type DocCommands = {
   outdent(): void;
   /** Line spacing multiple (1, 1.15, 1.5, 2). null = default. */
   setLineHeight(multiple: number | null): void;
+  /** Tab stops for the selected paragraphs (see TabStop). null = none, so tabs use the default rule. */
+  setTabStops(stops: TabStop[] | null): void;
   /** Add or remove space above / below the selected paragraphs, in points. */
   adjustSpaceBefore(deltaPt: number): void;
   adjustSpaceAfter(deltaPt: number): void;
@@ -48,7 +50,7 @@ export type DocCommands = {
  * active: the editor has the selection (focused, or last focused and not dismissed).
  * bold/italic/underline: on for the whole selection (with a caret: what typing would produce).
  * fontFamily / fontSize: null when the selection mixes values. Text without a mark has the document defaults.
- * align, list, lineHeight, borderBottom: of the paragraph the selection starts in.
+ * align, list, lineHeight, borderBottom, tabStops: of the paragraph the selection starts in.
  */
 export type FormatState = {
   active: boolean;
@@ -61,6 +63,8 @@ export type FormatState = {
   list: ListKind | null;
   lineHeight: number;
   borderBottom: boolean;
+  /** The paragraph's tab stops, or null when it has none (tabs then use the default rule). */
+  tabStops: TabStop[] | null;
   /** The href of the link on the selection (or at the caret); null when none or when the selection mixes. */
   link: string | null;
   canUndo: boolean;
@@ -78,6 +82,7 @@ export const EMPTY_FORMAT_STATE: FormatState = {
   list: null,
   lineHeight: DEFAULT_LINE_HEIGHT,
   borderBottom: false,
+  tabStops: null,
   link: null,
   canUndo: false,
   canRedo: false,
