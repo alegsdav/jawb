@@ -143,3 +143,41 @@
   font-style: italic;
   font-display: swap;
 }
+
+/*
+ * CMU Serif is Computer Modern Unicode, the face of LaTeX's Latin Modern Roman: the same design and advance widths
+ * (see public/fonts/cmu-serif-OFL.txt for the license). The LaTeX serif stack in src/lib/doc/fonts.ts names it after
+ * Latin Modern, so a LaTeX resume lays out as it does in TeX. The files are the 500 (regular) and 700 (bold) weights
+ * of the computer-modern package. local() uses an installed copy first, by full name per style.
+ */
+@font-face {
+  font-family: "CMU Serif";
+  src: local("CMU Serif"), local("CMU Serif Roman"), url("/fonts/cmu-serif-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "CMU Serif";
+  src: local("CMU Serif Italic"), url("/fonts/cmu-serif-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "CMU Serif";
+  src: local("CMU Serif Bold"), url("/fonts/cmu-serif-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "CMU Serif";
+  src: local("CMU Serif Bold Italic"), url("/fonts/cmu-serif-700-italic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}

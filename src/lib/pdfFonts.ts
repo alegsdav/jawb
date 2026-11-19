@@ -1,20 +1,25 @@
 import { Font } from "@react-pdf/renderer";
-import { isSansFamily, isSerifFamily } from "./doc/fonts";
+import { isSansFamily, isSerifFamily, isTexSerifFamily } from "./doc/fonts";
 
 /**
  * The PDF resume uses Carlito (the metric-compatible stand-in for Calibri, see src/app/fonts.css) for Calibri and
- * for unknown sans families, DejaVu Serif and DejaVu Sans for the families of those names (imported resumes name
- * them, and the PDF must match the original's wrapping), and the built-in PDF Times and Helvetica for the others.
+ * for unknown sans families, CMU Serif (Computer Modern, the face of LaTeX's Latin Modern) for the LaTeX serif
+ * families, DejaVu Serif and DejaVu Sans for the families of those names (imported resumes name them, and the PDF
+ * must match the original's wrapping), and the built-in PDF Times and Helvetica for the others.
  * @react-pdf/renderer can only use fonts it is given as files (ttf or woff, not woff2), so the web faces are
  * registered here once.
  */
-type WebFace = "carlito" | "dejavuSerif" | "dejavuSans";
+type WebFace = "carlito" | "dejavuSerif" | "dejavuSans" | "cmuSerif";
 
-/** The family each web face is registered under, and its file prefix in public/fonts (400, 400-italic, 700, 700-italic). */
-const WEB_FACES: Record<WebFace, { family: string; file: string }> = {
-  carlito: { family: "Carlito", file: "carlito" },
-  dejavuSerif: { family: "DejaVu Serif", file: "dejavu-serif" },
-  dejavuSans: { family: "DejaVu Sans", file: "dejavu-sans" },
+/**
+ * The family each web face is registered under, its file prefix in public/fonts (400, 400-italic, 700, 700-italic)
+ * and the file type react-pdf reads: woff for the DejaVu and Carlito files, ttf for CMU Serif.
+ */
+const WEB_FACES: Record<WebFace, { family: string; file: string; ext: "woff" | "ttf" }> = {
+  carlito: { family: "Carlito", file: "carlito", ext: "woff" },
+  dejavuSerif: { family: "DejaVu Serif", file: "dejavu-serif", ext: "woff" },
+  dejavuSans: { family: "DejaVu Sans", file: "dejavu-sans", ext: "woff" },
+  cmuSerif: { family: "CMU Serif", file: "cmu-serif", ext: "ttf" },
 };
 
 let registered = false;
@@ -29,14 +34,14 @@ function fontSrc(file: string): string {
 export function registerPdfFonts(): void {
   if (registered) return;
   registered = true;
-  for (const { family, file } of Object.values(WEB_FACES)) {
+  for (const { family, file, ext } of Object.values(WEB_FACES)) {
     Font.register({
       family,
       fonts: [
-        { src: fontSrc(`${file}-400.woff`), fontWeight: 400 },
-        { src: fontSrc(`${file}-400-italic.woff`), fontWeight: 400, fontStyle: "italic" },
-        { src: fontSrc(`${file}-700.woff`), fontWeight: 700 },
-        { src: fontSrc(`${file}-700-italic.woff`), fontWeight: 700, fontStyle: "italic" },
+        { src: fontSrc(`${file}-400.${ext}`), fontWeight: 400 },
+        { src: fontSrc(`${file}-400-italic.${ext}`), fontWeight: 400, fontStyle: "italic" },
+        { src: fontSrc(`${file}-700.${ext}`), fontWeight: 700 },
+        { src: fontSrc(`${file}-700-italic.${ext}`), fontWeight: 700, fontStyle: "italic" },
       ],
     });
   }
@@ -56,6 +61,7 @@ export function pdfFaceKind(family: string | null): FaceKind {
   if (name === "dejavu serif") return "dejavuSerif";
   if (name === "dejavu sans") return "dejavuSans";
   if (name === "arial" || name === "helvetica" || isSansFamily(name)) return "helvetica";
+  if (isTexSerifFamily(name)) return "cmuSerif";
   if (name && name !== "calibri" && isSerifFamily(name)) return "times";
   return "carlito";
 }

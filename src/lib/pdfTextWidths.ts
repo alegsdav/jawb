@@ -1,9 +1,9 @@
 /**
  * Advance widths of the PDF's faces, in 1/1000 em, so the PDF can place text at the editor's tab stops without
- * measuring it at draw time (@react-pdf/renderer does not expose measurement). Carlito's and DejaVu's widths come from
- * their font files; the built-in Times and Helvetica use the standard AFM widths. Each table holds ASCII 32-126, then the
- * typographic extras in TYPO_CODES. Kerning is not applied, so a width can differ from the drawn one by a fraction
- * of a point. Pure: no PDF library.
+ * measuring it at draw time (@react-pdf/renderer does not expose measurement). Carlito's, DejaVu's and CMU Serif's
+ * widths come from their font files (fontkit: advance width over unitsPerEm, times 1000, rounded); the built-in Times
+ * and Helvetica use the standard AFM widths. Each table holds ASCII 32-126, then the typographic extras in TYPO_CODES.
+ * Kerning is not applied, so a width can differ from the drawn one by a fraction of a point. Pure: no PDF library.
  */
 import { pdfFontFor } from "./pdfFonts";
 
@@ -32,13 +32,20 @@ const WIDTHS: Record<string, number[]> = {
   "DejaVu Sans-Italic": [318, 401, 460, 838, 636, 950, 780, 275, 390, 390, 500, 838, 318, 361, 318, 337, 636, 636, 636, 636, 636, 636, 636, 636, 636, 636, 337, 337, 838, 838, 838, 531, 1000, 684, 686, 698, 770, 632, 575, 775, 752, 295, 295, 656, 557, 863, 748, 787, 603, 787, 695, 635, 611, 732, 684, 989, 685, 611, 685, 390, 337, 390, 838, 500, 500, 613, 635, 550, 635, 615, 352, 635, 634, 278, 278, 579, 278, 974, 634, 612, 635, 635, 411, 521, 392, 634, 592, 818, 592, 592, 525, 636, 337, 636, 838, 500, 1000, 318, 318, 518, 518, 590, 1000],
   "DejaVu Sans-Bold": [348, 456, 521, 838, 696, 1002, 872, 306, 457, 457, 523, 838, 380, 415, 380, 365, 696, 696, 696, 696, 696, 696, 696, 696, 696, 696, 400, 400, 838, 838, 838, 580, 1000, 774, 762, 734, 830, 683, 683, 821, 837, 372, 372, 775, 637, 995, 837, 850, 733, 850, 770, 720, 682, 812, 774, 1103, 771, 724, 725, 457, 365, 457, 838, 500, 500, 675, 716, 593, 716, 678, 435, 716, 712, 343, 343, 665, 343, 1042, 712, 687, 716, 716, 493, 595, 478, 712, 652, 924, 645, 652, 582, 712, 365, 712, 838, 500, 1000, 380, 380, 657, 657, 639, 1000],
   "DejaVu Sans-BoldItalic": [348, 456, 521, 696, 696, 1002, 872, 306, 457, 457, 523, 838, 380, 415, 380, 365, 696, 696, 696, 696, 696, 696, 696, 696, 696, 696, 400, 400, 838, 838, 838, 580, 1000, 774, 762, 734, 830, 683, 683, 821, 837, 372, 372, 775, 637, 995, 837, 850, 733, 850, 770, 720, 682, 812, 774, 1103, 771, 724, 725, 457, 365, 457, 838, 500, 500, 675, 716, 593, 716, 678, 435, 716, 712, 343, 343, 665, 343, 1042, 712, 687, 716, 716, 493, 595, 478, 712, 652, 924, 645, 652, 582, 712, 365, 712, 838, 500, 1000, 380, 380, 644, 644, 639, 1000],
+  "CMU Serif": [333, 278, 500, 833, 500, 833, 777, 278, 388, 388, 500, 778, 277, 333, 278, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 277, 278, 778, 778, 778, 472, 777, 750, 708, 722, 763, 680, 652, 784, 750, 361, 513, 777, 625, 916, 750, 777, 680, 777, 736, 555, 722, 750, 750, 1027, 750, 750, 611, 278, 500, 278, 611, 778, 500, 500, 555, 444, 555, 444, 305, 500, 555, 277, 305, 527, 277, 833, 555, 500, 555, 527, 391, 394, 388, 555, 527, 722, 527, 527, 444, 500, 278, 500, 611, 500, 1000, 278, 278, 333, 333, 500, 834],
+  "CMU Serif-Italic": [358, 307, 511, 818, 511, 817, 766, 307, 408, 408, 511, 766, 306, 358, 307, 511, 511, 511, 511, 511, 511, 511, 511, 511, 511, 511, 306, 307, 766, 766, 766, 511, 766, 743, 703, 715, 755, 678, 652, 773, 743, 385, 525, 768, 627, 896, 743, 766, 678, 766, 729, 562, 715, 743, 743, 998, 743, 743, 613, 307, 511, 307, 613, 766, 511, 511, 460, 460, 511, 460, 306, 460, 511, 306, 306, 460, 255, 817, 562, 511, 511, 460, 421, 408, 332, 536, 460, 664, 463, 485, 408, 511, 307, 511, 613, 511, 1022, 307, 307, 361, 361, 511, 921],
+  "CMU Serif-Bold": [383, 350, 575, 958, 575, 958, 894, 319, 447, 447, 575, 894, 319, 383, 319, 575, 575, 575, 575, 575, 575, 575, 575, 575, 575, 575, 319, 319, 894, 894, 894, 543, 894, 869, 818, 830, 881, 755, 723, 904, 900, 436, 594, 901, 691, 1091, 900, 863, 786, 863, 862, 638, 800, 884, 869, 1188, 869, 869, 702, 319, 575, 319, 703, 894, 575, 559, 638, 511, 638, 527, 351, 575, 638, 319, 351, 606, 319, 958, 638, 575, 638, 606, 473, 453, 447, 638, 606, 830, 606, 606, 511, 575, 319, 575, 703, 575, 1150, 319, 319, 411, 411, 575, 957],
+  "CMU Serif-BoldItalic": [414, 386, 591, 944, 591, 944, 885, 355, 473, 473, 591, 885, 355, 414, 355, 591, 591, 591, 591, 591, 591, 591, 591, 591, 591, 591, 355, 355, 885, 885, 885, 591, 885, 865, 816, 826, 875, 756, 727, 895, 896, 472, 610, 895, 698, 1073, 896, 855, 787, 855, 859, 650, 796, 881, 865, 1160, 865, 865, 709, 356, 591, 356, 709, 885, 591, 591, 532, 532, 591, 532, 400, 532, 591, 355, 355, 532, 297, 944, 650, 591, 591, 532, 502, 487, 385, 620, 532, 768, 560, 562, 490, 591, 355, 591, 709, 591, 1182, 355, 355, 444, 444, 591, 1065],
 };
+
+/** The families registered with bold and italic faces, whose widths are keyed by family plus style. */
+const WEIGHTED_FAMILIES = ["Carlito", "DejaVu Serif", "DejaVu Sans", "CMU Serif"];
 
 /** The name of the face a run is drawn in (its family and weight/style), as a key of WIDTHS. */
 function faceOf(family: string | null, bold: boolean, italic: boolean): string {
   const f = pdfFontFor(family, bold, italic);
-  // Carlito and DejaVu are registered as one family with weights and styles; Times and Helvetica are named faces.
-  if (!["Carlito", "DejaVu Serif", "DejaVu Sans"].includes(f.fontFamily)) return f.fontFamily;
+  // Carlito, DejaVu and CMU Serif are registered as one family with weights and styles; Times and Helvetica are named faces.
+  if (!WEIGHTED_FAMILIES.includes(f.fontFamily)) return f.fontFamily;
   if (bold && italic) return `${f.fontFamily}-BoldItalic`;
   if (bold) return `${f.fontFamily}-Bold`;
   return italic ? `${f.fontFamily}-Italic` : f.fontFamily;

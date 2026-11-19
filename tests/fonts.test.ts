@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Font } from "@react-pdf/renderer";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -50,10 +50,16 @@ describe("LaTeX font families", () => {
 });
 
 describe("PDF face for LaTeX families", () => {
-  it.each(["Latin Modern Roman", "LMRoman12", "LMRoman10", "CMR10", "CMU Serif"])("%s is set in the PDF Times face", (family) => {
-    expect(pdfFaceKind(family)).toBe("times");
-    expect(pdfFontFor(family, false, false).fontFamily).toBe("Times-Roman");
-    expect(pdfFontFor(family, true, true).fontFamily).toBe("Times-BoldItalic");
+  it.each(["Latin Modern Roman", "LMRoman12", "LMRoman10-Regular", "CMR10", "CMBX12", "CMU Serif"])("%s is set in the registered CMU Serif face", (family) => {
+    expect(pdfFaceKind(family)).toBe("cmuSerif");
+    expect(pdfFontFor(family, false, false)).toEqual({ fontFamily: "CMU Serif" });
+    expect(pdfFontFor(family, true, true)).toEqual({ fontFamily: "CMU Serif", fontWeight: 700, fontStyle: "italic" });
+  });
+
+  it("keeps the other serif names on the built-in Times face", () => {
+    expect(pdfFaceKind("TeX Gyre Termes")).toBe("times");
+    expect(pdfFaceKind("Nimbus Roman")).toBe("times");
+    expect(pdfFontFor("Times New Roman", true, false).fontFamily).toBe("Times-Bold");
   });
 
   it.each(["Latin Modern Sans", "LMSans10", "CMSS10"])("%s is set in the PDF Helvetica face", (family) => {
@@ -95,22 +101,41 @@ describe("registerPdfFonts", () => {
     registerPdfFonts();
   });
 
-  it("registers Carlito and both DejaVu families with the four woff styles each", () => {
+  it("registers Carlito, both DejaVu families and CMU Serif with the four styles each", () => {
     const families = vi.mocked(Font.register).mock.calls.map(([arg]) => (arg as { family: string }).family);
-    expect(families.sort()).toEqual(["Carlito", "DejaVu Sans", "DejaVu Serif"]);
+    expect(families.sort()).toEqual(["CMU Serif", "Carlito", "DejaVu Sans", "DejaVu Serif"]);
     for (const [arg] of vi.mocked(Font.register).mock.calls) {
       expect((arg as { fonts: unknown[] }).fonts).toHaveLength(4);
     }
   });
 
-  it("points every registered font at a woff file that is served from public/fonts", () => {
+  it("points every registered font at a woff or ttf file that is served from public/fonts", () => {
     for (const [arg] of vi.mocked(Font.register).mock.calls) {
       for (const font of (arg as { fonts: { src: string }[] }).fonts) {
-        expect(font.src.endsWith(".woff")).toBe(true);
+        expect(/\.(woff|ttf)$/.test(font.src)).toBe(true);
         expect(existsSync(font.src), font.src).toBe(true);
       }
     }
-    expect(existsSync(join(process.cwd(), "public/fonts/dejavu-serif-OFL.txt"))).toBe(true);
-    expect(existsSync(join(process.cwd(), "public/fonts/dejavu-sans-OFL.txt"))).toBe(true);
+    for (const license of ["dejavu-serif", "dejavu-sans", "cmu-serif"]) {
+      expect(existsSync(join(process.cwd(), `public/fonts/${license}-OFL.txt`)), license).toBe(true);
+    }
+  });
+
+  it("registers CMU Serif from its ttf files, which react-pdf reads", () => {
+    const cmu = vi.mocked(Font.register).mock.calls.map(([arg]) => arg as { family: string; fonts: { src: string; fontWeight: number; fontStyle?: string }[] }).find((arg) => arg.family === "CMU Serif");
+    expect(cmu?.fonts.map((font) => [font.src.split("/").pop(), font.fontWeight, font.fontStyle ?? "normal"])).toEqual([
+      ["cmu-serif-400.ttf", 400, "normal"],
+      ["cmu-serif-400-italic.ttf", 400, "italic"],
+      ["cmu-serif-700.ttf", 700, "normal"],
+      ["cmu-serif-700-italic.ttf", 700, "italic"],
+    ]);
+  });
+
+  it("serves the CMU Serif web faces that the browser loads for the Latin Modern stack", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/fonts.css"), "utf8");
+    const urls = [...css.matchAll(/url\("\/fonts\/(cmu-serif-[^"]+\.woff2)"\)/g)].map((match) => match[1]);
+    expect(urls.sort()).toEqual(["cmu-serif-400-italic.woff2", "cmu-serif-400.woff2", "cmu-serif-700-italic.woff2", "cmu-serif-700.woff2"]);
+    for (const file of urls) expect(existsSync(join(process.cwd(), "public/fonts", file)), file).toBe(true);
+    expect(css).toContain(`font-family: "CMU Serif";`);
   });
 });

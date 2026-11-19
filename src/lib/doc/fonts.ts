@@ -13,9 +13,15 @@ const TEX_SERIF = /latin modern roman|lm ?roman|computer modern|cmu serif|^cm(r|
 /** LaTeX sans faces: "Latin Modern Sans", "LMSans10", "Computer Modern Sans", "CMSS10". */
 const TEX_SANS = /latin modern sans|lm ?sans|computer modern sans|cmu sans|^cmss/;
 
-/** Latin Modern has no web file here, so the stack names it, then the Times-like serif that is loaded. */
+/** Latin Modern is named first (when installed); CMU Serif, the same design, is the loaded web face (src/app/fonts.css). */
 const LATIN_MODERN_SERIF = `"Latin Modern Roman", "LM Roman 10", "CMU Serif", Tinos, "Times New Roman", serif`;
 const LATIN_MODERN_SANS = `"Latin Modern Sans", "LM Sans 10", "CMU Sans Serif", Arial, Helvetica, sans-serif`;
+
+/** True for a LaTeX serif face by name, not a sans one: "Latin Modern Roman", "LMRoman12", "CMR10", "CMU Serif". */
+export function isTexSerifFamily(family: string): boolean {
+  const name = family.toLowerCase();
+  return !isSansFamily(name) && TEX_SERIF.test(name);
+}
 
 /** True for sans-serif families, by name ("Verdana Sans", "Open Sans") or LaTeX sans naming. */
 export function isSansFamily(family: string): boolean {
@@ -27,7 +33,7 @@ export function isSansFamily(family: string): boolean {
 export function isSerifFamily(family: string): boolean {
   const name = family.toLowerCase();
   if (isSansFamily(name)) return false;
-  return TEX_SERIF.test(name) || SERIF_HINTS.some((hint) => name.includes(hint));
+  return isTexSerifFamily(name) || SERIF_HINTS.some((hint) => name.includes(hint));
 }
 
 /** CSS font-family value for a document family name, with fallbacks so a missing font degrades sensibly. */
