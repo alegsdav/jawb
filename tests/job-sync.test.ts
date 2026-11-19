@@ -5,41 +5,45 @@ import {
   mergeBaselines, mergeTailored, planSaveAsMaster, planTailoredRefresh, rebaseJob, removeIds, saveTailoredDocument,
   statusConflictOutcome, tailoredFromRow, writeJobIfUnchanged,
 } from "@/lib/jobSync";
-import { cloneForJob, makeBaseline, planPull } from "@/lib/tailor";
-import { bulletTextMap } from "@/lib/resume";
-import type { Analysis, Item, Job, Resume } from "@/lib/types";
+import { buildDoc, flattenDoc, insertParagraphsAfter, paragraph, removeParagraphs, setParagraphText, type FlatEntry } from "@/lib/doc/model";
+import { resumeDoc, withDoc } from "@/lib/resume";
+import { cloneForJob, makeBaseline } from "@/lib/tailor";
+import type { Analysis, Job, Resume } from "@/lib/types";
 
-// ---------- fixtures ----------
+// ---------- fixtures: a master resume as a document ----------
 
-const item = (id: string, title: string, bullets: [string, string][], extra: Partial<Item> = {}): Item => ({
-  id, title, subtitle: "", location: "", dates: "", bullets: bullets.map(([bid, text]) => ({ id: bid, text })), ...extra,
-});
+/** A plain paragraph (a line, or a heading when its text is all caps). */
+const L = (id: string, text: string): FlatEntry => ({ node: paragraph(text, { attrs: { id } }), listType: null, depth: 0, bullet: false });
+/** A bullet: the first line of a list item. */
+const B = (id: string, text: string): FlatEntry => ({ node: paragraph(text, { attrs: { id } }), listType: "bulletList", depth: 1, bullet: true });
 
-const master1 = (): Resume => ({
-  version: 2,
-  header: { name: "Ann Lee", contact: "ann@x.com" },
-  sections: [
-    {
-      id: "exp",
-      title: "Experience",
-      items: [
-        item("acme", "Acme", [["a1", "Built a dashboard"], ["a2", "Wrote tests"], ["a3", "Fixed bugs"]], { subtitle: "Intern", dates: "2025" }),
-        item("beta", "Beta", [["b1", "Ran a study"]]),
-      ],
-    },
-    { id: "edu", title: "Education", items: [item("uni", "State U", [["g1", "GPA 3.9"]])] },
-  ],
-  facts: ["Speaks Spanish"],
-});
+/** Name, contact, Experience (Acme: a1-a3, Beta: b1), Education (State U: g1). */
+const master1Entries = (): FlatEntry[] => [
+  L("ann", "Ann Lee"),
+  L("contact", "ann@x.com"),
+  L("h-exp", "EXPERIENCE"),
+  L("acme", "Acme\tNew York"),
+  L("acme-sub", "Intern\t2025"),
+  B("a1", "Built a dashboard"),
+  B("a2", "Wrote tests"),
+  B("a3", "Fixed bugs"),
+  L("beta", "Beta\tBoston"),
+  B("b1", "Ran a study"),
+  L("h-edu", "EDUCATION"),
+  L("uni", "State U"),
+  B("g1", "GPA 3.9"),
+];
+
+const resumeOf = (entries: FlatEntry[]): Resume => withDoc({ header: { name: "", contact: "" }, sections: [] }, buildDoc(entries));
+const master1 = (): Resume => resumeOf(master1Entries());
 
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
-const edit = <T,>(x: T, fn: (d: T) => void): T => {
-  const d = clone(x);
-  fn(d);
-  return d;
-};
-const texts = (r: Resume) => Object.fromEntries(bulletTextMap(r));
-const order = (r: Resume, itemId: string) => r.sections.flatMap((s) => s.items).find((it) => it.id === itemId)!.bullets.map((b) => b.id);
+const lines = (r: Resume) => flattenDoc(resumeDoc(r)).map((p) => p.text);
+const ids = (r: Resume) => flattenDoc(resumeDoc(r)).map((p) => p.id);
+const textOf = (r: Resume, id: string) => flattenDoc(resumeDoc(r)).find((p) => p.id === id)?.text;
+const withText = (r: Resume, id: string, text: string): Resume => withDoc(r, setParagraphText(resumeDoc(r), id, text));
+const withoutIds = (r: Resume, drop: string[]): Resume => withDoc(r, removeParagraphs(resumeDoc(r), drop));
+const insertAfter = (r: Resume, afterId: string, entries: FlatEntry[]): Resume => withDoc(r, insertParagraphsAfter(resumeDoc(r), afterId, entries));
 
 const analysis = (over: Partial<Analysis> = {}): Analysis => ({
   fit: "possible",
@@ -248,37 +252,33 @@ describe("status conflicts", () => {
 describe("mergeTailored", () => {
   const copy0 = () => cloneForJob(master1());
 
-  it("edits to different bullets on two devices both survive", () => {
+  it("edits to different paragraphs on two devices both survive", () => {
     const base = copy0();
-    const phone = edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Phone edit A"));
-    const laptop = edit(base, (d) => (d.sections[0].items[0].bullets[1].text = "Laptop edit B"));
+    const phone = withText(base, "a1", "Phone edit A");
+    const laptop = withText(base, "a2", "Laptop edit B");
     const { merged, conflicts } = mergeTailored(base, laptop, phone);
     expect(conflicts).toEqual([]);
-    expect(texts(merged)).toMatchObject({ a1: "Phone edit A", a2: "Laptop edit B" });
-    expect(merged.baseline).toEqual(base.baseline);
+    expect(textOf(merged, "a1")).toBe("Phone edit A");
+    expect(textOf(merged, "a2")).toBe("Laptop edit B");
   });
 
-  it("the same bullet changed differently is a conflict (merged holds this tab's version)", () => {
+  it("the same paragraph changed differently is a conflict (merged holds this tab's version)", () => {
     const base = copy0();
-    const phone = edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Phone"));
-    const laptop = edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Laptop"));
+    const phone = withText(base, "a1", "Phone");
+    const laptop = withText(base, "a1", "Laptop");
     const { merged, conflicts } = mergeTailored(base, laptop, phone);
-    expect(conflicts).toHaveLength(1);
-    expect(conflicts[0]).toMatchObject({ local: "Laptop", server: "Phone" });
-    expect(texts(merged).a1).toBe("Laptop");
+    expect(conflicts).toEqual([{ where: 'Line "Laptop"', local: "Laptop", server: "Phone" }]);
+    expect(textOf(merged, "a1")).toBe("Laptop");
   });
 
   it("merges the baseline key by key (a pull on the other device keeps its baseline)", () => {
     const base = copy0();
-    const server = edit(base, (d) => {
-      d.sections[0].items[0].bullets[2].text = "Fixed 12 bugs";
-      d.baseline!.a3 = "Fixed 12 bugs";
-    });
-    const local = edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Mine"));
+    const server = { ...base, baseline: { ...base.baseline, a3: "Fixed 40 bugs" } };
+    const local = withText(base, "a1", "Mine");
     const { merged, conflicts } = mergeTailored(base, local, server);
     expect(conflicts).toEqual([]);
-    expect(merged.baseline!.a3).toBe("Fixed 12 bugs");
-    expect(texts(merged)).toMatchObject({ a1: "Mine", a3: "Fixed 12 bugs" });
+    expect(merged.baseline?.a3).toBe("Fixed 40 bugs");
+    expect(textOf(merged, "a1")).toBe("Mine");
   });
 
   it("mergeBaselines handles additions, deletions and missing sides", () => {
@@ -288,14 +288,17 @@ describe("mergeTailored", () => {
   });
 
   it("tailoredFromRow keeps the baseline that normalizeResume drops", () => {
-    const c = copy0();
-    expect(tailoredFromRow(JSON.parse(JSON.stringify(c))).baseline).toEqual(c.baseline);
+    const copy = copy0();
+    const stored = clone(copy);
+    const read = tailoredFromRow(stored);
+    expect(read.baseline).toEqual(copy.baseline);
+    expect(lines(read)).toEqual(lines(copy));
   });
 });
 
 describe("planTailoredRefresh", () => {
   const base = { content: cloneForJob(master1()), updatedAt: "t1" };
-  const theirs = edit(base.content, (d) => (d.sections[0].items[0].bullets[0].text = "Theirs"));
+  const theirs = withText(base.content, "a1", "Theirs");
 
   it("does nothing when the server didn't change", () => {
     expect(planTailoredRefresh(base, base.content, { content: clone(base.content), updatedAt: "t1" })).toEqual({ kind: "none" });
@@ -304,13 +307,13 @@ describe("planTailoredRefresh", () => {
     expect(planTailoredRefresh(base, base.content, { content: theirs, updatedAt: "t2" })).toEqual({ kind: "replace", content: theirs });
   });
   it("merges unsaved edits here with theirs", () => {
-    const mine = edit(base.content, (d) => (d.sections[0].items[0].bullets[1].text = "Mine"));
+    const mine = withText(base.content, "a2", "Mine");
     const p = planTailoredRefresh(base, mine, { content: theirs, updatedAt: "t2" });
     expect(p.kind).toBe("merge");
-    expect(texts((p as { content: Resume }).content)).toMatchObject({ a1: "Theirs", a2: "Mine" });
+    expect([textOf((p as { content: Resume }).content, "a1"), textOf((p as { content: Resume }).content, "a2")]).toEqual(["Theirs", "Mine"]);
   });
-  it("reports a conflict when both changed the same bullet", () => {
-    const mine = edit(base.content, (d) => (d.sections[0].items[0].bullets[0].text = "Mine"));
+  it("reports a conflict when both changed the same paragraph", () => {
+    const mine = withText(base.content, "a1", "Mine");
     expect(planTailoredRefresh(base, mine, { content: theirs, updatedAt: "t2" }).kind).toBe("conflict");
   });
 });
@@ -318,158 +321,128 @@ describe("planTailoredRefresh", () => {
 // ---------- save as master ----------
 
 describe("planSaveAsMaster", () => {
+  const m1 = master1();
+  const copy0 = () => cloneForJob(m1);
+
   it("applies the copy's rewording and keeps a bullet added to the master later", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => (d.sections[0].items[0].bullets[0].text = "Built a Tableau dashboard for 40 users"));
-    const m2 = edit(m1, (d) => d.sections[0].items[0].bullets.push({ id: "a4", text: "Mentored 2 interns" }));
+    const copy = withText(copy0(), "a1", "Built a Tableau dashboard for 40 users");
+    const m2 = insertAfter(m1, "a3", [B("a4", "Mentored 2 interns")]);
     const plan = planSaveAsMaster(copy, m2);
-    expect(texts(plan.merged)).toEqual({ ...texts(m2), a1: "Built a Tableau dashboard for 40 users" });
-    expect(order(plan.merged, "acme")).toEqual(["a1", "a2", "a3", "a4"]);
-    expect(plan.merged.facts).toEqual(["Speaks Spanish"]);
-    expect(plan.merged.baseline).toBeUndefined();
+    expect(textOf(plan.merged, "a1")).toBe("Built a Tableau dashboard for 40 users");
+    expect(textOf(plan.merged, "a4")).toBe("Mentored 2 interns");
     expect(plan).toMatchObject({ edited: 1, added: 0, kept: 1, removals: [], conflicts: [] });
   });
 
   it("keeps master rewordings the copy didn't touch", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => (d.sections[0].items[0].bullets[0].text = "Copy A"));
-    const m2 = edit(m1, (d) => (d.sections[0].items[0].bullets[1].text = "Wrote 120 unit tests"));
-    expect(texts(planSaveAsMaster(copy, m2).merged)).toMatchObject({ a1: "Copy A", a2: "Wrote 120 unit tests" });
+    const copy = withText(copy0(), "a1", "Copy A");
+    const m2 = withText(m1, "a2", "Wrote 120 unit tests");
+    const merged = planSaveAsMaster(copy, m2).merged;
+    expect([textOf(merged, "a1"), textOf(merged, "a2")]).toEqual(["Copy A", "Wrote 120 unit tests"]);
   });
 
-  it("inserts bullets and entries added in the copy next to their neighbours", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => {
-      d.sections[0].items[0].bullets.splice(1, 0, { id: "n1", text: "New after a1" });
-      d.sections[0].items.splice(1, 0, item("gamma", "Gamma", [["c1", "Gamma bullet"]]));
-    });
-    const m2 = edit(m1, (d) => d.sections[0].items[0].bullets.unshift({ id: "a0", text: "Master-first bullet" }));
+  it("places lines added in the copy and in the master next to their neighbours", () => {
+    const copy = insertAfter(insertAfter(copy0(), "a1", [B("cN", "Copy-only bullet")]), "b1", [L("gam", "Gamma\tDenver"), B("gB", "Gamma bullet")]);
+    const m2 = insertAfter(m1, "acme-sub", [B("a0", "Master-first bullet")]);
     const plan = planSaveAsMaster(copy, m2);
-    expect(order(plan.merged, "acme")).toEqual(["a0", "a1", "n1", "a2", "a3"]);
-    expect(plan.merged.sections[0].items.map((it) => it.id)).toEqual(["acme", "gamma", "beta"]);
-    expect(plan.added).toBe(2);
+    expect(ids(plan.merged)).toEqual([
+      "ann", "contact", "h-exp", "acme", "acme-sub", "a0", "a1", "cN", "a2", "a3", "beta", "b1", "gam", "gB", "h-edu", "uni", "g1",
+    ]);
+    expect(plan).toMatchObject({ added: 3, edited: 0, removals: [] });
   });
 
-  it("never deletes master content: copy deletions are offered (unticked) as removals", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => {
-      d.sections[0].items[0].bullets.splice(2, 1); // a3 trimmed for this job
-      d.sections[0].items.splice(1, 1); // Beta trimmed for this job
-    });
+  it("never deletes master content: lines the copy deleted are offered as removals, unticked", () => {
+    const copy = withoutIds(copy0(), ["a3", "beta", "b1"]);
     const plan = planSaveAsMaster(copy, m1);
-    expect(texts(plan.merged)).toEqual(texts(m1));
-    expect(plan.removals.map((r) => `${r.kind}:${r.id}`)).toEqual(["bullet:a3", "item:beta"]);
-    expect(texts(applySaveAsMaster(copy, m1, new Set()))).toEqual(texts(m1));
-    const removed = applySaveAsMaster(copy, m1, new Set(["a3"]));
-    expect(order(removed, "acme")).toEqual(["a1", "a2"]);
-    expect(removed.sections[0].items.map((it) => it.id)).toEqual(["acme", "beta"]);
-    // A ticked id that isn't a removal candidate is ignored.
-    expect(texts(applySaveAsMaster(copy, m1, new Set(["g1"])))).toEqual(texts(m1));
+    expect(plan.removals).toEqual([
+      { kind: "bullet", id: "a3", ids: ["a3"], label: "Fixed bugs", where: "EXPERIENCE" },
+      { kind: "item", id: "beta", ids: ["beta", "b1"], label: "Beta — Boston", where: "EXPERIENCE" },
+    ]);
+    expect(lines(plan.merged)).toEqual(lines(m1));
+  });
+
+  it("removes the offered lines only when they are ticked", () => {
+    const copy = withoutIds(copy0(), ["a3", "beta", "b1"]);
+    expect(lines(applySaveAsMaster(copy, m1, new Set()))).toEqual(lines(m1));
+    expect(ids(applySaveAsMaster(copy, m1, new Set(["a3"])))).toEqual(ids(m1).filter((id) => id !== "a3"));
+    expect(ids(applySaveAsMaster(copy, m1, new Set(["beta"])))).toEqual(ids(m1).filter((id) => id !== "beta" && id !== "b1"));
   });
 
   it("returns the same master object when the copy adds nothing (so updateMaster skips the write)", () => {
-    const m1 = master1();
-    expect(applySaveAsMaster(cloneForJob(m1), m1, new Set())).toBe(m1);
+    expect(applySaveAsMaster(copy0(), m1, new Set())).toBe(m1);
   });
 
   it("does not resurrect master content deleted after the copy was made, unless the copy edited it", () => {
-    const m1 = master1();
-    const copy = cloneForJob(m1);
-    const m2 = edit(m1, (d) => d.sections[0].items.splice(1, 1)); // Beta removed from master later
-    expect(planSaveAsMaster(copy, m2).merged.sections[0].items.map((it) => it.id)).toEqual(["acme"]);
-    const edited = edit(copy, (d) => (d.sections[0].items[1].bullets[0].text = "Ran a 30-person study"));
-    expect(planSaveAsMaster(edited, m2).merged.sections[0].items.map((it) => it.id)).toEqual(["acme", "beta"]);
-  });
-
-  it("header, section and entry edits apply; entry details the baseline doesn't track take the copy's value", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => {
-      d.header.contact = "ann@new.com";
-      d.sections[1].title = "EDUCATION";
-      d.sections[0].items[0].subtitle = "Data Intern";
-    });
-    const m2 = edit(m1, (d) => (d.header.name = "Ann B. Lee"));
-    const merged = planSaveAsMaster(copy, m2).merged;
-    expect(merged.header).toEqual({ name: "Ann B. Lee", contact: "ann@new.com" });
-    expect(merged.sections[1].title).toBe("EDUCATION");
-    expect(merged.sections[0].items[0].subtitle).toBe("Data Intern");
-  });
-
-  it("both changed the same bullet: the copy's wording wins and the conflict is reported", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => (d.sections[0].items[0].bullets[0].text = "Copy"));
-    const m2 = edit(m1, (d) => (d.sections[0].items[0].bullets[0].text = "Master"));
-    const plan = planSaveAsMaster(copy, m2);
-    expect(texts(plan.merged).a1).toBe("Copy");
+    const copy = copy0();
+    const m2 = withoutIds(m1, ["beta", "b1"]);
+    expect(ids(planSaveAsMaster(copy, m2).merged)).not.toContain("beta");
+    const plan = planSaveAsMaster(withText(copy, "b1", "Ran a 30-person study"), m2);
+    expect(textOf(plan.merged, "b1")).toBe("Ran a 30-person study");
     expect(plan.conflicts).toHaveLength(1);
   });
 
-  it("baseFromBaseline rebuilds the master as the copy saw it", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => {
-      d.sections[0].items[0].bullets[0].text = "Edited";
-      d.sections[0].items[0].bullets.push({ id: "new", text: "Added here" });
-    });
-    const b = baseFromBaseline(copy, m1);
-    expect(texts(b)).toEqual({ a1: "Built a dashboard", a2: "Wrote tests", a3: "Fixed bugs", b1: "Ran a study", g1: "GPA 3.9" });
+  it("the copy's details the master doesn't change apply, and master edits elsewhere are kept", () => {
+    const copy = withText(copy0(), "acme-sub", "Intern\t2024");
+    const m2 = withText(m1, "ann", "Ann B. Lee");
+    const plan = planSaveAsMaster(copy, m2);
+    expect(textOf(plan.merged, "acme-sub")).toBe("Intern\t2024");
+    expect(textOf(plan.merged, "ann")).toBe("Ann B. Lee");
   });
 
-  it("baseFromBaseline gives the copy's marks only where the copy still has the base text", () => {
+  it("both changed the same paragraph: the copy's wording wins and the conflict is reported", () => {
+    const copy = withText(copy0(), "a1", "Copy");
+    const m2 = withText(m1, "a1", "Master");
+    const plan = planSaveAsMaster(copy, m2);
+    expect(textOf(plan.merged, "a1")).toBe("Copy");
+    expect(plan.conflicts).toEqual([{ where: 'Line "Copy"', local: "Copy", server: "Master" }]);
+  });
+});
+
+describe("baseFromBaseline and removeIds", () => {
+  it("baseFromBaseline rebuilds the master as the copy saw it, with the baseline's wording", () => {
     const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => {
-      d.sections[0].items[0].bullets[0].marks = [{ from: 0, to: 5, bold: true }]; // a1: text untouched
-      d.sections[0].items[0].bullets[1].text = "Edited";
-      d.sections[0].items[0].bullets[1].marks = [{ from: 0, to: 6, italic: true }]; // a2: text edited, marks must not follow
-      d.sections[0].items[0].bullets[1].para = { spaceBefore: 3 };
-    });
-    const b = baseFromBaseline(copy, m1);
-    const [a1, a2] = b.sections[0].items[0].bullets;
-    expect(a1).toEqual({ id: "a1", text: "Built a dashboard", marks: [{ from: 0, to: 5, bold: true }] });
-    expect(a2).toEqual({ id: "a2", text: "Wrote tests", para: { spaceBefore: 3 } });
+    const copy = withText(cloneForJob(m1), "a1", "Edited in copy");
+    const m2 = withText(m1, "a1", "Master moved on");
+    expect(lines(baseFromBaseline(cloneForJob(m1), m1))).toEqual(lines(m1));
+    expect(textOf(baseFromBaseline(copy, m2), "a1")).toBe("Built a dashboard");
   });
 
-  it("removeIds drops sections, entries and bullets by id", () => {
-    const r = removeIds(master1(), new Set(["edu", "beta", "a2"]));
-    expect(r.sections.map((s) => s.id)).toEqual(["exp"]);
-    expect(order(r, "acme")).toEqual(["a1", "a3"]);
+  it("removeIds drops paragraphs by id, leaving lists that still have items", () => {
+    const r = removeIds(master1(), new Set(["beta", "b1", "a2"]));
+    expect(ids(r)).toEqual(["ann", "contact", "h-exp", "acme", "acme-sub", "a1", "a3", "h-edu", "uni", "g1"]);
   });
 });
 
 describe("baselineAfterMasterSave", () => {
-  it("nothing reads as changed afterwards, but master-only additions are still offered", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => (d.sections[0].items[0].bullets[0].text = "Copy A"));
-    const m2 = edit(m1, (d) => d.sections[0].items[0].bullets.push({ id: "a4", text: "Mentored 2 interns" }));
+  const m1 = master1();
+
+  it("nothing reads as changed afterwards, but master-only additions are still left out of the baseline", () => {
+    const copy = withText(cloneForJob(m1), "a1", "Copy A");
+    const m2 = insertAfter(m1, "a3", [B("a4", "Mentored 2 interns")]);
     const newMaster = applySaveAsMaster(copy, m2, new Set());
-    const after = { ...copy, baseline: baselineAfterMasterSave(copy, newMaster) };
-    expect(after.baseline!.a1).toBe("Copy A");
-    const plan = planPull(after, newMaster);
-    expect(plan.additions.map((a) => a.id)).toEqual(["a4"]);
-    expect(plan.total).toBe(0);
+    const baseline = baselineAfterMasterSave(copy, newMaster);
+    for (const p of flattenDoc(resumeDoc(copy))) if (p.id in baseline) expect(baseline[p.id]).toBe(p.text);
+    expect(baseline).not.toHaveProperty("a4");
   });
 
-  it("a master rewording this copy never touched is still offered by Pull", () => {
-    const m1 = master1();
+  it("a master rewording this copy never touched keeps the old wording in the baseline (so Pull offers it)", () => {
     const copy = cloneForJob(m1);
-    const m2 = edit(m1, (d) => (d.sections[0].items[0].bullets[1].text = "Wrote 120 unit tests"));
-    const newMaster = applySaveAsMaster(copy, m2, new Set());
-    const after = { ...copy, baseline: baselineAfterMasterSave(copy, newMaster) };
-    expect(planPull(after, newMaster).bullets).toBe(1);
+    const m2 = withText(m1, "a2", "Wrote 120 unit tests");
+    expect(baselineAfterMasterSave(copy, applySaveAsMaster(copy, m2, new Set()))["a2"]).toBe("Wrote tests");
   });
 
-  it("content deleted here and kept on the master stays deleted here (not re-offered)", () => {
-    const m1 = master1();
-    const copy = edit(cloneForJob(m1), (d) => d.sections[0].items[0].bullets.splice(2, 1));
+  it("a line the copy kept and the master removed keeps its old entry, so it is still listed", () => {
+    const copy = cloneForJob(m1);
+    const m2 = withoutIds(m1, ["a2"]);
+    const baseline = baselineAfterMasterSave(copy, applySaveAsMaster(copy, m2, new Set()));
+    expect(baseline["a2"]).toBe("Wrote tests");
+  });
+
+  it("content deleted in the copy and kept on the master stays in the baseline (not re-offered)", () => {
+    const copy = withoutIds(cloneForJob(m1), ["a3"]);
     const newMaster = applySaveAsMaster(copy, m1, new Set());
-    const after = { ...copy, baseline: baselineAfterMasterSave(copy, newMaster) };
-    expect(planPull(after, newMaster).additions).toEqual([]);
-    expect(after.baseline).toEqual(makeBaseline(newMaster));
+    expect(baselineAfterMasterSave(copy, newMaster)).toHaveProperty("a3");
   });
 });
-
-// ---------- database helpers with a fake PostgREST ----------
-
-type Filters = { eq: Record<string, unknown>; is: Record<string, unknown> };
 
 function fakeDb(table: "resumes" | "jobs", row: Record<string, unknown>) {
   let n = 0;
@@ -517,45 +490,45 @@ describe("saveTailoredDocument", () => {
   it("writes conditionally on updated_at", async () => {
     const base = cloneForJob(master1());
     const db = fakeDb("resumes", { id: "r1", content: clone(base), updated_at: "t1" });
-    const mine = edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Mine"));
-    const out = await saveTailoredDocument(db.client, "r1", mine, { content: base, updatedAt: "t1" });
-    expect(out).toMatchObject({ kind: "saved", merged: false, updatedAt: "saved-1" });
-    expect(db.calls[0].f.eq).toEqual({ id: "r1", updated_at: "t1" });
+    const out = await saveTailoredDocument(db.client, "r1", withText(base, "a1", "Mine"), { content: base, updatedAt: "t1" });
+    expect(out).toMatchObject({ kind: "saved", merged: false });
+    expect(textOf(tailoredFromRow(db.row.content), "a1")).toBe("Mine");
   });
 
   it("a stale tab merges with the other device's save instead of overwriting it", async () => {
     const base = cloneForJob(master1());
     const db = fakeDb("resumes", { id: "r1", content: clone(base), updated_at: "t1" });
-    db.other({ content: edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Phone A")) });
-    const laptop = edit(base, (d) => (d.sections[0].items[0].bullets[1].text = "Laptop B"));
+    db.other({ content: withText(base, "a1", "Phone A") });
+    const laptop = withText(base, "a2", "Laptop B");
     const out = await saveTailoredDocument(db.client, "r1", laptop, { content: base, updatedAt: "t1" });
-    expect(out.kind).toBe("saved");
-    expect((out as { merged: boolean }).merged).toBe(true);
-    expect(texts(tailoredFromRow(db.row.content))).toMatchObject({ a1: "Phone A", a2: "Laptop B" });
-    expect(tailoredFromRow(db.row.content).baseline).toEqual(base.baseline);
+    expect(out).toMatchObject({ kind: "saved", merged: true });
+    expect([textOf(tailoredFromRow(db.row.content), "a1"), textOf(tailoredFromRow(db.row.content), "a2")]).toEqual(["Phone A", "Laptop B"]);
   });
 
-  it("stops without writing on a same-bullet conflict", async () => {
+  it("stops without writing on a same-paragraph conflict", async () => {
     const base = cloneForJob(master1());
     const db = fakeDb("resumes", { id: "r1", content: clone(base), updated_at: "t1" });
-    db.other({ content: edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Phone")) });
-    const out = await saveTailoredDocument(db.client, "r1", edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Laptop")), {
-      content: base,
-      updatedAt: "t1",
-    });
+    const phone = withText(base, "a1", "Phone");
+    db.other({ content: phone });
+    const out = await saveTailoredDocument(db.client, "r1", withText(base, "a1", "Laptop"), { content: base, updatedAt: "t1" });
     expect(out.kind).toBe("conflict");
-    expect(texts(tailoredFromRow(db.row.content)).a1).toBe("Phone");
+    expect(db.row.content).toEqual(phone);
+    expect(db.calls.map((c) => c.op)).toEqual(["update", "select"]);
   });
 
   it("retries when another save lands between the re-read and the merged write", async () => {
     const base = cloneForJob(master1());
     const db = fakeDb("resumes", { id: "r1", content: clone(base), updated_at: "t1" });
-    db.other({ content: edit(base, (d) => (d.sections[0].items[0].bullets[0].text = "Phone A")) });
-    db.hooks.push(() => {}, () => db.other({ content: edit(tailoredFromRow(db.row.content), (d) => (d.sections[1].items[0].bullets[0].text = "GPA 4.0")) }));
-    const laptop = edit(base, (d) => (d.sections[0].items[0].bullets[1].text = "Laptop B"));
+    db.other({ content: withText(base, "a1", "Phone A") });
+    db.hooks.push(
+      () => {},
+      () => db.other({ content: withText(tailoredFromRow(db.row.content), "g1", "GPA 4.0") }),
+    );
+    const laptop = withText(base, "a2", "Laptop B");
     const out = await saveTailoredDocument(db.client, "r1", laptop, { content: base, updatedAt: "t1" });
     expect(out.kind).toBe("saved");
-    expect(texts(tailoredFromRow(db.row.content))).toMatchObject({ a1: "Phone A", a2: "Laptop B", g1: "GPA 4.0" });
+    const stored = tailoredFromRow(db.row.content);
+    expect([textOf(stored, "a1"), textOf(stored, "a2"), textOf(stored, "g1")]).toEqual(["Phone A", "Laptop B", "GPA 4.0"]);
   });
 });
 

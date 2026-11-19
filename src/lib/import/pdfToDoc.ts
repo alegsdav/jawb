@@ -483,6 +483,9 @@ function docFromItems(items: Item[]): DocJSON {
 /**
  * The margins from the text's place on the page: left and right from the outermost text, top from the first
  * line's top, bottom from the blank space under the last line. Inches, rounded to 0.05 and kept within 0.2-1.5.
+ * Blank space on the right or bottom only bounds the margin from above (a short page, or lines that never reach
+ * the right edge), so those margins are capped at the left / top margin: resumes use symmetric margins, and a
+ * wider right margin than the original would rewrap every line.
  */
 function pageSetupOf(pages: PageText[]): PageSetup {
   const first = pages[0];
@@ -494,8 +497,8 @@ function pageSetupOf(pages: PageText[]): PageSetup {
   const inches = (pt: number) => Math.min(1.5, Math.max(0.2, Math.round((pt / PT_PER_INCH) * 20) / 20));
   return {
     marginTop: inches(top),
-    marginBottom: inches(bottom),
+    marginBottom: Math.min(inches(bottom), inches(top)),
     marginLeft: inches(left),
-    marginRight: inches(first.width - right),
+    marginRight: Math.min(inches(first.width - right), inches(left)),
   };
 }
