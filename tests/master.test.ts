@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { mergeDocs, mergeResumes, sameJson, saveMasterDocument, updateMaster } from "@/lib/master";
+import { isReplacement, keepMineVersion, mergeDocs, mergeResumes, sameJson, saveMasterDocument, updateMaster } from "@/lib/master";
 import { addFacts } from "@/lib/facts";
 import { buildDoc, flattenDoc, insertParagraphsAfter, paragraph, paragraphText, removeParagraphs, setParagraphText } from "@/lib/doc/model";
 import type { FlatEntry } from "@/lib/doc/model";
 import type { DocParagraph } from "@/lib/doc/types";
-import { resumeDoc, withDoc } from "@/lib/resume";
+import { reconcileIds, resumeDoc, withDoc } from "@/lib/resume";
 import type { Resume } from "@/lib/types";
 
 // ---------- fake Supabase client: one `resumes` row, conditional updates like PostgREST ----------
@@ -496,5 +496,138 @@ describe("mergeResumes: formatting", () => {
     const { merged, conflicts } = mergeResumes(base, local, server);
     expect(conflicts).toEqual([]);
     expect(flattenDoc(resumeDoc(merged)).find((p) => p.id === "b2")!.node.content?.[0]).toMatchObject({ marks: [{ type: "bold" }] });
+  });
+});
+
+// ---------- replacement (another tab re-imported or rebuilt the resume) ----------
+
+/** A different resume: new names and lines, but the same "Fixed bugs" bullet and EXPERIENCE heading as the base. */
+const otherResumeEntries = (): FlatEntry[] => [
+  L("x-name", "Grace Hopper"),
+  L("x-contact", "grace@example.org"),
+  L("x-h-exp", "EXPERIENCE"),
+  L("x-navy", "Navy\tArlington"),
+  L("x-navy-sub", "Programmer\t1944"),
+  B("x-1", "Compiled the first compiler"),
+  B("x-2", "Led a team of twelve"),
+  B("x-3", "Fixed bugs"),
+  L("x-h-edu", "EDUCATION"),
+  L("x-vassar", "Vassar"),
+  B("x-4", "Math degree"),
+];
+
+describe("isReplacement", () => {
+  it("a server copy that is the same document edited is not a replacement", () => {
+    expect(isReplacement(baseResume(), baseResume())).toBe(false);
+    expect(isReplacement(baseResume(), withText(baseResume(), "b2", "Wrote more tests"))).toBe(false);
+    // Three of thirteen paragraphs edited by the other side: still the same document.
+    const edited = ["b1", "b2", "b4"].reduce((r, id) => withText(r, id, `${id} edited`), baseResume());
+    expect(isReplacement(baseResume(), edited)).toBe(false);
+  });
+
+  it("a server copy that only reordered or added paragraphs is not a replacement", () => {
+    expect(isReplacement(baseResume(), resumeOf(reverseIn(baseEntries(), BULLETS)))).toBe(false);
+    expect(isReplacement(baseResume(), insertAfter(baseResume(), "b1", [B("new", "Added a bullet")]))).toBe(false);
+  });
+
+  it("a re-import is a replacement, even when reconcileIds reused a few ids", () => {
+    const reimported = reconcileIds(baseResume(), resumeOf(otherResumeEntries()));
+    // The matching bullet and heading keep their ids, so this is not caught by ids alone.
+    expect(ids(reimported)).toEqual(expect.arrayContaining(["h-exp", "b3"]));
+    expect(isReplacement(baseResume(), reimported)).toBe(true);
+  });
+
+  it("a completely different resume is a replacement", () => {
+    expect(isReplacement(baseResume(), resumeOf(otherResumeEntries()))).toBe(true);
+  });
+
+  it("threshold: below half of the base's paragraphs unchanged is a replacement, exactly half is not", () => {
+    const four = resumeOf([L("a", "A"), L("b", "B"), L("c", "C"), L("d", "D")]);
+    // Two of four kept (a, b with the same text): exactly half, not a replacement.
+    const half = resumeOf([L("a", "A"), L("b", "B"), L("c", "changed"), L("d", "changed")]);
+    expect(isReplacement(four, half)).toBe(false);
+    // One of four kept: below half.
+    const quarter = resumeOf([L("a", "A"), L("c", "changed"), L("d", "changed"), L("z", "new")]);
+    expect(isReplacement(four, quarter)).toBe(true);
+  });
+
+  it("a kept id with changed text, formatting or list placement does not count as kept", () => {
+    const four = resumeOf([L("a", "A"), L("b", "B"), L("c", "C"), L("d", "D")]);
+    const restyled = mapPara(four, "a", (n) => paragraph(paragraphText(n), { attrs: { id: "a" }, marks: [{ type: "bold" }] }));
+    const asBullet = resumeOf([B("a", "A"), L("b", "B"), L("c", "C"), L("d", "D")]);
+    // Three of four still match (b, c, d): not a replacement.
+    expect(isReplacement(four, restyled)).toBe(false);
+    // a is a bullet now: 3 of 4 still kept.
+    expect(isReplacement(four, asBullet)).toBe(false);
+    const twoOfFourKept = resumeOf([L("a", "A"), L("b", "B"), B("c", "C"), B("d", "D")]);
+    expect(isReplacement(four, twoOfFourKept)).toBe(false);
+    const oneOfFourKept = resumeOf([L("a", "A"), B("b", "B"), B("c", "C"), B("d", "D")]);
+    expect(isReplacement(four, oneOfFourKept)).toBe(true);
+  });
+
+  it("a blank master that another tab filled in is a replacement, not a blend", () => {
+    expect(isReplacement(resumeOf([]), baseResume())).toBe(true);
+  });
+});
+
+describe("keepMineVersion", () => {
+  it("against a replacement, keeps my version exactly, with none of theirs", () => {
+    const base = baseResume();
+    const local = withText(base, "b2", "Wrote tests for the importer");
+    const server = resumeOf(otherResumeEntries());
+    expect(keepMineVersion(base, local, server)).toEqual(local);
+  });
+
+  it("against a same-document edit, is the three-way merge with mine winning", () => {
+    const base = baseResume();
+    const local = withText(base, "b2", "Mine");
+    const server = withText(withText(base, "b2", "Theirs"), "b4", "Their other change");
+    expect(keepMineVersion(base, local, server)).toEqual(mergeResumes(base, local, server).merged);
+    expect(lines(keepMineVersion(base, local, server))).toContain("Their other change");
+  });
+});
+
+describe("saveMasterDocument: replaced resume", () => {
+  it("my edit against a replaced master: a replacement conflict, nothing written", async () => {
+    const base = baseResume();
+    const db = fakeDb({ content: base, updated_at: "t0" });
+    const theirs = resumeOf(otherResumeEntries());
+    db.otherSaves(theirs);
+    const before = db.row!.updated_at;
+    const out = await saveMasterDocument(db.client, "m1", withText(base, "b2", "Mine"), { content: base, updatedAt: "t0" });
+    expect(out).toEqual({ kind: "conflict", server: theirs, serverUpdatedAt: before, conflicts: [], replaced: true });
+    expect(db.row!.content).toEqual(theirs);
+  });
+
+  it("Keep mine after a replacement saves exactly my version over theirs", async () => {
+    const base = baseResume();
+    const db = fakeDb({ content: base, updated_at: "t0" });
+    db.otherSaves(resumeOf(otherResumeEntries()));
+    const local = withText(base, "b2", "Mine");
+    const first = await saveMasterDocument(db.client, "m1", local, { content: base, updatedAt: "t0" });
+    if (first.kind !== "conflict") throw new Error("expected a conflict");
+    const resolved = keepMineVersion(base, local, first.server);
+    const out = await saveMasterDocument(db.client, "m1", resolved, { content: first.server, updatedAt: first.serverUpdatedAt });
+    expect(out.kind).toBe("saved");
+    expect(db.row!.content).toEqual(local);
+  });
+
+  it("I have no edits of my own: the replacement is taken as is, no conflict", async () => {
+    const base = baseResume();
+    const db = fakeDb({ content: base, updated_at: "t0" });
+    const theirs = resumeOf(otherResumeEntries());
+    db.otherSaves(theirs);
+    const out = await saveMasterDocument(db.client, "m1", base, { content: base, updatedAt: "t0" });
+    expect(out).toMatchObject({ kind: "saved", content: theirs, merged: true });
+  });
+
+  it("the same document edited by another tab (few paragraphs changed) still merges as before", async () => {
+    const base = baseResume();
+    const db = fakeDb({ content: base, updated_at: "t0" });
+    db.otherSaves(withText(base, "b4", "Their change"));
+    const out = await saveMasterDocument(db.client, "m1", withText(base, "b2", "Mine"), { content: base, updatedAt: "t0" });
+    expect(out).toMatchObject({ kind: "saved", merged: true });
+    expect(textOf(db.row!.content, "b2")).toBe("Mine");
+    expect(textOf(db.row!.content, "b4")).toBe("Their change");
   });
 });

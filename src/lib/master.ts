@@ -189,6 +189,38 @@ export function mergeDocs(base: DocJSON, local: DocJSON, server: DocJSON): { doc
 }
 
 /**
+ * Below this share of the base's paragraphs surviving into the server copy, the server holds a different resume
+ * (replaced), not the same one edited.
+ */
+export const REPLACED_BELOW = 0.5;
+
+/**
+ * Did `server` replace `base` (another tab re-imported or rebuilt the resume), rather than edit it? A paragraph
+ * survives when its id is still there with the same text, formatting and list placement. Measured on those, not
+ * on ids alone: a re-import reuses the ids of similar paragraphs (reconcileIds), so a few shared ids are not
+ * evidence of the same document. Merging two different resumes line by line blends them, so this is checked first.
+ */
+export function isReplacement(base: Resume, server: Resume): boolean {
+  const B = flattenDoc(resumeDoc(base));
+  if (B.length === 0) return false;
+  const S = byId(flattenDoc(resumeDoc(server)));
+  const kept = B.filter((p) => {
+    const s = S.get(p.id);
+    return s !== undefined && sameParagraph(p, s);
+  }).length;
+  return kept / B.length < REPLACED_BELOW;
+}
+
+/**
+ * "Keep mine" on a conflict: the version to save over the server's. When the server holds a replacement, this
+ * page's version whole (a line merge would blend the two resumes); otherwise the three-way merge, mine winning.
+ */
+export function keepMineVersion(base: Resume, local: Resume, server: Resume): Resume {
+  if (!sameJson(local, server) && !sameJson(local, base) && isReplacement(base, server)) return local;
+  return mergeResumes(base, local, server).merged;
+}
+
+/**
  * Three-way merge of the master resume. `base` is what this page last loaded or saved, `local` is what's on screen,
  * `server` is the row as it is now. The document is merged paragraph by paragraph (mergeDocs); the page setup is
  * local if it changed relative to base, else the server's. Where both sides changed the same paragraph differently,
@@ -221,7 +253,10 @@ export type MasterSaveResult =
       /** The row as it is now, and its `updated_at`. */
       server: Resume;
       serverUpdatedAt: string;
+      /** Line-level clashes. Empty when `replaced`, where no line list applies. */
       conflicts: MergeConflict[];
+      /** The row is a different resume (another tab re-imported or rebuilt it), not an edit of ours. */
+      replaced: boolean;
     };
 
 /**
@@ -262,8 +297,13 @@ export async function saveMasterDocument(
     if (!row) throw new Error("Your master resume was deleted elsewhere. Reload the page.");
     const s = row as Omit<Row, "id">;
     const server = normalizeResume(s.content);
+    // Our edits against a replaced resume: stop rather than blend the two. No edits of ours, or the same copy on
+    // both sides, is not a conflict.
+    if (!sameJson(content, baseContent) && !sameJson(content, server) && isReplacement(baseContent, server)) {
+      return { kind: "conflict", server, serverUpdatedAt: s.updated_at, conflicts: [], replaced: true };
+    }
     const { merged, conflicts } = mergeResumes(baseContent, content, server);
-    if (conflicts.length) return { kind: "conflict", server, serverUpdatedAt: s.updated_at, conflicts };
+    if (conflicts.length) return { kind: "conflict", server, serverUpdatedAt: s.updated_at, conflicts, replaced: false };
     // Nothing of ours left to add: the server already has it.
     if (sameJson(merged, server)) return { kind: "saved", content: server, updatedAt: s.updated_at, merged: !sameJson(server, local) };
     // Next round (if someone saves again before our write): base = this server copy, local = our merge.

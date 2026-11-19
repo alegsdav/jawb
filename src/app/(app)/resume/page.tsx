@@ -6,7 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { emptyResume, isEmptyResume, normalizeResume, reconcileIds, uid } from "@/lib/resume";
 import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
-import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
+import { keepMineVersion, mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import { PAGE_DEFAULTS } from "@/lib/doc/types";
 import type { Fact, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
@@ -85,7 +85,8 @@ async function loadOrCreateMaster(supabase: SupabaseClient): Promise<MasterRow> 
   return again.data as MasterRow;
 }
 
-type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConflict[] };
+/** `replaced`: the server holds a different resume, so `conflicts` is empty and the banner offers whole versions. */
+type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConflict[]; replaced: boolean };
 
 /**
  * The review of the last file import: the master as it was before the import (Undo puts it back), the facts the
@@ -99,40 +100,61 @@ function ConflictBanner({
 }: { conflict: Conflict; busy: boolean; onReload: () => void; onKeepMine: () => void }) {
   const shown = conflict.conflicts.slice(0, 3);
   const more = conflict.conflicts.length - shown.length;
+  const replaced = conflict.replaced;
   return (
     <div
       role="alert"
       className="fixed z-40 inset-x-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] sm:inset-x-auto sm:right-4 lg:bottom-4 sm:max-w-md rounded-xl border border-bad/50 bg-surface p-4 text-sm shadow-lg space-y-2 max-h-[70dvh] overflow-y-auto"
     >
-      <p className="font-semibold text-bad">Your master resume was changed elsewhere</p>
-      <p className="text-muted">
-        Another tab or device changed the same {conflict.conflicts.length === 1 ? "line" : "lines"}. Nothing here is saved
-        until you choose.
+      <p className="font-semibold text-bad">
+        {replaced ? "Your master resume was replaced elsewhere" : "Your master resume was changed elsewhere"}
       </p>
-      <ul className="space-y-1">
-        {shown.map((c, i) => (
-          <li key={i} className="break-words">
-            <span className="font-medium">{c.where}</span>
-            {(c.local || c.server) && (
-              <span className="block text-xs text-muted">
-                Yours: “{c.local || "(empty)"}” · Theirs: “{c.server || "(empty)"}”
-              </span>
-            )}
-          </li>
-        ))}
-        {more > 0 && <li className="text-xs text-muted">and {more} more</li>}
-      </ul>
+      {replaced ? (
+        <p className="text-muted">
+          Another tab or device replaced the whole resume (for example with a new import). Nothing here is saved until
+          you choose.
+        </p>
+      ) : (
+        <>
+          <p className="text-muted">
+            Another tab or device changed the same {conflict.conflicts.length === 1 ? "line" : "lines"}. Nothing here is saved
+            until you choose.
+          </p>
+          <ul className="space-y-1">
+            {shown.map((c, i) => (
+              <li key={i} className="break-words">
+                <span className="font-medium">{c.where}</span>
+                {(c.local || c.server) && (
+                  <span className="block text-xs text-muted">
+                    Yours: “{c.local || "(empty)"}” · Theirs: “{c.server || "(empty)"}”
+                  </span>
+                )}
+              </li>
+            ))}
+            {more > 0 && <li className="text-xs text-muted">and {more} more</li>}
+          </ul>
+        </>
+      )}
       <div className="flex flex-wrap gap-2 pt-1">
         <button type="button" className="btn min-h-10 sm:min-h-0 flex-1 sm:flex-none" disabled={busy} onClick={onReload}>
           Reload theirs
         </button>
         <button type="button" className="btn btn-primary min-h-10 sm:min-h-0 flex-1 sm:flex-none" disabled={busy} onClick={onKeepMine}>
-          Keep mine (overwrite)
+          {replaced ? "Keep mine (replace theirs)" : "Keep mine (overwrite)"}
         </button>
       </div>
       <p className="text-xs text-muted">
-        Reload theirs shows their version and drops your unsaved edits here. Keep mine saves your version of these lines
-        over theirs and keeps their other changes.
+        {replaced ? (
+          <>
+            Reload theirs shows their version and drops your unsaved edits here. Keep mine puts this version back over
+            theirs, whole; their version is not kept.
+          </>
+        ) : (
+          <>
+            Reload theirs shows their version and drops your unsaved edits here. Keep mine saves your version of these
+            lines over theirs and keeps their other changes.
+          </>
+        )}
       </p>
     </div>
   );
@@ -239,7 +261,7 @@ export default function MasterResumePage() {
       if (!sameJson(r, base.current.content)) {
         const out = await saveMasterDocument(supabase, id, r, base.current);
         if (out.kind === "conflict") {
-          setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts });
+          setConflict({ server: out.server, serverUpdatedAt: out.serverUpdatedAt, conflicts: out.conflicts, replaced: out.replaced });
           return;
         }
         base.current = { content: out.content, updatedAt: out.updatedAt };
@@ -283,13 +305,14 @@ export default function MasterResumePage() {
   }
 
   /**
-   * Conflict choice: keep this page's version of the conflicting lines (their other changes are kept
-   * too) and save it over theirs. Rebasing on the server copy makes the next save write exactly that.
+   * Conflict choice: keep this page's version and save it over theirs. For a line conflict that keeps their other
+   * changes too; for a replaced resume it is this page's version whole. Rebasing on the server copy makes the next
+   * save write exactly that.
    */
   function keepMine() {
     const c = conflictRef.current;
     if (!c || !base.current || !resume) return;
-    const { merged } = mergeResumes(base.current.content, resume, c.server);
+    const merged = keepMineVersion(base.current.content, resume, c.server);
     base.current = { content: c.server, updatedAt: c.serverUpdatedAt };
     setConflict(null);
     setResume({ ...merged }); // a new value, so autosave runs
