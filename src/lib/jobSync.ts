@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Analysis, Job, Resume } from "./types";
 import type { DocParagraph, FlatParagraph } from "./doc/types";
 import { buildDoc, flattenDoc, removeParagraphs, setParagraphText } from "./doc/model";
-import { isHeading } from "./doc/outline";
+import { headingPredicate } from "./doc/outline";
 import {
   MASTER_RETRIES, mergeDocs, mergeResumes, placeInto, sameJson, sameParagraph, type MergeConflict, type MergeResult,
 } from "./master";
@@ -334,6 +334,8 @@ export function baseFromBaseline(copy: Resume, master: Resume): Resume {
  * `where` is the heading above the run.
  */
 function masterRemovals(masterParas: FlatParagraph[], ids: Set<string>): MasterRemoval[] {
+  // The same heading rule as the master's outline (its own heading style), so a removed entry is not called a section.
+  const isHeading = headingPredicate(buildDoc(masterParas));
   const out: MasterRemoval[] = [];
   let section = "";
   let run: MasterRemoval | undefined;

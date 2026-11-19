@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { outlineFromDoc, outlineGroups, isHeading, splitLine } from "@/lib/doc/outline";
+import { outlineFromDoc, outlineGroups, isHeading, headingPredicate, splitLine } from "@/lib/doc/outline";
 import { flattenDoc, paragraph } from "@/lib/doc/model";
 import type { DocBlock, DocJSON, DocMark, FlatParagraph } from "@/lib/doc/types";
 
@@ -7,6 +7,19 @@ const p = (id: string, text: string, opts: { bold?: boolean; border?: boolean } 
   const marks: DocMark[] | undefined = opts.bold ? [{ type: "bold" }] : undefined;
   const node = paragraph(text, { marks, attrs: { id, ...(opts.border ? { borderBottom: true } : {}) } });
   return node;
+};
+/** A paragraph set in a font size in points (the body is 11pt, unmarked), with optional bold, italic, rule, centring. */
+const sized = (
+  id: string,
+  text: string,
+  pt: number,
+  opts: { bold?: boolean; italic?: boolean; border?: boolean; center?: boolean } = {},
+): DocBlock => {
+  const marks: DocMark[] = [{ type: "textStyle", attrs: { fontSize: `${pt}pt` } }];
+  if (opts.bold) marks.push({ type: "bold" });
+  if (opts.italic) marks.push({ type: "italic" });
+  const attrs = { id, ...(opts.border ? { borderBottom: true } : {}), ...(opts.center ? { textAlign: "center" as const } : {}) };
+  return paragraph(text, { marks, attrs });
 };
 /** Consecutive bullets as one list. */
 const bullets = (...items: [string, string][]): DocBlock => ({
@@ -179,6 +192,92 @@ describe("outlineFromDoc: other shapes", () => {
     const out = outlineFromDoc(doc(p("e0", ""), p("n", "Ada"), p("e1", "   "), p("h", "SKILLS", { border: true }), p("e2", "")));
     expect(out.header.name).toBe("Ada");
     expect(out.sections.map((s) => s.id)).toEqual(["h"]);
+  });
+});
+
+/** A resume whose headings are 12pt bold with a rule, with one finished entry (Acme) and the given blocks after it. */
+function styledResume(...rest: DocBlock[]): DocJSON {
+  return doc(
+    p("n", "Ada Lovelace"),
+    p("c", "ada@example.com"),
+    sized("edu", "EDUCATION", 12, { bold: true, border: true }),
+    p("uni", "Uni\tCambridge"),
+    sized("exp", "EXPERIENCE", 12, { bold: true, border: true }),
+    p("acme", "Acme Corp\tBoston, MA"),
+    p("acme-role", "Engineer\t2020"),
+    bullets(["acme-b1", "Built a dashboard"]),
+    ...rest,
+  );
+}
+
+describe("heading style from the document", () => {
+  it("keeps a bold entry title in entry style as an entry, not a heading, even when it is a known heading name", () => {
+    const out = outlineFromDoc(
+      styledResume(
+        sized("vol", "Volunteer", 10, { bold: true }),
+        sized("vol-role", "Coordinator", 11, { italic: true }),
+        bullets(["vol-b1", "Ran a food drive"]),
+      ),
+    );
+    expect(out.sections.map((s) => s.id)).toEqual(["edu", "exp"]);
+    expect(out.sections[1].items.map((it) => it.id)).toEqual(["acme", "vol"]);
+    expect(out.sections[1].items[1]).toMatchObject({
+      title: "Volunteer",
+      subtitle: "Coordinator",
+      bullets: [{ id: "vol-b1", text: "Ran a food drive" }],
+    });
+  });
+
+  it("reads a line set like the headings as a heading", () => {
+    const out = outlineFromDoc(
+      styledResume(sized("vol", "Volunteer", 12, { bold: true, border: true }), p("vol-role", "Coordinator\t2021 - 2023")),
+    );
+    expect(out.sections.map((s) => [s.id, s.title])).toEqual([
+      ["edu", "EDUCATION"],
+      ["exp", "EXPERIENCE"],
+      ["vol", "Volunteer"],
+    ]);
+  });
+
+  it("uses the capitals style of ALL CAPS headings and keeps a bold caps entry as an entry", () => {
+    const out = outlineFromDoc(
+      doc(
+        p("n", "Ada Lovelace"),
+        p("c", "ada@example.com"),
+        sized("edu", "EDUCATION", 12, { bold: true }),
+        p("uni", "Uni\tCambridge"),
+        sized("exp", "EXPERIENCE", 12, { bold: true }),
+        sized("acme", "ACME CORP", 10, { bold: true }),
+        bullets(["acme-b1", "Built a dashboard"]),
+      ),
+    );
+    expect(out.sections.map((s) => s.id)).toEqual(["edu", "exp"]);
+    expect(out.sections[1].items[0]).toMatchObject({ id: "acme", title: "ACME CORP", bullets: [{ id: "acme-b1", text: "Built a dashboard" }] });
+  });
+
+  it("keeps a plain known heading next to styled headings", () => {
+    const out = outlineFromDoc(styledResume(p("sk", "Skills"), p("sk-line", "Python, SQL")));
+    expect(out.sections.map((s) => s.id)).toEqual(["edu", "exp", "sk"]);
+  });
+
+  it("never reads a line with a tab as a heading, even in heading style", () => {
+    const heading = headingPredicate(styledResume());
+    const all = flattenDoc(styledResume());
+    expect(heading(all.find((x) => x.id === "edu")!)).toBe(true);
+    expect(heading(flattenDoc(doc(sized("t", "EXPERIENCE\tBoston", 12, { bold: true, border: true })))[0])).toBe(false);
+  });
+
+  it("keeps the older rules when the document shows no heading style", () => {
+    const out = outlineFromDoc(
+      doc(
+        p("n", "Ada Lovelace"),
+        p("c", "ada@example.com"),
+        p("w", "WORK HISTORY"),
+        p("acme", "Acme Corp\tBoston"),
+        bullets(["acme-b1", "Built a dashboard"]),
+      ),
+    );
+    expect(out.sections.map((s) => [s.id, s.title])).toEqual([["w", "WORK HISTORY"]]);
   });
 });
 

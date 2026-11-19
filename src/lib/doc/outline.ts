@@ -5,9 +5,14 @@
  *   - Empty paragraphs are ignored for structure.
  *   - name: the first non-empty paragraph, if it is not a list item or a heading (else "").
  *   - contact: up to 3 following non-list, non-heading paragraphs, joined with " | ".
- *   - heading: not in a list, 1-40 chars, no tab, not ending in ".", and one of:
+ *   - heading: not in a list, 1-40 chars, no tab, not ending in ".", and, when the document shows its own heading
+ *     style (see headingPredicate), one set in that style. Without one, the older rules, one of:
  *       (a) it has borderBottom; (b) its letters are all uppercase and there are at least 3;
  *       (c) every text run is bold and its text is a known heading; (d) its text is a known heading of at most 3 words.
+ *   - The heading style is read from the confident headings: a line with a rule, or a known heading name set in
+ *     capitals or larger than the body. A bold or ALL CAPS line is a heading only when set in one of those styles
+ *     (rule, caps, bold, larger, alignment), so a bold "Volunteer" in entry style is an entry and "Volunteer" set like
+ *     the headings is one. Other lines keep the rules above, so a plain heading next to styled ones is not lost.
  *   - Each heading starts a section. Lines before the first heading form an untitled section (title "").
  *   - A bullet (list paragraph) is a Bullet of the current item (a new item when there is none).
  *   - Any other paragraph starts an item. The item's first line is split at its first tab (left: title,
@@ -16,7 +21,7 @@
  *     The second line is only taken while the item has no bullets yet.
  */
 import { flattenDoc } from "./model";
-import type { DocJSON, DocText, FlatParagraph } from "./types";
+import { DEFAULT_FONT_SIZE_PT, type DocJSON, type DocText, type FlatParagraph } from "./types";
 import type { Bullet, Item, Section } from "../types";
 
 export type Outline = { header: { name: string; contact: string }; sections: Section[] };
@@ -44,19 +49,31 @@ function isAllCaps(text: string): boolean {
   return letters.length >= 3 && letters.join("") === letters.join("").toUpperCase();
 }
 
-/** A paragraph's text runs (non-empty text nodes) with their bold flag. */
-function runsOf(p: FlatParagraph): { bold: boolean }[] {
+/** A paragraph's text runs (non-empty text nodes): bold flag, font size in points (default when unmarked), length. */
+function runsOf(p: FlatParagraph): { bold: boolean; size: number; length: number }[] {
   return (p.node.content ?? [])
     .filter((n): n is DocText => n.type === "text" && n.text.length > 0)
-    .map((n) => ({ bold: (n.marks ?? []).some((m) => m.type === "bold") }));
+    .map((n) => {
+      const style = (n.marks ?? []).find((m) => m.type === "textStyle");
+      const pt = style?.type === "textStyle" ? parseFloat(style.attrs.fontSize ?? "") : NaN;
+      return {
+        bold: (n.marks ?? []).some((m) => m.type === "bold"),
+        size: Number.isFinite(pt) ? pt : DEFAULT_FONT_SIZE_PT,
+        length: n.text.length,
+      };
+    });
 }
 
-/** The paragraph is a section heading under the rules in the file comment. */
-export function isHeading(p: FlatParagraph): boolean {
-  if (isList(p)) return false;
+/** A line that can be a heading at all: not in a list, 1-40 chars, no tab, not a sentence. */
+function isCandidate(p: FlatParagraph): boolean {
   const t = p.text.trim();
-  if (t.length < 1 || t.length > 40) return false;
-  if (p.text.includes("\t") || t.endsWith(".")) return false;
+  return !isList(p) && t.length >= 1 && t.length <= 40 && !p.text.includes("\t") && !t.endsWith(".");
+}
+
+/** The paragraph is a section heading under the rules in the file comment, without looking at the rest of the document. */
+export function isHeading(p: FlatParagraph): boolean {
+  if (!isCandidate(p)) return false;
+  const t = p.text.trim();
   if (p.node.attrs?.borderBottom === true) return true;
   if (isAllCaps(t)) return true;
   const key = headingKey(t);
@@ -64,6 +81,62 @@ export function isHeading(p: FlatParagraph): boolean {
   const runs = runsOf(p);
   if (runs.length && runs.every((r) => r.bold)) return true;
   return t.split(/\s+/).length <= 3;
+}
+
+/** The body text size: the size that most characters are set in. */
+function bodySize(all: FlatParagraph[]): number {
+  const chars = new Map<number, number>();
+  for (const r of all.flatMap((p) => runsOf(p))) chars.set(r.size, (chars.get(r.size) ?? 0) + r.length);
+  let body = DEFAULT_FONT_SIZE_PT;
+  let most = 0;
+  for (const [size, n] of chars) if (n > most) [body, most] = [size, n];
+  return body;
+}
+
+/** The visual features that tell a heading from an entry line. */
+type Style = { rule: boolean; caps: boolean; bold: boolean; big: boolean; align: string };
+
+function styleOf(p: FlatParagraph, body: number): Style {
+  const runs = runsOf(p);
+  return {
+    rule: p.node.attrs?.borderBottom === true,
+    caps: isAllCaps(p.text.trim()),
+    bold: runs.length > 0 && runs.every((r) => r.bold),
+    big: runs.some((r) => r.size > body),
+    align: p.node.attrs?.textAlign ?? "left",
+  };
+}
+
+const styleKey = (s: Style) => [s.rule, s.caps, s.bold, s.big, s.align].join("|");
+
+/**
+ * A line that shows a heading style by itself: a rule, or a known heading name set in capitals or a larger size.
+ * A known name in bold alone does not count, since a bold entry title looks the same.
+ */
+function isConfidentHeading(p: FlatParagraph, body: number): boolean {
+  if (!isCandidate(p)) return false;
+  const s = styleOf(p, body);
+  return s.rule || (KNOWN_HEADINGS.has(headingKey(p.text)) && (s.caps || s.big));
+}
+
+/**
+ * The heading test for one document. A rule always makes a heading. When the document has confident headings, a bold
+ * or ALL CAPS line is a heading only if it is set in one of their styles: bold and caps are how entry titles look
+ * too, so the document's own look decides ("Volunteer" in entry style stays an entry whatever its name). Every other
+ * line, and every line in a document with no confident heading, gets the context-free isHeading rules.
+ */
+export function headingPredicate(doc: DocJSON): (p: FlatParagraph) => boolean {
+  const all = flattenDoc(doc);
+  const body = bodySize(all);
+  const styles = new Set(all.filter((p) => isConfidentHeading(p, body)).map((p) => styleKey(styleOf(p, body))));
+  if (styles.size === 0) return isHeading;
+  return (p) => {
+    if (!isCandidate(p)) return false;
+    const s = styleOf(p, body);
+    if (s.rule || styles.has(styleKey(s))) return true;
+    if (s.bold || s.caps) return false;
+    return isHeading(p);
+  };
 }
 
 /** Splits a line at its first tab: left part and right part, both trimmed. */
@@ -77,15 +150,15 @@ export function splitLine(text: string): { left: string; right: string; tabbed: 
 const isLabelLine = (text: string) => text.includes(": ");
 
 /** The name and contact lines at the top, and how many non-empty paragraphs they used. */
-function readHeader(lines: FlatParagraph[]): { name: string; contact: string; used: number } {
+function readHeader(lines: FlatParagraph[], isHead: (p: FlatParagraph) => boolean): { name: string; contact: string; used: number } {
   let i = 0;
   let name = "";
-  if (lines.length && !isList(lines[0]) && !isHeading(lines[0])) {
+  if (lines.length && !isList(lines[0]) && !isHead(lines[0])) {
     name = lines[0].text.trim();
     i = 1;
   }
   const contact: string[] = [];
-  while (i < lines.length && contact.length < 3 && !isList(lines[i]) && !isHeading(lines[i])) {
+  while (i < lines.length && contact.length < 3 && !isList(lines[i]) && !isHead(lines[i])) {
     contact.push(lines[i].text.trim());
     i++;
   }
@@ -102,7 +175,8 @@ type Owner = { section?: string; item?: string };
 function analyze(doc: DocJSON): { outline: Outline; groups: Map<string, string[]> } {
   const all = flattenDoc(doc);
   const lines = all.filter((p) => !isBlank(p));
-  const head = readHeader(lines);
+  const isHead = headingPredicate(doc);
+  const head = readHeader(lines, isHead);
   const groups = new Map<string, string[]>([["header", []]]);
   const place = (id: string, owner: Owner) => {
     const keys = owner.item !== undefined || owner.section !== undefined
@@ -151,7 +225,7 @@ function analyze(doc: DocJSON): { outline: Outline; groups: Map<string, string[]
       const bullet: Bullet = { id: p.id, text: p.text.trim() };
       item.bullets.push(bullet);
       entryOpen = false;
-    } else if (isHeading(p)) {
+    } else if (isHead(p)) {
       section = { id: p.id, title: p.text.trim(), items: [] };
       sections.push(section);
       item = undefined;
