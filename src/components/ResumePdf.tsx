@@ -80,8 +80,7 @@ function lineNode(line: RenderLine, p: RenderParagraph, key: number): ReactEleme
 }
 
 /**
- * A hanging bullet or number, as wide as the indent before the text. A default marker is left-aligned in its box; one
- * with a custom indent is right-aligned, `gapPt` before the text. "◦" and "▪" are drawn as shapes (a hollow and a solid
+ * A hanging bullet or number, as wide as the indent before the text. Markers are right-aligned, `gapPt` before the text. "◦" and "▪" are drawn as shapes (a hollow and a solid
  * dot), centred on the x-height of the first line, at the same side of the box.
  */
 function markerNode(marker: RenderMarker, width: number, lineHeight: number): ReactElement {

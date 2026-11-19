@@ -4,7 +4,7 @@ import { ResumePdf } from "@/components/ResumePdf";
 import { listIndentDecorations, docFromJSON } from "@/lib/doc/extensions";
 import { buildDoc, cleanListAttrs, flattenDoc, normalizeDoc, paragraph, type FlatEntry } from "@/lib/doc/model";
 import type { DocJSON, DocList, DocListItem } from "@/lib/doc/types";
-import { LIST_INDENT_PT, orderedMarker, renderBlocks } from "@/lib/docRender";
+import { DEFAULT_MARKER_GAP_PT, LIST_INDENT_PT, orderedMarker, renderBlocks } from "@/lib/docRender";
 import { emptyResume, withDoc } from "@/lib/resume";
 
 const item = (text: string, ...nested: DocList[]): DocListItem => ({
@@ -121,8 +121,9 @@ describe("renderBlocks: list text positions and markers", () => {
   it("keeps the default indents and markers of a list with no attrs", () => {
     const blocks = renderBlocks(docOf(bullets(undefined, item("top", bullets(undefined, item("deep"))))));
     expect(blocks.map((b) => b.textIndentPt)).toEqual([LIST_INDENT_PT, 2 * LIST_INDENT_PT]);
-    expect(blocks[0].marker).toMatchObject({ text: "•", x: 0, align: "left", gapPt: 0 });
-    expect(blocks[1].marker).toMatchObject({ text: "◦", x: LIST_INDENT_PT, align: "left" });
+    // A default marker sits in its level's indent, right-aligned just before the text (the editor's outside marker).
+    expect(blocks[0].marker).toMatchObject({ text: "•", x: 0, align: "right", gapPt: DEFAULT_MARKER_GAP_PT });
+    expect(blocks[1].marker).toMatchObject({ text: "◦", x: LIST_INDENT_PT, align: "right", gapPt: DEFAULT_MARKER_GAP_PT });
   });
 
   it("starts the text at indentPt and right-aligns the marker before it", () => {

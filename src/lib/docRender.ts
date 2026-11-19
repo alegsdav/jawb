@@ -19,10 +19,15 @@ import {
   type PageSetup,
 } from "./doc/types";
 
-/** Left indent of each list level when the list has no indentPt: a quarter inch. */
-export const LIST_INDENT_PT = 18;
+/** Left indent of each list level when the list has no indentPt: half an inch, as the editor's list padding. */
+export const LIST_INDENT_PT = 36;
 /** The gap between a right-aligned (custom indent) marker and the text after it. */
 const MARKER_GAP_PT = 5;
+/**
+ * The gap between a default marker and its text: the space a browser's outside marker leaves before the text, so the
+ * bullet sits where it does in the editor.
+ */
+export const DEFAULT_MARKER_GAP_PT = 3;
 const BULLETS = ["•", "◦", "▪"];
 
 export type RunStyle = { bold: boolean; italic: boolean; underline: boolean; sizePt: number; fontFamily: string };
@@ -34,9 +39,9 @@ export type Run = { text: string; style: RunStyle; href?: string; tab?: true };
  */
 export type RenderLine = { left: Run[]; right: Run[] | null };
 /**
- * A bullet or number in the indent, from x (points from the left margin) to the paragraph's text. A default marker is
- * left-aligned at the start of its level's indent; one in a list with its own indentPt is right-aligned, `gapPt` before
- * the text, and starts at the content's left edge.
+ * A bullet or number in the indent, from x (points from the left margin) to the paragraph's text. Both kinds are
+ * right-aligned, `gapPt` before the text: a default one fills its level's indent (from the enclosing text), and one in a
+ * list with its own indentPt starts at the content's left edge.
  */
 export type RenderMarker = { text: string; x: number; style: RunStyle; align: "left" | "right"; gapPt: number };
 export type RenderParagraph = {
@@ -249,6 +254,8 @@ type ListPos = {
   bullet: boolean;
   number: number;
   textPt: number;
+  /** Where the enclosing list's text starts (0 at the top level): a default marker fills the indent from there. */
+  parentPt: number;
   custom: boolean;
 };
 
@@ -257,13 +264,13 @@ function markerText(list: ListPos): string {
 }
 
 /**
- * The marker of a list item's first paragraph: right-aligned at the content's edge for a custom indent, else hung in
- * its level's indent.
+ * The marker of a list item's first paragraph: right-aligned at the content's edge for a custom indent, else right-
+ * aligned in its level's indent, just before the text as the editor's outside marker is.
  */
 function markerOf(list: ListPos, style: RunStyle): RenderMarker {
   const text = markerText(list);
   if (list.custom) return { text, x: 0, style, align: "right", gapPt: MARKER_GAP_PT };
-  return { text, x: Math.max(0, list.textPt - LIST_INDENT_PT), style, align: "left", gapPt: 0 };
+  return { text, x: list.parentPt, style, align: "right", gapPt: DEFAULT_MARKER_GAP_PT };
 }
 
 /**
@@ -318,8 +325,8 @@ export function linesWithMarker(p: RenderParagraph, glyph: (text: string) => str
 
 /**
  * A list's items in order, nested lists one level deeper. Only an item's first paragraph carries the marker. A list
- * with an indentPt starts its text there; one without starts it LIST_INDENT_PT past its parent's text (so a list
- * nested in a default list sits where it always did). `parentPt` is where the enclosing list's text starts.
+ * with an indentPt starts its text there; one without starts it LIST_INDENT_PT past its parent's text, as the editor's
+ * padding does. `parentPt` is where the enclosing list's text starts.
  */
 function walkList(list: DocList, depth: number, parentPt: number, out: RenderParagraph[]): void {
   const own = list.attrs?.indentPt;
@@ -331,7 +338,7 @@ function walkList(list: DocList, depth: number, parentPt: number, out: RenderPar
   list.content.forEach((item, i) => {
     item.content.forEach((child, j) => {
       if (child.type === "paragraph") {
-        const pos: ListPos = { depth, ordered, type, bullet: j === 0, number: start + i, textPt, custom };
+        const pos: ListPos = { depth, ordered, type, bullet: j === 0, number: start + i, textPt, parentPt, custom };
         out.push(paragraphBlock(child, pos));
       } else {
         walkList(child, depth + 1, textPt, out);

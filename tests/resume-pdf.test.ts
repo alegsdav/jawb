@@ -98,11 +98,11 @@ describe("renderBlocks (the shared layout)", () => {
   });
 
   it("hangs bullet markers per level and indents nested text", () => {
-    expect(nested.marker).toMatchObject({ text: "◦", x: 18 });
-    expect(nested.textIndentPt).toBe(36);
+    expect(nested.marker).toMatchObject({ text: "◦", x: 36 });
+    expect(nested.textIndentPt).toBe(72);
     const wrote = at("Wrote the first");
     expect(wrote.marker).toMatchObject({ text: "•", x: 0 });
-    expect(wrote.textIndentPt).toBe(18);
+    expect(wrote.textIndentPt).toBe(36);
   });
 
   it("numbers an ordered list", () => {
@@ -238,7 +238,7 @@ describe("line height follows each paragraph's own size", () => {
     const buffer = await renderToBuffer(ResumePdf({ resume: withDoc(emptyResume(), d) }));
     const task = getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false });
     const page = await (await task.promise).getPage(1);
-    const items = (await page.getTextContent()).items.filter((it) => "str" in it && it.str.startsWith(prefix));
+    const items = (await page.getTextContent()).items.filter((it) => "str" in it && it.str.includes(prefix));
     await task.destroy();
     return items.map((it) => (it as { transform: number[] }).transform[5]);
   }
@@ -261,12 +261,12 @@ describe("line height follows each paragraph's own size", () => {
 });
 
 describe("unsized text keeps 11pt beside a big name, and list items keep their spacing", () => {
-  /** The text items of page 1 that start with `prefix`: their text, font size (pt) and baseline (pt from the page bottom). */
+  /** The text items of page 1 that contain `prefix` (a bullet and its text can be one item): their text, font size (pt) and baseline (pt from the page bottom). */
   async function glyphsOf(d: DocJSON, prefixes: string[]) {
     const buffer = await renderToBuffer(ResumePdf({ resume: withDoc(emptyResume(), d) }));
     const task = getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false });
     const page = await (await task.promise).getPage(1);
-    const items = (await page.getTextContent()).items.filter((it) => "str" in it && prefixes.some((p) => it.str.startsWith(p)));
+    const items = (await page.getTextContent()).items.filter((it) => "str" in it && prefixes.some((p) => it.str.includes(p)));
     await task.destroy();
     return items.map((it) => {
       const t = (it as { transform: number[] }).transform;

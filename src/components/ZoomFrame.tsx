@@ -2,21 +2,15 @@
 
 import type React from "react";
 import { useLayoutEffect, useRef, useState } from "react";
-
-/** Letter page width at 96dpi; matches `.doc-page` max-width and the PDF. */
-export const PAGE_W = 816;
-/** Below this column width the page reflows for phones (see globals.css), so it is never scaled. */
-const REFLOW_W = 640;
+import { PAGE_W, pageScale, reflowsAt } from "@/lib/pageZoom";
 
 /**
- * Scales its children visually (the page only, not the UI around it). When scaled, the inner element is
- * laid out at the page's own width and scaled from its top-left corner; the outer box takes the scaled
- * size and centres itself, so a page wider than the column scrolls horizontally instead of being clipped.
- * At zoom 1 nothing is transformed or sized.
+ * Lays out the page at its own width (PAGE_W) and scales it visually from its top-left corner when `scale` is not 1.
+ * The outer box takes the scaled size and centres itself, so a page wider than the column scrolls horizontally instead
+ * of being clipped or re-wrapped. A `reflow` page (phones) takes the column's width instead and is never scaled.
  */
-export function ZoomFrame({ zoom, children }: { zoom: number; children: React.ReactNode }) {
-  const scale = zoom > 0 ? zoom : 1;
-  const scaled = scale !== 1;
+export function ZoomFrame({ scale, reflow = false, children }: { scale: number; reflow?: boolean; children: React.ReactNode }) {
+  const scaled = !reflow && scale !== 1;
   const innerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number | null>(null);
 
@@ -34,7 +28,8 @@ export function ZoomFrame({ zoom, children }: { zoom: number; children: React.Re
     return () => ro.disconnect();
   }, [scale, scaled]);
 
-  if (!scaled) return <div className="zoom-frame">{children}</div>;
+  if (reflow) return <div className="zoom-frame">{children}</div>;
+  if (!scaled) return <div className="zoom-frame mx-auto" style={{ width: PAGE_W }}>{children}</div>;
   return (
     <div className="relative mx-auto" style={{ width: PAGE_W * scale, height: height ?? undefined }}>
       <div
@@ -49,8 +44,8 @@ export function ZoomFrame({ zoom, children }: { zoom: number; children: React.Re
 }
 
 /**
- * The Docs-style grey canvas the page sits on. It is the document's scroll area, works out the "Fit"
- * zoom (0) from its own width, and never scales on phone widths (the page reflows there instead).
+ * The Docs-style grey canvas the page sits on. It is the document's scroll area (it scrolls sideways when the page is
+ * wider than the window), works out the "Fit" zoom (0) from its own width, and reflows on phone widths instead.
  */
 export function EditorCanvas({
   zoom, children, className = "", footer,
@@ -63,21 +58,31 @@ export function EditorCanvas({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const [viewport, setViewport] = useState(0);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => setWidth(el.clientWidth);
+    const measure = () => {
+      setWidth(el.clientWidth);
+      setViewport(window.innerWidth);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, []);
-  const reflow = width > 0 && width < REFLOW_W;
-  const fit = width ? Math.min(1, (width - 48) / PAGE_W) : 1;
-  const effective = reflow ? 1 : zoom === 0 ? fit : zoom;
+  // Phones are decided by the window, like the phone CSS (max-width: 639px): a laptop whose side panels leave a
+  // narrow column still gets the real page, scaled to fit.
+  const reflow = reflowsAt(viewport);
   return (
-    <div ref={ref} className={`bg-[#f1f3f4] ${className}`}>
-      <ZoomFrame zoom={effective}>{children}</ZoomFrame>
+    <div ref={ref} className={`overflow-x-auto bg-[#f1f3f4] ${className}`}>
+      <ZoomFrame scale={reflow ? 1 : pageScale(zoom, width)} reflow={reflow}>
+        {children}
+      </ZoomFrame>
       {footer}
     </div>
   );

@@ -211,7 +211,7 @@ const zoomKey = (key: string) => `doc-zoom:${key}`;
 
 /** Document zoom (1 = 100%, 0 = Fit), remembered per document key in localStorage. */
 export function useZoom(key: string): [number, (z: number) => void] {
-  const [zoom, setZoomState] = useState(1);
+  const [zoom, setZoomState] = useState(0);
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(zoomKey(key));
