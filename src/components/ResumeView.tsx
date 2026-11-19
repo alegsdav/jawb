@@ -7,6 +7,7 @@ import {
 } from "@/lib/docRender";
 import { resumeDoc } from "@/lib/resume";
 import type { Resume } from "@/lib/types";
+import { EditorCanvas } from "./ZoomFrame";
 
 const pt = (n: number) => `${n}pt`;
 const RULE_BORDER = "0.75pt solid #000";
@@ -80,13 +81,14 @@ function LineView({ line }: { line: RenderLine }) {
 /**
  * Sizes every earlier-tab gap under `root` from the measured widths of the parts before it. The same stop rule as the
  * editor (tabGapsPx), so a line reads the same here as in the editor. Parts are measured in order, so each gap's
- * position is known before it is sized.
+ * position is known before it is sized. offsetWidth (not getBoundingClientRect) is the unscaled layout width: the
+ * page is zoomed by a CSS transform (ZoomFrame), so the stops stay the same at every zoom and need no re-measure.
  */
 function layoutTabStops(root: HTMLElement): void {
   for (const line of Array.from(root.querySelectorAll<HTMLElement>("[data-tab-line]"))) {
     const gaps = Array.from(line.querySelectorAll<HTMLElement>("[data-tab-gap]"));
     for (const g of gaps) g.style.width = "0px";
-    const widths = Array.from(line.querySelectorAll<HTMLElement>("[data-tab-part]")).map((p) => p.getBoundingClientRect().width);
+    const widths = Array.from(line.querySelectorAll<HTMLElement>("[data-tab-part]")).map((p) => p.offsetWidth);
     tabGapsPx(widths).forEach((w, i) => {
       gaps[i].style.width = `${w}px`;
     });
@@ -132,7 +134,10 @@ function ParagraphView({ p }: { p: RenderParagraph }) {
   );
 }
 
-/** The resume as a read-only page, laid out like the PDF (see src/lib/docRender.ts). */
+/**
+ * The resume as a read-only page, laid out like the PDF (see src/lib/docRender.ts). The page is 8.5in wide and scaled
+ * to fit its container (Fit), the same as the editor, so the text never re-wraps; only phone widths reflow it.
+ */
 export function ResumeView({ value }: { value: Resume }) {
   const page = pageOf(value);
   const blocks = renderBlocks(resumeDoc(value));
@@ -150,22 +155,28 @@ export function ResumeView({ value }: { value: Resume }) {
   }, [value]);
   return (
     <div className="doc-canvas">
-      <div className="doc-page doc-readonly">
+      {/* Fit (zoom 0) and no grey backdrop: the page sits on the card or dialog that shows it. */}
+      <EditorCanvas zoom={0} plain>
+        {/* The margins go on the page box, as in the editor (on the content they'd add to .doc-page's own padding). */}
         <div
-          ref={contentRef}
-          className="doc-content"
-          style={{
-            padding: `${page.marginTop}in ${page.marginRight}in ${page.marginBottom}in ${page.marginLeft}in`,
-            fontFamily: cssFontStack(DEFAULT_FONT_FAMILY),
-            fontSize: pt(DEFAULT_FONT_SIZE_PT),
-            lineHeight: DEFAULT_LINE_HEIGHT,
-          }}
+          className="doc-page doc-readonly"
+          style={{ padding: `${page.marginTop}in ${page.marginRight}in ${page.marginBottom}in ${page.marginLeft}in` }}
         >
-          {blocks.map((p, i) => (
-            <ParagraphView key={i} p={p} />
-          ))}
+          <div
+            ref={contentRef}
+            className="doc-content"
+            style={{
+              fontFamily: cssFontStack(DEFAULT_FONT_FAMILY),
+              fontSize: pt(DEFAULT_FONT_SIZE_PT),
+              lineHeight: DEFAULT_LINE_HEIGHT,
+            }}
+          >
+            {blocks.map((p, i) => (
+              <ParagraphView key={i} p={p} />
+            ))}
+          </div>
         </div>
-      </div>
+      </EditorCanvas>
     </div>
   );
 }

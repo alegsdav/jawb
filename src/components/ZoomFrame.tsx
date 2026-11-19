@@ -46,15 +46,18 @@ export function ZoomFrame({ scale, reflow = false, children }: { scale: number; 
 /**
  * The Docs-style grey canvas the page sits on. It is the document's scroll area (it scrolls sideways when the page is
  * wider than the window), works out the "Fit" zoom (0) from its own width, and reflows on phone widths instead.
+ * `plain` drops the grey for a page shown inside a card or dialog, where the surrounding surface is the backdrop.
  */
 export function EditorCanvas({
-  zoom, children, className = "", footer,
+  zoom, children, className = "", footer, plain = false,
 }: {
   zoom: number;
   children: React.ReactNode;
   className?: string;
   /** Rendered after the page, outside the zoom (e.g. nothing, or notes). */
   footer?: React.ReactNode;
+  /** No grey backdrop. Default false (the editor's grey). */
+  plain?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -79,7 +82,7 @@ export function EditorCanvas({
   // narrow column still gets the real page, scaled to fit.
   const reflow = reflowsAt(viewport);
   return (
-    <div ref={ref} className={`overflow-x-auto bg-[#f1f3f4] ${className}`}>
+    <div ref={ref} className={`overflow-x-auto ${plain ? "" : "bg-[#f1f3f4]"} ${className}`}>
       <ZoomFrame scale={reflow ? 1 : pageScale(zoom, width)} reflow={reflow}>
         {children}
       </ZoomFrame>
