@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { docEquals, setParagraphText, flattenDoc } from "@/lib/doc/model";
+import { buildDoc, docEquals, flattenDoc, paragraph, setParagraphText, type FlatEntry } from "@/lib/doc/model";
 import {
   bulletTextMap,
   countChangedBullets,
@@ -338,13 +338,44 @@ describe("reconcileIds", () => {
     expect(reconcileIds({ ...prev, facts: undefined }, next)).not.toHaveProperty("facts");
   });
 
-  it("keeps the version and the new header", () => {
+  it("returns a version 4 resume with the new header", () => {
     const prev = master();
     const next = reparsed(prev);
     next.header.contact = "ada@new.example.com";
     const out = reconcileIds(prev, next);
-    expect(out.version).toBe(2);
+    expect(out.version).toBe(RESUME_VERSION);
     expect(out.header.contact).toBe("ada@new.example.com");
+  });
+
+  it("on documents: a reworded paragraph keeps its id, a new one gets a fresh id, a deleted one is gone", () => {
+    const line = (id: string, text: string, list = false): FlatEntry => ({
+      node: paragraph(text, { attrs: { id } }),
+      listType: list ? "bulletList" : null,
+      depth: list ? 1 : 0,
+      bullet: list,
+    });
+    const prevDoc = buildDoc([
+      line("h", "EXPERIENCE"),
+      line("p1", "Built a dashboard for analysts", true),
+      line("p2", "Wrote unit tests for the parser", true),
+      line("p3", "Ran the weekly report", true),
+    ]);
+    const nextDoc = buildDoc([
+      line("n0", "EXPERIENCE"),
+      line("n1", "Built a dashboard for analysts used daily", true),
+      line("n2", "Presented a design review to the VP", true),
+      line("n3", "Wrote unit tests for the parser", true),
+    ]);
+    const prev = withDoc({ header: { name: "", contact: "" }, sections: [] }, prevDoc);
+    const next = withDoc({ header: { name: "", contact: "" }, sections: [] }, nextDoc);
+    const out = flattenDoc(resumeDoc(reconcileIds(prev, next))).map((p) => p.id);
+    expect(out.slice(0, 1)).toEqual(["h"]);
+    expect(out[1]).toBe("p1");
+    expect(out[2]).not.toBe("p2");
+    expect(out[2]).not.toBe("p3");
+    expect(out[3]).toBe("p2");
+    expect(out).not.toContain("p3");
+    expect(new Set(out).size).toBe(out.length);
   });
 
   it("does not mutate its inputs", () => {
