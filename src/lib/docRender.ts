@@ -23,8 +23,11 @@ const BULLETS = ["•", "◦", "▪"];
 
 export type RunStyle = { bold: boolean; italic: boolean; underline: boolean; sizePt: number; fontFamily: string };
 /** A run of text; href is set when a link mark covers it (http(s) or mailto). */
-export type Run = { text: string; style: RunStyle; href?: string };
-/** One visual line (a hard break starts a new one). With a tab, `right` is the text after the last tab. */
+export type Run = { text: string; style: RunStyle; href?: string; tab?: true };
+/**
+ * One visual line (a hard break starts a new one). `left` holds `tab` runs for the earlier tabs (0.5in stops); with a
+ * tab, `right` is the text after the last tab, right-aligned.
+ */
 export type RenderLine = { left: Run[]; right: Run[] | null };
 /** A bullet or number at x (points from the left margin); the paragraph's text starts at textIndentPt. */
 export type RenderMarker = { text: string; x: number; style: RunStyle };
@@ -79,10 +82,64 @@ function hrefOfMarks(marks: DocMark[] | undefined): string | undefined {
   return raw ? normalizeHref(raw) ?? undefined : undefined;
 }
 
+/** Page geometry in px at 96dpi, as the editor draws it. */
+export const PX_PER_IN = 96;
+export const PAGE_HEIGHT_IN = 11;
+
+/** Default tab stops, every 0.5in (at 96dpi). */
+export const TAB_STOP_PX = 48;
+/** A tab that would advance less than this skips to the following stop, so the gap is never a sliver. */
+const MIN_TAB_PX = 8;
+
+/**
+ * The width of an earlier tab (an indent) that starts `offset` px from the line's content left: it ends on the next
+ * 0.5in stop. The one stop rule shared by the editor, the read-only page and the PDF.
+ */
+export function tabGapPx(offset: number): number {
+  const into = ((offset % TAB_STOP_PX) + TAB_STOP_PX) % TAB_STOP_PX;
+  const w = TAB_STOP_PX - into;
+  return Math.round(w < MIN_TAB_PX ? w + TAB_STOP_PX : w);
+}
+
+/**
+ * The gaps of a line given the widths (px) of the parts between its earlier tabs: part i ends at the running x, and
+ * the tab after it advances to the next stop. Returns one gap per tab (parts.length - 1).
+ */
+export function tabGapsPx(partWidths: number[]): number[] {
+  const gaps: number[] = [];
+  let x = 0;
+  for (const w of partWidths.slice(0, -1)) {
+    x += w;
+    const gap = tabGapPx(x);
+    gaps.push(gap);
+    x += gap;
+  }
+  return gaps;
+}
+
+/** A line's runs split at its earlier tabs: the parts before, between and after them (one part without tabs). */
+export function splitAtTabs(runs: Run[]): Run[][] {
+  const parts: Run[][] = [[]];
+  for (const r of runs) {
+    if (r.tab) parts.push([]);
+    else parts[parts.length - 1].push(r);
+  }
+  return parts;
+}
+
+/**
+ * The top of the first line that does not fit on page 1, or null when all lines fit. A line that straddles the
+ * bottom of the text area moves to page 2 whole, so its top is where page 2 starts. `pageBottom` is the bottom
+ * edge of the text area in px from the page top.
+ */
+export function firstLineOnNextPage(lines: { top: number; bottom: number }[], pageBottom: number): number | null {
+  const over = lines.filter((l) => l.bottom > pageBottom);
+  return over.length ? Math.min(...over.map((l) => l.top)) : null;
+}
+
 /**
  * Lines of a paragraph: split at hard breaks, and each line at its LAST tab, which right-aligns what follows (the
- * editor's rule, see layoutTabs). An earlier tab is an indent; here it is drawn as a fixed gap (four spaces),
- * an approximation of the editor's 0.5in stops.
+ * editor's rule, see layoutTabs). An earlier tab is a `tab` run: an indent to the next 0.5in stop (tabGapPx).
  */
 function linesOf(content: DocInline[] | undefined): RenderLine[] {
   const groups: DocInline[][] = [[]];
@@ -97,7 +154,7 @@ function linesOf(content: DocInline[] | undefined): RenderLine[] {
     items.forEach((n, i) => {
       const into = last >= 0 && i > last ? right : left;
       if (n.type === "tab") {
-        if (i !== last) into.push({ text: "    ", style: styleOf(undefined) });
+        if (i !== last) into.push({ text: "", style: styleOf(undefined), tab: true });
       } else if (n.type === "text" && n.text) {
         const run: Run = { text: n.text, style: styleOf(n.marks) };
         const href = hrefOfMarks(n.marks);

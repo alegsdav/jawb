@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { docExtensions, docFromJSON, docSchema, findIdFixes, isValidDoc, newParagraphId } from "@/lib/doc/extensions";
+import { EditorState } from "@tiptap/pm/state";
+import { docExtensions, docFromJSON, docSchema, findIdFixes, isLinkable, isValidDoc, linkTargetOf, newParagraphId } from "@/lib/doc/extensions";
 import { cssFontStack, isSerifFamily } from "@/lib/doc/fonts";
 import { docEquals, normalizeDoc } from "@/lib/doc/model";
 import type { DocJSON } from "@/lib/doc/types";
@@ -245,3 +246,63 @@ describe("links", () => {
   });
 });
 
+
+describe("autolink: which typed or pasted text links", () => {
+  it.each([
+    ["https://example.com", true],
+    ["http://example.com/jobs", true],
+    ["www.example.com", true],
+    ["WWW.Example.com", true],
+    ["jane@example.com", true],
+    ["example.com", false],
+    ["Node.js", false],
+  ])("%s -> linkable %s", (text, linkable) => {
+    expect(isLinkable(text)).toBe(linkable);
+  });
+
+  it("gives a www. address the https:// href and keeps an email as mailto:", () => {
+    expect(linkTargetOf("www.example.com")).toBe("https://www.example.com");
+    expect(linkTargetOf("jane@example.com")).toBe("mailto:jane@example.com");
+    expect(linkTargetOf("example.com")).toBeNull();
+    expect(linkTargetOf("javascript:alert(1)")).toBeNull();
+  });
+
+  /** Types `text` one character at a time into an empty paragraph, as a user does, and returns the link hrefs. */
+  function typedHrefs(text: string): string[] {
+    const link = docExtensions.find((e) => e.name === "link")!;
+    const plugins = (link.config as unknown as { addProseMirrorPlugins: (this: unknown) => unknown[] }).addProseMirrorPlugins.call({
+      type: docSchema.marks.link,
+      options: link.options,
+      editor: { isEditable: true },
+    });
+    let state = EditorState.create({
+      schema: docSchema,
+      doc: docSchema.nodes.doc.create(null, [docSchema.nodes.paragraph.create()]),
+      plugins: plugins as never[],
+    });
+    let pos = 1;
+    for (const ch of text) {
+      state = state.apply(state.tr.insertText(ch, pos));
+      pos += ch.length;
+    }
+    const hrefs: string[] = [];
+    state.doc.descendants((n) => {
+      for (const m of n.marks) if (m.type.name === "link") hrefs.push(String(m.attrs.href));
+    });
+    return hrefs;
+  }
+
+  it("links a typed www. address to https://www. when a space follows it", () => {
+    expect(typedHrefs("www.example.com ")).toEqual(["https://www.example.com"]);
+    expect(typedHrefs("see www.example.com ")).toEqual(["https://www.example.com"]);
+  });
+
+  it("links a typed https address as it is", () => {
+    expect(typedHrefs("https://example.com ")).toEqual(["https://example.com"]);
+  });
+
+  it("does not link a bare domain", () => {
+    expect(typedHrefs("example.com ")).toEqual([]);
+    expect(typedHrefs("Node.js ")).toEqual([]);
+  });
+});

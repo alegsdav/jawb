@@ -11,6 +11,7 @@ import type { Resume } from "@/lib/types";
 import { PAGE_DEFAULTS, type DocJSON, type PageSetup } from "@/lib/doc/types";
 import { docEquals, normalizeDoc, normalizeHref } from "@/lib/doc/model";
 import { docExtensions } from "@/lib/doc/extensions";
+import { PAGE_HEIGHT_IN, PX_PER_IN, firstLineOnNextPage } from "@/lib/docRender";
 import { resumeDoc, withDoc } from "@/lib/resume";
 import { bulletInfo } from "./docDecorations";
 import { AiHighlights, paragraphPlainText, sameOptions, type HighlightOptions } from "./aiHighlights";
@@ -58,11 +59,33 @@ type Props = {
 /** Transaction meta: the change came from the page (an accepted rewrite, a pull, an import), not from typing. */
 const EXTERNAL = "docExternal";
 
-/** Page geometry in px (1in = 96px). US Letter height. */
-const PX_PER_IN = 96;
-const PAGE_H = 11 * PX_PER_IN;
 /** One line of 11pt text at 1.15 line height, in px. */
 const LINE = 16.87;
+
+/**
+ * The line boxes of the editor's paragraphs, as tops and bottoms in unscaled px from the page's top. A text rect is
+ * the glyphs' box, so it is centred in the line box the line-height gives (the PDF lays out line boxes). Measured on
+ * the screen and divided by the zoom, so the result does not depend on it.
+ */
+function lineBoxesOf(content: HTMLElement, pageEl: HTMLElement): { top: number; bottom: number }[] {
+  const page = pageEl.getBoundingClientRect();
+  const scale = pageEl.offsetWidth > 0 ? page.width / pageEl.offsetWidth : 1;
+  const boxes: { top: number; bottom: number }[] = [];
+  for (const p of Array.from(content.querySelectorAll<HTMLElement>("p"))) {
+    const style = getComputedStyle(p);
+    const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.15;
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const rects = Array.from(range.getClientRects()).filter((r) => r.height > 0);
+    for (const r of rects.length ? rects : [p.getBoundingClientRect()]) {
+      if (r.height <= 0) continue;
+      const textTop = (r.top - page.top) / scale;
+      const top = textTop - (lineHeight - r.height / scale) / 2;
+      boxes.push({ top, bottom: top + lineHeight });
+    }
+  }
+  return boxes;
+}
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -227,6 +250,9 @@ export function ResumeDocument({
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  /** Where page 2 starts, in px from the page's top (null when the resume fits on page 1). */
+  const [page2Top, setPage2Top] = useState<number | null>(null);
   /** The latest resume: the page's value, or the last one this editor emitted. */
   const valueRef = useRef<Resume>(value);
   /** The last resume this editor emitted or was given; a value prop equal to it is our own echo. */
@@ -386,13 +412,39 @@ export function ResumeDocument({
     const ro = new ResizeObserver(() => {
       if (el.offsetWidth < 600) return; // reflowed phone layout isn't page-accurate
       const page = valueRef.current.page ?? PAGE_DEFAULTS;
-      const usable = PAGE_H - (page.marginTop + page.marginBottom) * PX_PER_IN;
+      const usable = PAGE_HEIGHT_IN * PX_PER_IN - (page.marginTop + page.marginBottom) * PX_PER_IN;
       const h = el.scrollHeight;
       onMeasure({ pages: Math.max(1, Math.ceil(h / usable)), overflowLines: Math.max(0, Math.ceil((h - usable) / LINE)) });
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, [onMeasure]);
+
+  // Page 2 starts at the first line that does not fit above the bottom margin (the PDF moves that line whole). The
+  // line boxes change with every edit, with a resize or a font load, so the marker is measured again on each.
+  const marginBottom = value.page?.marginBottom ?? PAGE_DEFAULTS.marginBottom;
+  useEffect(() => {
+    const content = contentRef.current;
+    const pageEl = pageRef.current;
+    if (!editor || !content || !pageEl) return;
+    const measure = () => {
+      if (content.offsetWidth < 600) return setPage2Top(null); // the phone layout reflows: no page breaks there
+      const pageBottom = (PAGE_HEIGHT_IN - marginBottom) * PX_PER_IN;
+      setPage2Top(firstLineOnNextPage(lineBoxesOf(content, pageEl), pageBottom));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(content);
+    editor.on("update", measure);
+    const fonts = document.fonts;
+    fonts?.addEventListener?.("loadingdone", measure);
+    void fonts?.ready.then(measure);
+    return () => {
+      ro.disconnect();
+      editor.off("update", measure);
+      fonts?.removeEventListener?.("loadingdone", measure);
+    };
+  }, [editor, marginBottom]);
 
   // The document commands, for the toolbar, the menus and the shortcuts.
   useEffect(() => {
@@ -488,11 +540,13 @@ export function ResumeDocument({
           if (e.key === "Escape" && !e.defaultPrevented && !e.nativeEvent.isComposing) setSelActive(false);
         }}
       >
-        <div className="doc-page" style={{ padding: `${page.marginTop}in ${page.marginRight}in ${page.marginBottom}in ${page.marginLeft}in` }}>
-          {/* Page-break guide (desktop only) */}
-          <div aria-hidden className="doc-pagebreak" style={{ top: PAGE_H - page.marginBottom * PX_PER_IN }}>
-            <span>Page 2</span>
-          </div>
+        <div ref={pageRef} className="doc-page" style={{ padding: `${page.marginTop}in ${page.marginRight}in ${page.marginBottom}in ${page.marginLeft}in` }}>
+          {/* Page-break guide (desktop only): the line where page 2 begins */}
+          {page2Top !== null && (
+            <div aria-hidden className="doc-pagebreak" style={{ top: page2Top }}>
+              <span>Page 2</span>
+            </div>
+          )}
           <div ref={contentRef} className="doc-content">
             <EditorContent editor={editor} />
           </div>

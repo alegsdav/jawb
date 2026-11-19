@@ -2,13 +2,16 @@ import { Document, Link, Page, Text, View } from "@react-pdf/renderer";
 import { createElement as h, type ReactElement } from "react";
 import { pdfFontFor, registerPdfFonts } from "@/lib/pdfFonts";
 import {
-  hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, type Run, type RenderLine, type RenderMarker,
-  type RenderParagraph, type RunStyle,
+  PX_PER_IN, hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, splitAtTabs, tabGapsPx, type Run, type RenderLine,
+  type RenderMarker, type RenderParagraph, type RunStyle,
 } from "@/lib/docRender";
+import { textWidthPt } from "@/lib/pdfTextWidths";
 import { resumeDoc } from "@/lib/resume";
 import type { Resume } from "@/lib/types";
 
 const POINTS_PER_INCH = 72;
+/** A px at 96dpi is three quarters of a point: the stop math works in px, the PDF in pt. */
+const PT_PER_PX = POINTS_PER_INCH / PX_PER_IN;
 const RULE = { borderBottomWidth: 0.75, borderBottomColor: "#000" };
 /** Carlito has no "◦" or "▪": those markers are drawn as shapes, and inline ones use an en dash. */
 const SHAPE_MARKERS = new Set(["◦", "▪"]);
@@ -39,14 +42,39 @@ function runNodes(runs: Run[], lineHeight: number): ReactElement[] {
   });
 }
 
+/** The width of a run of text in px, from the PDF face's metrics (see pdfTextWidths). */
+function runsWidthPx(runs: Run[]): number {
+  const pt = runs.reduce(
+    (sum, r) => sum + textWidthPt(r.text, r.style.fontFamily, r.style.bold, r.style.italic, r.style.sizePt),
+    0,
+  );
+  return pt / PT_PER_PX;
+}
+
+/**
+ * The left side of a line. Without earlier tabs it is one text. With them, each part is drawn where the editor puts
+ * it: the parts sit in a row, and a fixed-width gap after each part carries it to the next 0.5in stop (tabGapsPx),
+ * so no line is laid out by guesswork.
+ */
+function leftNode(runs: Run[], p: RenderParagraph): ReactElement {
+  const parts = splitAtTabs(runs);
+  if (parts.length === 1) return h(Text, { style: { textAlign: p.align, flexShrink: 1 } }, ...runNodes(runs, p.lineHeight));
+  const gaps = tabGapsPx(parts.map(runsWidthPx));
+  const children: ReactElement[] = [];
+  parts.forEach((part, i) => {
+    if (part.length) children.push(h(Text, { key: `t${i}` }, ...runNodes(part, p.lineHeight)));
+    if (i < gaps.length) children.push(h(View, { key: `g${i}`, style: { width: gaps[i] * PT_PER_PX } }));
+  });
+  return h(View, { style: { flexDirection: "row", flexShrink: 1 } }, ...children);
+}
+
 /** A line: its text, or the text before a tab at the left and after it at the right margin. */
 function lineNode(line: RenderLine, p: RenderParagraph, key: number): ReactElement {
-  const textStyle = { textAlign: p.align };
-  if (!line.right) return h(Text, { key, style: textStyle }, ...runNodes(line.left, p.lineHeight));
+  if (!line.right) return h(View, { key }, leftNode(line.left, p));
   return h(
     View,
     { key, style: { flexDirection: "row", justifyContent: "space-between" } },
-    h(Text, { style: { ...textStyle, flexShrink: 1 } }, ...runNodes(line.left, p.lineHeight)),
+    leftNode(line.left, p),
     h(Text, { style: { textAlign: "right" } }, ...runNodes(line.right, p.lineHeight)),
   );
 }

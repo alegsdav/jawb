@@ -2,7 +2,8 @@ import { createElement as h } from "react";
 import { describe, expect, it } from "vitest";
 import { Document, Page, Text, View, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import { flattenDoc } from "@/lib/doc/model";
-import { TAB_STOP_PX, indentWidth, tabWidth } from "@/lib/doc/extensions";
+import { tabWidth } from "@/lib/doc/extensions";
+import { TAB_STOP_PX, firstLineOnNextPage, splitAtTabs, tabGapPx, tabGapsPx, type Run, type RunStyle } from "@/lib/docRender";
 import { pdfToDoc } from "@/lib/import/pdfToDoc";
 import type { DocInline, DocJSON } from "@/lib/doc/types";
 
@@ -26,14 +27,58 @@ describe("tabWidth", () => {
   });
 });
 
-describe("indentWidth", () => {
+describe("tabGapPx (the shared 0.5in stop rule)", () => {
   it("ends on the next 0.5in stop", () => {
-    expect(indentWidth(0)).toBe(TAB_STOP_PX);
-    expect(indentWidth(10)).toBe(TAB_STOP_PX - 10);
-    expect(indentWidth(48)).toBe(TAB_STOP_PX);
+    expect(tabGapPx(0)).toBe(TAB_STOP_PX);
+    expect(tabGapPx(10)).toBe(TAB_STOP_PX - 10);
+    expect(tabGapPx(48)).toBe(TAB_STOP_PX);
   });
   it("skips a stop that is almost under the tab", () => {
-    expect(indentWidth(44)).toBe(52);
+    expect(tabGapPx(44)).toBe(52);
+  });
+});
+
+const style: RunStyle = { bold: false, italic: false, underline: false, sizePt: 11, fontFamily: "Calibri" };
+const run = (text: string): Run => ({ text, style });
+const TAB: Run = { text: "", style, tab: true };
+
+describe("tabGapsPx", () => {
+  it("gives one gap per earlier tab, each carrying the text before it to the next stop", () => {
+    // "Name" is 30px: its tab ends at 48. "Role" then runs 48 to 88, and the next stop (96) is 8px away.
+    expect(tabGapsPx([30, 40, 20])).toEqual([18, 8]);
+  });
+  it("has no gaps without a tab", () => {
+    expect(tabGapsPx([120])).toEqual([]);
+  });
+  it("counts an empty part as a stop: two tabs in a row advance two stops", () => {
+    // Part 0 is 10px (gap to 48), part 1 is empty and sits on the stop, so its tab advances a full stop.
+    expect(tabGapsPx([10, 0, 5])).toEqual([38, 48]);
+  });
+});
+
+describe("splitAtTabs", () => {
+  it("splits a line's runs at its earlier tabs", () => {
+    expect(splitAtTabs([run("A"), TAB, run("B"), run("C")])).toEqual([[run("A")], [run("B"), run("C")]]);
+  });
+  it("is one part without tabs", () => {
+    expect(splitAtTabs([run("A")])).toEqual([[run("A")]]);
+  });
+});
+
+describe("firstLineOnNextPage", () => {
+  const lines = [
+    { top: 0, bottom: 17 },
+    { top: 17, bottom: 34 },
+    { top: 34, bottom: 51 },
+  ];
+  it("is the top of the first line whose bottom passes the text area's bottom", () => {
+    expect(firstLineOnNextPage(lines, 40)).toBe(34);
+  });
+  it("is the top of the line that straddles the bottom, not the bottom itself", () => {
+    expect(firstLineOnNextPage(lines, 20)).toBe(17);
+  });
+  it("is null when every line fits on page 1", () => {
+    expect(firstLineOnNextPage(lines, 51)).toBeNull();
   });
 });
 

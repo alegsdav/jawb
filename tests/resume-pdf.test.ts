@@ -226,7 +226,8 @@ describe("tab rows in the view and PDF follow the editor's last-tab rule", () =>
     const d: DocJSON = { type: "doc", content: [paragraph("\tAcme Corp\tBoston, MA")] };
     const [p] = renderBlocks(d) as RenderParagraph[];
     const [line] = p.lines;
-    expect(line.left.map((r) => r.text).join("")).toBe("    Acme Corp");
+    // The earlier tab is a tab stop run (laid out to the 0.5in stop), not spaces.
+    expect(line.left.map((r) => (r.tab ? "\t" : r.text)).join("")).toBe("\tAcme Corp");
     expect(line.right?.map((r) => r.text).join("")).toBe("Boston, MA");
   });
 });

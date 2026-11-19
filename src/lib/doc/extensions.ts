@@ -1,10 +1,12 @@
-import { type Command, type Extensions, Extension, Node, getSchema } from "@tiptap/core";
+import { type Command, type Extensions, Extension, Node, getSchema, markPasteRule } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { type EditorState, Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { FontSize, TextStyle } from "@tiptap/extension-text-style";
+import Link from "@tiptap/extension-link";
 import { TextAlign } from "@tiptap/extension-text-align";
 import StarterKit from "@tiptap/starter-kit";
+import { tabGapPx } from "../docRender";
 import { cssFontStack } from "./fonts";
 import { normalizeHref } from "./model";
 import type { DocJSON } from "./types";
@@ -230,18 +232,8 @@ const DocFontFamily = Extension.create({
   },
 });
 
-/** Lays out right-aligned tabs: the span grows so the text after it ends at the paragraph's right edge. */
+/** The narrowest a right-aligned tab may be (px). */
 const MIN_TAB_PX = 8;
-
-/** Default tab stops, every 0.5in (at 96dpi). */
-export const TAB_STOP_PX = 48;
-
-/** The width of an indent tab that starts `offset` px from the content's left edge: it ends on the next 0.5in stop. */
-export function indentWidth(offset: number): number {
-  const into = ((offset % TAB_STOP_PX) + TAB_STOP_PX) % TAB_STOP_PX;
-  const w = TAB_STOP_PX - into;
-  return Math.round(w < MIN_TAB_PX ? w + TAB_STOP_PX : w);
-}
 
 /**
  * The width (in the page's own, unscaled px) a tab needs so what follows it ends at the content's right edge.
@@ -279,7 +271,7 @@ function layoutTabs(root: HTMLElement): void {
     }
     for (const t of tabs) {
       if (t === tab) break;
-      t.style.width = `${indentWidth((t.getBoundingClientRect().left - contentLeft) / lineScale)}px`;
+      t.style.width = `${tabGapPx((t.getBoundingClientRect().left - contentLeft) / lineScale)}px`;
     }
     const box = lineBox;
     const scale = lineScale;
@@ -363,6 +355,42 @@ export const Tab = Node.create({
   },
 });
 
+/**
+ * What typed or pasted text links: an address with a scheme (http, https, mailto), a www. host, or an email. A bare
+ * domain ("example.com") stays text, since ordinary words such as "Node.js" look like one.
+ */
+export function isLinkable(text: string): boolean {
+  return /^(?:https?:\/\/|www\.|mailto:)/i.test(text) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+}
+
+/** The href a linkable text links to (www. gets https://, an email mailto:), or null when it is not one. */
+export function linkTargetOf(text: string): string | null {
+  if (!isLinkable(text)) return null;
+  return normalizeHref(/^[^\s:]+@/.test(text) && !/^https?:|^www\./i.test(text) ? `mailto:${text}` : text);
+}
+
+/** Addresses inside pasted text: a scheme or www. address, or an email; trailing punctuation is not part of them. */
+const PASTED_LINK = /(?:https?:\/\/|www\.|[^\s@<>"']+@)[^\s<>"']*[^\s<>"'.,;:!?)\]]/gi;
+
+/**
+ * The link extension. Its own paste rule builds http:// links for bare www. text; this one builds https:// (see
+ * linkTargetOf), and only for linkable text, so the same rule holds for typing, pasting and the link box.
+ */
+const DocLink = Link.extend({
+  addPasteRules() {
+    return [
+      markPasteRule({
+        find: PASTED_LINK,
+        type: this.type,
+        getAttributes: (match) => {
+          const href = linkTargetOf(match[0]);
+          return href ? { href } : null;
+        },
+      }),
+    ];
+  },
+});
+
 export const docExtensions: Extensions = [
   StarterKit.configure({
     heading: false,
@@ -374,17 +402,19 @@ export const docExtensions: Extensions = [
     horizontalRule: false,
     // Off so the JSON is exactly what the user wrote, not an extra empty paragraph at the end.
     trailingNode: false,
-    // A link is a mark with only an href in the JSON (see DocMark). Target and rel are set on render only; the
-    // editor's JSON carries their defaults too, which normalizeDoc drops. Only http(s) and mailto are allowed.
-    link: {
-      openOnClick: false,
-      autolink: true,
-      linkOnPaste: true,
-      defaultProtocol: "https",
-      protocols: [],
-      isAllowedUri: (url: string) => normalizeHref(url) !== null,
-      HTMLAttributes: { rel: "noopener noreferrer nofollow", target: "_blank" },
-    },
+    link: false,
+  }),
+  // A link is a mark with only an href in the JSON (see DocMark). Target and rel are set on render only; the
+  // editor's JSON carries their defaults too, which normalizeDoc drops. Only http(s) and mailto are allowed.
+  DocLink.configure({
+    openOnClick: false,
+    autolink: true,
+    linkOnPaste: true,
+    defaultProtocol: "https",
+    protocols: [],
+    shouldAutoLink: isLinkable,
+    isAllowedUri: (url: string) => normalizeHref(url) !== null,
+    HTMLAttributes: { rel: "noopener noreferrer nofollow", target: "_blank" },
   }),
   TextStyle,
   FontSize,
