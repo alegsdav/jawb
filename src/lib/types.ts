@@ -1,3 +1,5 @@
+import type { DocJSON, PageSetup } from "./doc/types";
+
 /**
  * Inline formatting over the characters [from, to) of one plain-text field (a bullet's text, an entry's
  * title, ...). The text itself stays plain, so the AI, the number checks, placeholders and facts read it
@@ -57,16 +59,26 @@ export type Section = {
 
 export type Resume = {
   /**
-   * 3 = explicit formatting (marks/para). 2 = Harvard defaults implied by field, with `styles` overrides.
-   * 2+ = title is the organization/school (line 1), subtitle is the role/degree (line 2).
+   * 4 = the document (`doc`) is the source of truth. 3 = explicit formatting (marks/para). 2 = Harvard defaults
+   * implied by field, with `styles` overrides. 2+ = title is the organization/school (line 1), subtitle is the
+   * role/degree (line 2). Versions 1-3 are migrated to a document by normalizeResume (see doc/legacy.ts).
    */
   version?: number;
+  /** The resume document (TipTap JSON, see doc/types.ts). Required from version 4; the source of truth. */
+  doc?: DocJSON;
+  /** Page margins in inches (see doc/types.ts). Absent = PAGE_DEFAULTS. */
+  page?: PageSetup;
+  /**
+   * DERIVED from `doc` by outlineFromDoc (via withDoc), for the AI, facts and coaching code. Not edited directly in
+   * version 4: change the document instead.
+   */
   header: {
     name: string;
     contact: string;
     marks?: { name?: Mark[]; contact?: Mark[] };
     para?: { name?: Para; contact?: Para };
   };
+  /** DERIVED from `doc` by outlineFromDoc (via withDoc), for the AI, facts and coaching code. Not edited directly in version 4. */
   sections: Section[];
   /**
    * Legacy: the master's facts before they moved to the `facts` table (migration 0005 copied them).

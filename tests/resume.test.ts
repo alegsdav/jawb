@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { bulletTextMap, countChangedBullets, normalizeResume, reconcileIds, RESUME_VERSION } from "@/lib/resume";
+import { docEquals, setParagraphText, flattenDoc } from "@/lib/doc/model";
+import {
+  bulletTextMap,
+  countChangedBullets,
+  emptyResume,
+  isEmptyResume,
+  normalizeResume,
+  reconcileIds,
+  RESUME_VERSION,
+  resumeDoc,
+  withDoc,
+} from "@/lib/resume";
 import type { Resume } from "@/lib/types";
 
 const b = (id: string, text: string) => ({ id, text });
@@ -71,7 +82,7 @@ describe("normalizeResume", () => {
         title: "Experience",
         items: [
           { title: "Software Intern", subtitle: "Acme Corp", location: "Boston", dates: "2025", bullets: ["Did a thing"] },
-          { title: "Volunteer", subtitle: "Food Bank", location: "", dates: "", bullets: ["Helped"] },
+          { title: "Park Cleanup", subtitle: "Food Bank", location: "", dates: "", bullets: ["Helped"] },
         ],
       },
       { title: "Skills", items: [{ title: "Languages", subtitle: "Python, SQL", bullets: [] }] },
@@ -84,13 +95,14 @@ describe("normalizeResume", () => {
     const [acme, volunteer] = r.sections[0].items;
     expect(acme.title).toBe("Acme Corp");
     expect(acme.subtitle).toBe("Software Intern");
-    expect(volunteer.title).toBe("Volunteer");
+    expect(acme.location).toBe("Boston");
+    expect(volunteer.title).toBe("Park Cleanup");
     expect(volunteer.subtitle).toBe("Food Bank");
   });
 
-  it("leaves inline skills lines untouched", () => {
+  it("keeps inline skills lines as one line (title is the whole line in version 4)", () => {
     const skills = normalizeResume(v1).sections[1].items[0];
-    expect(skills).toMatchObject({ title: "Languages", subtitle: "Python, SQL", dates: "", location: "", bullets: [] });
+    expect(skills).toMatchObject({ title: "Languages: Python, SQL", subtitle: "", dates: "", location: "", bullets: [] });
   });
 
   it("gives every section, item and bullet an id and converts string bullets", () => {
@@ -112,9 +124,114 @@ describe("normalizeResume", () => {
     expect(normalizeResume({ sections: [] }).facts).toBeUndefined();
   });
 
+  it("is version 4 with a document and derived sections", () => {
+    const r = normalizeResume(v1);
+    expect(r.version).toBe(4);
+    expect(r.doc).toBeDefined();
+    expect(r.sections.map((s) => s.title)).toEqual(["EXPERIENCE", "SKILLS"]);
+  });
+
   it("tolerates garbage", () => {
     expect(() => normalizeResume(null)).not.toThrow();
     expect(normalizeResume(undefined).sections).toEqual([]);
+  });
+});
+
+/** A version 3 resume with explicit formatting, as the editor stored it. */
+function v3(): Record<string, unknown> {
+  return {
+    version: 3,
+    header: {
+      name: "Ada",
+      contact: "ada@example.com",
+      marks: { name: [{ from: 0, to: 3, bold: true, size: 16 }] },
+      para: { name: { align: "center" } },
+    },
+    sections: [
+      {
+        id: "s1",
+        title: "Experience",
+        para: { rule: true, caps: true, spaceBefore: 6 },
+        items: [
+          {
+            id: "i1",
+            title: "Acme",
+            subtitle: "",
+            location: "Boston",
+            dates: "2025",
+            bullets: [
+              { id: "b1", text: "Built a dashboard" },
+              { id: "b2", text: "Cut latency" },
+            ],
+            para: { entry: { spaceBefore: 3 } },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe("normalizeResume: version 3 to version 4", () => {
+  it("normalizing the same v3 resume twice gives equal documents", () => {
+    const a = normalizeResume(v3());
+    const b = normalizeResume(v3());
+    expect(docEquals(a.doc!, b.doc!)).toBe(true);
+    expect(docEquals(normalizeResume(a).doc!, a.doc!)).toBe(true);
+  });
+
+  it("keeps legacy bullet ids as paragraph ids and as derived bullet ids", () => {
+    const r = normalizeResume(v3());
+    const ids = flattenDoc(r.doc!).map((p) => p.id);
+    expect(ids).toEqual(expect.arrayContaining(["s1", "i1", "b1", "b2"]));
+    expect(r.sections[0].id).toBe("s1");
+    expect(r.sections[0].items[0].id).toBe("i1");
+    expect(r.sections[0].items[0].bullets.map((b) => b.id)).toEqual(["b1", "b2"]);
+    expect(r.sections[0].items[0].bullets[0].text).toBe("Built a dashboard");
+  });
+
+  it("converts explicit formatting to document marks, attributes and text", () => {
+    const d = normalizeResume(v3()).doc!;
+    const [name] = flattenDoc(d);
+    expect(name.id).toBe("hdr-name");
+    expect(name.node.attrs).toMatchObject({ textAlign: "center" });
+    expect(name.node.content).toEqual([{ type: "text", text: "Ada", marks: [{ type: "bold" }, { type: "textStyle", attrs: { fontSize: "16pt" } }] }]);
+    const heading = flattenDoc(d).find((p) => p.id === "s1")!;
+    expect(heading.text).toBe("EXPERIENCE");
+    expect(heading.node.attrs).toMatchObject({ borderBottom: true, spaceBefore: 6 });
+  });
+
+  it("reads a version 4 document as the source of truth: edits show up in the derived sections", () => {
+    const r = normalizeResume(v3());
+    const edited = withDoc(r, setParagraphText(r.doc!, "b1", "Built a React dashboard"));
+    expect(edited.sections[0].items[0].bullets.map((b) => [b.id, b.text])).toEqual([
+      ["b1", "Built a React dashboard"],
+      ["b2", "Cut latency"],
+    ]);
+    const again = normalizeResume(JSON.parse(JSON.stringify(edited)));
+    expect(again).toEqual(edited);
+    expect(docEquals(resumeDoc(again), edited.doc!)).toBe(true);
+  });
+
+  it("keeps facts, baseline and page, and drops page setups with bad margins", () => {
+    const withMeta = normalizeResume({ ...v3(), facts: ["Speaks Spanish"], baseline: { b1: "old", n: 3 }, page: { marginTop: 1, marginBottom: 1, marginLeft: 0.75, marginRight: 0.75 } });
+    expect(withMeta.facts).toEqual(["Speaks Spanish"]);
+    expect(withMeta.baseline).toEqual({ b1: "old" });
+    expect(withMeta.page).toEqual({ marginTop: 1, marginBottom: 1, marginLeft: 0.75, marginRight: 0.75 });
+    expect(normalizeResume({ ...v3(), page: { marginTop: 9, marginBottom: 1, marginLeft: 1, marginRight: 1 } }).page).toBeUndefined();
+  });
+});
+
+describe("emptyResume and isEmptyResume", () => {
+  it("starts as version 4 with a blank document", () => {
+    const r = emptyResume();
+    expect(r.version).toBe(RESUME_VERSION);
+    expect(r.sections).toEqual([]);
+    expect(isEmptyResume(r)).toBe(true);
+  });
+
+  it("is not empty once the document has text", () => {
+    const r = emptyResume();
+    expect(isEmptyResume(withDoc(r, setParagraphText(r.doc!, flattenDoc(r.doc!)[0].id, "Ada")))).toBe(false);
   });
 });
 

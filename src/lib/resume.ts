@@ -2,6 +2,10 @@ import { effectiveStyle, cleanStyle } from "./textStyle";
 import { TEMPLATE } from "./template";
 import { cleanMarks, cleanPara, wholeMarks, type Format } from "./richText";
 import type { Bullet, Item, Resume, Section, TextStyle } from "./types";
+import { emptyDoc, flattenDoc, normalizeDoc } from "./doc/model";
+import { outlineFromDoc } from "./doc/outline";
+import { legacyToDoc } from "./doc/legacy";
+import type { DocJSON, PageSetup } from "./doc/types";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -14,20 +18,27 @@ export const emptySection = (title = "Section"): Section => ({
 });
 
 /**
- * 3 = explicit formatting (marks/para). Older data is migrated by normalizeResume: version 2 (Harvard look
- * implied by field, `styles` overrides) becomes explicit template formatting; version 1 also swaps the
- * title and subtitle of entries.
+ * 4 = the resume is a document (`doc`, see ./doc/types.ts); `header` and `sections` are derived from it.
+ * Older data is migrated by normalizeResume: versions 1-3 are read as before and then converted to a document
+ * (see ./doc/legacy.ts). Version 3 = explicit formatting (marks/para); version 2 = Harvard look implied by field;
+ * version 1 also swaps the title and subtitle of entries.
  */
-export const RESUME_VERSION = 3;
+export const RESUME_VERSION = 4;
 
-export const emptyResume = (): Resume => ({
-  version: RESUME_VERSION,
-  header: { name: "", contact: "" },
-  sections: [],
-});
+/** A resume with the document `doc` and the structure derived from it (header, sections). */
+export function withDoc(r: Resume, doc: DocJSON): Resume {
+  return { ...r, version: 4, doc, ...outlineFromDoc(doc) };
+}
+
+/** The resume's document: `doc` when present, else converted from the structured fields (versions 1-3). */
+export function resumeDoc(r: Resume): DocJSON {
+  return r.doc ?? legacyToDoc(r);
+}
+
+export const emptyResume = (): Resume => withDoc({ header: { name: "", contact: "" }, sections: [] }, emptyDoc());
 
 export function isEmptyResume(r: Resume): boolean {
-  return !r.sections.some((s) => s.items.some((it) => it.title || it.subtitle || it.bullets.some((b) => b.text.trim())));
+  return flattenDoc(resumeDoc(r)).every((p) => !p.text.trim());
 }
 
 type Obj = Record<string, unknown>;
@@ -65,10 +76,46 @@ function itemPara(raw: Obj, it: Item, legacy: boolean): Item["para"] {
   return compact({ entry: cleanPara(p.entry), role: cleanPara(p.role) });
 }
 
-/** Make sure every section/item/bullet has an id (AI output or old data may lack them). */
+/** Facts, baseline and page setup: kept as stored (cleaned) on any version. */
+function carryMeta(src: Obj, out: Resume): void {
+  if (Array.isArray(src.facts)) out.facts = src.facts.filter((f): f is string => typeof f === "string");
+  const base = src.baseline;
+  if (typeof base === "object" && base !== null && !Array.isArray(base)) {
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(base)) if (typeof v === "string") clean[k] = v;
+    out.baseline = clean;
+  }
+  setOpt(out, "page", cleanPage(src.page));
+}
+
+/** Margins in inches, all four required and within 0-2; otherwise undefined (PAGE_DEFAULTS apply). */
+function cleanPage(raw: unknown): PageSetup | undefined {
+  const p = obj(raw);
+  const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 2;
+  const { marginTop, marginBottom, marginLeft, marginRight } = p;
+  if (!ok(marginTop) || !ok(marginBottom) || !ok(marginLeft) || !ok(marginRight)) return undefined;
+  return { marginTop, marginBottom, marginLeft, marginRight };
+}
+
+/**
+ * Any stored resume as a version 4 resume: `doc` is read as is (version 4 data), otherwise the structured
+ * fields of versions 1-3 are read and converted to a document. Ids are kept, so re-reading gives the same result.
+ */
 export function normalizeResume(raw: unknown): Resume {
   const r = obj(raw);
   const version = typeof r.version === "number" ? r.version : 1;
+  if (version >= 4 && typeof r.doc === "object" && r.doc !== null && !Array.isArray(r.doc)) {
+    const base: Resume = { header: { name: "", contact: "" }, sections: [] };
+    carryMeta(r, base);
+    return withDoc(base, normalizeDoc(r.doc));
+  }
+  const v3 = normalizeV3(r, version);
+  carryMeta(r, v3);
+  return withDoc(v3, normalizeDoc(legacyToDoc(v3)));
+}
+
+/** Reads a version 1-3 resume into the version 3 shape (the structured fields, before the document). */
+function normalizeV3(r: Obj, version: number): Resume {
   const swapTitles = version < 2; // v1 stored role in title and organization in subtitle; Harvard puts the organization first.
   const legacy = version < 3; // v2 and older: formatting is implied by field, so make it explicit.
 
@@ -76,7 +123,7 @@ export function normalizeResume(raw: unknown): Resume {
   const hs = obj(header.styles);
   const name = str(header.name);
   const contact = str(header.contact);
-  const out: Resume = { version: RESUME_VERSION, header: { name, contact }, sections: [] };
+  const out: Resume = { version: 3, header: { name, contact }, sections: [] };
   if (legacy) {
     setOpt(out.header, "marks", compact({
       name: wholeMarks(name, formatWith(TEMPLATE.name.format, effectiveStyle("name", cleanStyle(hs.name)))),
@@ -90,8 +137,6 @@ export function normalizeResume(raw: unknown): Resume {
     }));
     setOpt(out.header, "para", compact({ name: cleanPara(obj(header.para).name), contact: cleanPara(obj(header.para).contact) }));
   }
-  if (Array.isArray(r.facts)) out.facts = r.facts.filter((f): f is string => typeof f === "string");
-
   out.sections = arr(r.sections).map((sv) => {
     const sec = obj(sv);
     const title = str(sec.title);
