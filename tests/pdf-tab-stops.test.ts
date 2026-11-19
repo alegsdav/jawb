@@ -47,6 +47,32 @@ describe("PDF tab stops", () => {
   });
 });
 
+describe("PDF tab stops of a paragraph", () => {
+  it("puts Team at the 144pt stop and ends 2024 at the 540pt right stop, from the margin", async () => {
+    const doc: DocJSON = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { id: "stops-1", tabStops: [{ pos: 144, align: "left" }, { pos: 540, align: "right" }] },
+          content: [{ type: "text", text: "Role" }, { type: "tab" }, { type: "text", text: "Team" }, { type: "tab" }, { type: "text", text: "2024" }],
+        },
+      ],
+    };
+    const buffer = await renderToBuffer(ResumePdf({ resume: withDoc(emptyResume(), doc) }));
+    const task = getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false });
+    const page = await (await task.promise).getPage(1);
+    const items = (await page.getTextContent()).items.filter((it) => "str" in it) as { str: string; transform: number[] }[];
+    const x = (text: string) => items.find((it) => it.str === text)!.transform[4];
+
+    const left = PAGE_DEFAULTS.marginLeft * 72;
+    expect(Math.abs(x("Team") - (left + 144))).toBeLessThanOrEqual(1);
+    const end = x("2024") + textWidthPt("2024", "Calibri", false, false, 11);
+    expect(Math.abs(end - (left + 540))).toBeLessThanOrEqual(1);
+    await task.destroy();
+  });
+});
+
 describe("DejaVu widths", () => {
   it("measures DejaVu runs with their own tables, bold wider than regular", async () => {
     const { textWidthPt } = await import("@/lib/pdfTextWidths");

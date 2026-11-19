@@ -13,6 +13,7 @@ const para = (id: string, attrs: Record<string, unknown> = {}) => ({
   spaceAfter: null,
   lineHeight: null,
   borderBottom: null,
+  tabStops: null,
   ...attrs,
 });
 
@@ -102,6 +103,35 @@ const realistic: DocJSON = {
     },
   ],
 };
+
+describe("paragraph tab stops in the schema", () => {
+  const withStops: DocJSON = {
+    type: "doc",
+    content: [{ type: "paragraph", attrs: { id: "tabbed1", tabStops: [{ pos: 72, align: "left" }, { pos: 540, align: "right" }] }, content: [{ type: "text", text: "Role" }, { type: "tab" }, { type: "text", text: "2024" }] }],
+  };
+
+  it("keeps the stops through TipTap's JSON", () => {
+    const json = docFromJSON(withStops).toJSON() as DocJSON;
+    expect(json.content[0]).toMatchObject({ attrs: { tabStops: [{ pos: 72, align: "left" }, { pos: 540, align: "right" }] } });
+    expect(docEquals(json, withStops)).toBe(true);
+  });
+
+  it("writes the stops as a data-tabs attribute, so copied HTML keeps them", () => {
+    const node = docFromJSON(withStops).firstChild!;
+    const [tag, attrs] = docSchema.nodes.paragraph.spec.toDOM!(node) as [string, Record<string, string>];
+    expect(tag).toBe("p");
+    expect(attrs["data-tabs"]).toBe("72:left,540:right");
+  });
+
+  it("reads data-tabs back into the stops, and ignores a paragraph without it", () => {
+    const rule = docSchema.nodes.paragraph.spec.parseDOM!.find((r) => r.tag === "p")!;
+    const element = { getAttribute: (name: string) => (name === "data-tabs" ? "540:right,72:left" : null), style: {} };
+    const attrs = (rule.getAttrs as (el: unknown) => Record<string, unknown>)(element);
+    expect(attrs.tabStops).toEqual([{ pos: 72, align: "left" }, { pos: 540, align: "right" }]);
+    const bare = (rule.getAttrs as (el: unknown) => Record<string, unknown>)({ getAttribute: () => null, style: {} });
+    expect(bare.tabStops ?? null).toBeNull();
+  });
+});
 
 describe("docSchema", () => {
   it("accepts a realistic document and round-trips it through TipTap's JSON", () => {

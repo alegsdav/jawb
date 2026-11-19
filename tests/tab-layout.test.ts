@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import { Document, Page, Text, View, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import { flattenDoc } from "@/lib/doc/model";
 import { tabWidth } from "@/lib/doc/extensions";
-import { TAB_STOP_PX, firstLineOnNextPage, splitAtTabs, tabGapPx, tabGapsPx, type Run, type RunStyle } from "@/lib/docRender";
+import {
+  DEFAULT_TAB_STEP_PT, TAB_STOP_PX, firstLineOnNextPage, renderBlocks, splitAtTabs, tabGapPx, tabGapsPx, tabGapsPxFor,
+  tabStopLayout, type Run, type RunStyle,
+} from "@/lib/docRender";
 import { pdfToDoc } from "@/lib/import/pdfToDoc";
-import type { DocInline, DocJSON } from "@/lib/doc/types";
+import type { DocInline, DocJSON, TabStop } from "@/lib/doc/types";
 
 describe("tabWidth", () => {
   const base = { contentRight: 900, tabLeft: 200, afterWidth: 100, scale: 1, wraps: false };
@@ -112,5 +115,104 @@ describe("PDF import: which gaps are right tabs", () => {
     expect(shape(doc, "Languages")).not.toContain("tab");
     // The column's spacing survives as spaces between the label and its value.
     expect(lang.text).toMatch(/^Languages:\s{2,}English, Spanish$/);
+  });
+});
+
+const left = (pos: number): TabStop => ({ pos, align: "left" });
+const center = (pos: number): TabStop => ({ pos, align: "center" });
+const right = (pos: number): TabStop => ({ pos, align: "right" });
+
+describe("tabStopLayout (paragraphs with tab stops, in points)", () => {
+  it("a left stop starts the next part at the stop", () => {
+    // "Name" is 30pt: the tab runs from 30 to the stop at 72, and the next part starts there.
+    expect(tabStopLayout([30, 40], [left(72)])).toEqual([42]);
+  });
+
+  it("a right stop ends the next part at the stop", () => {
+    // The part after the tab is 50pt and must end at 200: it starts at 150, so the tab is 150 - 30 = 120.
+    expect(tabStopLayout([30, 50], [right(200)])).toEqual([120]);
+  });
+
+  it("a centre stop centres the next part on the stop", () => {
+    // A 40pt part centred on 100 spans 80 to 120, so the tab runs from 30 to 80.
+    expect(tabStopLayout([30, 40], [center(100)])).toEqual([50]);
+  });
+
+  it("reaches the first stop past the text, not an earlier one", () => {
+    // The text ends at 30: the stop at 20 is behind it, so the tab goes to 100.
+    expect(tabStopLayout([30, 10], [left(20), left(100)])).toEqual([70]);
+  });
+
+  it("does not use a stop that is under the text's end (a point of slack)", () => {
+    // The text ends at 30.5: a stop at 31 is only half a point away, so the tab takes the default stop at 36.
+    expect(tabStopLayout([30.5, 10], [left(31)])).toEqual([5.5]);
+  });
+
+  it("takes the next default stop once the text has passed every stop", () => {
+    // The text ends at 100, past the only stop (72): the next default stop after it is 108.
+    expect(tabStopLayout([100, 20], [left(72)])).toEqual([8]);
+  });
+
+  it("uses the default 0.5in stops when there are no stops", () => {
+    // Stops at 36, 72, 108: a tab after 10pt goes to 36, and after 46pt to 72.
+    expect(tabStopLayout([10, 10, 10], [])).toEqual([26, 26]);
+    expect(DEFAULT_TAB_STEP_PT).toBe(36);
+  });
+
+  it("a right or centre part that would start before the tab takes the next default stop", () => {
+    // The text ends at 100 and a 80pt right part would start at 40, before the tab: the default stop 108 is used.
+    expect(tabStopLayout([100, 80], [right(120)])).toEqual([8]);
+  });
+
+  it("is at least 1pt wide", () => {
+    // A right part of 5pt ending at 15.5 would start at 10.5, half a point after the text: the tab is 1pt.
+    expect(tabStopLayout([10, 5], [right(15.5)])).toEqual([1]);
+  });
+
+  it("uses each stop once, in order: a second tab reaches the stop after the first", () => {
+    // Name ends at 30 and the tab stops at 72; the next 10pt part ends at 82, so the next stop is 200.
+    expect(tabStopLayout([30, 10, 10], [left(72), left(200)])).toEqual([42, 118]);
+  });
+
+  it("lays out Role, Team and a right-aligned date with a left and a right stop", () => {
+    // Role (20pt) then a tab to 144, Team (30pt) to 174, then a tab to the right stop at 540 where the 25pt date ends.
+    expect(tabStopLayout([20, 30, 25], [left(144), right(540)])).toEqual([124, 341]);
+  });
+
+  it("has no tabs for a single part", () => {
+    expect(tabStopLayout([120], [left(72)])).toEqual([]);
+  });
+});
+
+describe("tabGapsPxFor", () => {
+  it("is the default 0.5in rule without stops", () => {
+    expect(tabGapsPxFor([30, 40, 20], null)).toEqual(tabGapsPx([30, 40, 20]));
+  });
+
+  it("works in px with the stops measured in points: 40px (30pt) before a stop at 72pt is a 42pt, 56px gap", () => {
+    expect(tabGapsPxFor([40, 30], [left(72)])[0]).toBeCloseTo(56);
+  });
+});
+
+describe("paragraphs with tab stops in the shared layout", () => {
+  it("puts every tab on the line's left side and no right-aligned part", () => {
+    const doc: DocJSON = {
+      type: "doc",
+      content: [{ type: "paragraph", attrs: { id: "st1", tabStops: [left(72), right(540)] }, content: [{ type: "text", text: "a" }, { type: "tab" }, { type: "text", text: "b" }, { type: "tab" }, { type: "text", text: "c" }] }],
+    };
+    const [p] = renderBlocks(doc);
+    expect(p.tabStops).toEqual([left(72), right(540)]);
+    expect(p.lines[0].right).toBeNull();
+    expect(splitAtTabs(p.lines[0].left).map((part) => part.map((r) => r.text).join(""))).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps the last-tab rule for a paragraph without stops", () => {
+    const doc: DocJSON = {
+      type: "doc",
+      content: [{ type: "paragraph", attrs: { id: "nost1" }, content: [{ type: "text", text: "a" }, { type: "tab" }, { type: "text", text: "b" }] }],
+    };
+    const [p] = renderBlocks(doc);
+    expect(p.tabStops).toBeNull();
+    expect(p.lines[0].right?.map((r) => r.text).join("")).toBe("b");
   });
 });

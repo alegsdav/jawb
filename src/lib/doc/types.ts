@@ -23,8 +23,9 @@ export type DocMark =
 
 export type DocText = { type: "text"; text: string; marks?: DocMark[] };
 /**
- * A right-aligned tab: everything after it on the line is pushed to the right margin (how a resume puts the
- * location or dates on the right of "Company ⇥ City, ST"). At most one per paragraph is meaningful.
+ * A tab. In a paragraph without tabStops, the LAST tab of a line pushes everything after it to the right margin (how
+ * a resume puts the location or dates on the right of "Company ⇥ City, ST"), and earlier tabs go to the next 0.5in.
+ * In a paragraph with tabStops, each tab goes to the stop it reaches (see tabStopLayout in src/lib/docRender.ts).
  */
 export type DocTab = { type: "tab" };
 /** A line break inside a paragraph (Shift+Enter). */
@@ -46,7 +47,19 @@ export type ParagraphAttrs = {
    * paragraph with this set: there is no separate rule node, so every merge and save keeps it.
    */
   borderBottom?: boolean | null;
+  /**
+   * Tab stops, sorted by pos and unique (see cleanTabStops in ./model). null or absent = none: tabs then use the
+   * default rule (see DocTab). An empty list is the same as none.
+   */
+  tabStops?: TabStop[] | null;
 };
+
+/** How text sits on a tab stop: it starts at the stop (left), ends at it (right), or is centred on it. */
+export type TabStopAlign = "left" | "center" | "right";
+/** A tab stop: `pos` in points from where the paragraph's text starts, in (0, TAB_STOP_MAX_PT]. */
+export type TabStop = { pos: number; align: TabStopAlign };
+export const TAB_STOP_MAX_PT = 720;
+export const MAX_TAB_STOPS = 20;
 
 export type DocParagraph = { type: "paragraph"; attrs: ParagraphAttrs; content?: DocInline[] };
 export type DocListItem = { type: "listItem"; content: (DocParagraph | DocList)[] };

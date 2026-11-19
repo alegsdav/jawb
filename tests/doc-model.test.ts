@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDoc,
+  cleanTabStops,
+  formatTabStops,
+  parseTabStops,
   docEquals,
   docPlainText,
   emptyDoc,
@@ -412,3 +415,65 @@ describe("normalizeHref", () => {
   });
 });
 
+describe("tab stops", () => {
+  const stop = (pos: number, align: "left" | "center" | "right" = "left") => ({ pos, align });
+
+  it("keeps valid stops sorted, the first at each position, and drops the invalid ones", () => {
+    const raw = [
+      stop(540, "right"),
+      stop(72),
+      stop(72, "center"),
+      stop(0),
+      stop(721),
+      stop(-5),
+      { pos: 10, align: "justify" },
+      { pos: "36", align: "left" },
+      { pos: Number.NaN, align: "left" },
+      "junk",
+      null,
+      stop(144, "center"),
+    ];
+    expect(cleanTabStops(raw)).toEqual([stop(72), stop(144, "center"), stop(540, "right")]);
+  });
+
+  it("keeps at most 20 stops, the leftmost", () => {
+    const raw = Array.from({ length: 25 }, (_, i) => stop(10 + i * 10));
+    const kept = cleanTabStops(raw)!;
+    expect(kept).toHaveLength(20);
+    expect(kept[19].pos).toBe(200);
+  });
+
+  it("is undefined for no valid stops, or a value that is not a list", () => {
+    expect(cleanTabStops([])).toBeUndefined();
+    expect(cleanTabStops([stop(0)])).toBeUndefined();
+    expect(cleanTabStops("72:left")).toBeUndefined();
+  });
+
+  it("round-trips through the data-tabs string", () => {
+    const stops = [stop(72), stop(540, "right")];
+    expect(formatTabStops(stops)).toBe("72:left,540:right");
+    expect(parseTabStops(formatTabStops(stops))).toEqual(stops);
+    expect(parseTabStops(null)).toBeNull();
+    expect(parseTabStops("abc:left,72:sideways")).toBeNull();
+  });
+
+  it("normalizeDoc keeps the stops of a paragraph and drops them when none are valid", () => {
+    const d = normalizeDoc({
+      type: "doc",
+      content: [
+        { type: "paragraph", attrs: { id: "t1", tabStops: [stop(540, "right"), stop(-1)] }, content: [{ type: "text", text: "a" }] },
+        { type: "paragraph", attrs: { id: "t2", tabStops: [stop(-1)] }, content: [{ type: "text", text: "b" }] },
+      ],
+    });
+    expect((d.content[0] as DocParagraph).attrs.tabStops).toEqual([stop(540, "right")]);
+    expect((d.content[1] as DocParagraph).attrs.tabStops).toBeUndefined();
+  });
+
+  it("docEquals treats an empty list of stops like none, and sees a stop that differs", () => {
+    const base = { type: "doc", content: [{ type: "paragraph", attrs: { id: "e1" }, content: [{ type: "text", text: "x" }] }] } as DocJSON;
+    const empty = { type: "doc", content: [{ type: "paragraph", attrs: { id: "e1", tabStops: [] }, content: [{ type: "text", text: "x" }] }] } as DocJSON;
+    const one = { type: "doc", content: [{ type: "paragraph", attrs: { id: "e1", tabStops: [stop(72)] }, content: [{ type: "text", text: "x" }] }] } as DocJSON;
+    expect(docEquals(base, empty)).toBe(true);
+    expect(docEquals(base, one)).toBe(false);
+  });
+});

@@ -3,7 +3,7 @@
  * indents and list markers. The read-only page (ResumeView) and the PDF (ResumePdf) both draw this model, so
  * they match each other and the editor. Pure: no DOM and no PDF library.
  */
-import { normalizeHref } from "./doc/model";
+import { cleanTabStops, normalizeHref } from "./doc/model";
 import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE_PT,
@@ -17,6 +17,7 @@ import {
   type DocParagraph,
   type ListNumberType,
   type PageSetup,
+  type TabStop,
 } from "./doc/types";
 
 /** Left indent of each list level when the list has no indentPt: half an inch, as the editor's list padding. */
@@ -34,8 +35,8 @@ export type RunStyle = { bold: boolean; italic: boolean; underline: boolean; siz
 /** A run of text; href is set when a link mark covers it (http(s) or mailto). */
 export type Run = { text: string; style: RunStyle; href?: string; tab?: true };
 /**
- * One visual line (a hard break starts a new one). `left` holds `tab` runs for the earlier tabs (0.5in stops); with a
- * tab, `right` is the text after the last tab, right-aligned.
+ * One visual line (a hard break starts a new one). `left` holds the parts with a `tab` run between each two; without
+ * tab stops, the earlier tabs are 0.5in stops and `right` is the text after the last tab, right-aligned.
  */
 export type RenderLine = { left: Run[]; right: Run[] | null };
 /**
@@ -61,6 +62,8 @@ export type RenderParagraph = {
   marker: RenderMarker | null;
   /** True for a centered or right-aligned marker: it goes inline before the first line's text (see linesWithMarker). */
   markerInline: boolean;
+  /** The tab stops of the paragraph (see tabStopLayout), or null: its tabs then follow the default 0.5in rule. */
+  tabStops: TabStop[] | null;
   lines: RenderLine[];
 };
 
@@ -133,6 +136,14 @@ export const PAGE_HEIGHT_IN = 11;
 export const TAB_STOP_PX = 48;
 /** A tab that would advance less than this skips to the following stop, so the gap is never a sliver. */
 const MIN_TAB_PX = 8;
+/** A px at 96dpi is three quarters of a point. */
+export const PT_PER_PX = 72 / PX_PER_IN;
+/** Default tab stops of a paragraph with tab stops, every 0.5in, in points. */
+export const DEFAULT_TAB_STEP_PT = 36;
+/** A stop must lie this far past the text before a tab to be reached, so a stop under the text's end is not a sliver. */
+const STOP_SLACK_PT = 1;
+/** The narrowest tab that moves the text on, in points. */
+const MIN_TAB_PT = 1;
 
 /**
  * The width of an earlier tab (an indent) that starts `offset` px from the line's content left: it ends on the next
@@ -160,6 +171,54 @@ export function tabGapsPx(partWidths: number[]): number[] {
   return gaps;
 }
 
+/**
+ * The width in points of each tab of a line, in a paragraph with tab `stops` (Word's rule). At a tab, x is the end of the
+ * text before it, and the tab goes to the first stop past x: a left stop starts the next part at the stop, a right one
+ * ends it there and a centre one centres it. A right or centre part that would have to start before x, and a line with
+ * no stop left, take the next default stop (every `defaultStepPt`) as a left stop. `segmentWidthsPt` are the widths of
+ * the parts (the text between the tabs). Returns one width per tab: segmentWidthsPt.length - 1 of them.
+ */
+export function tabStopLayout(segmentWidthsPt: number[], stops: TabStop[], defaultStepPt = DEFAULT_TAB_STEP_PT): number[] {
+  const gaps: number[] = [];
+  let x = 0;
+  for (let i = 0; i < segmentWidthsPt.length - 1; i++) {
+    x += segmentWidthsPt[i];
+    const gap = tabGapPt(x, segmentWidthsPt[i + 1], stops, defaultStepPt);
+    gaps.push(gap);
+    x += gap;
+  }
+  return gaps;
+}
+
+/** The width of one tab that starts at x and is followed by a part `nextPt` wide (see tabStopLayout). */
+function tabGapPt(x: number, nextPt: number, stops: TabStop[], defaultStepPt: number): number {
+  const target = firstStopPast(x, stops);
+  if (target) {
+    const start =
+      target.align === "right" ? target.pos - nextPt : target.align === "center" ? target.pos - nextPt / 2 : target.pos;
+    if (start >= x) return Math.max(MIN_TAB_PT, start - x);
+  }
+  return (Math.floor((x + STOP_SLACK_PT) / defaultStepPt) + 1) * defaultStepPt - x;
+}
+
+/** The leftmost stop that lies past x by the slack, or null when there is none. */
+function firstStopPast(x: number, stops: TabStop[]): TabStop | null {
+  let best: TabStop | null = null;
+  for (const s of stops) {
+    if (s.pos > x + STOP_SLACK_PT && (!best || s.pos < best.pos)) best = s;
+  }
+  return best;
+}
+
+/**
+ * The tab widths in px of a line whose parts are `partWidthsPx` wide: the 0.5in rule without stops (tabGapsPx), else
+ * the stops rule (tabStopLayout), worked in points. The editor and the read-only page size their tabs with it.
+ */
+export function tabGapsPxFor(partWidthsPx: number[], stops: TabStop[] | null): number[] {
+  if (!stops) return tabGapsPx(partWidthsPx);
+  return tabStopLayout(partWidthsPx.map((w) => w * PT_PER_PX), stops).map((g) => g / PT_PER_PX);
+}
+
 /** A line's runs split at its earlier tabs: the parts before, between and after them (one part without tabs). */
 export function splitAtTabs(runs: Run[]): Run[][] {
   const parts: Run[][] = [[]];
@@ -181,17 +240,18 @@ export function firstLineOnNextPage(lines: { top: number; bottom: number }[], pa
 }
 
 /**
- * Lines of a paragraph: split at hard breaks, and each line at its LAST tab, which right-aligns what follows (the
- * editor's rule, see layoutTabs). An earlier tab is a `tab` run: an indent to the next 0.5in stop (tabGapPx).
+ * Lines of a paragraph: split at hard breaks. Without tab stops each line is split at its LAST tab, which right-aligns
+ * what follows (the editor's rule, see layoutTabs), and an earlier tab is a `tab` run: an indent to the next 0.5in stop
+ * (tabGapPx). With stops every tab is a `tab` run, sized by the stops (tabGapsPxFor).
  */
-function linesOf(content: DocInline[] | undefined): RenderLine[] {
+function linesOf(content: DocInline[] | undefined, stops: TabStop[] | null): RenderLine[] {
   const groups: DocInline[][] = [[]];
   for (const n of content ?? []) {
     if (n.type === "hardBreak") groups.push([]);
     else groups[groups.length - 1].push(n);
   }
   return groups.map((items) => {
-    const last = items.map((n) => n.type).lastIndexOf("tab");
+    const last = stops ? -1 : items.map((n) => n.type).lastIndexOf("tab");
     const left: Run[] = [];
     const right: Run[] = [];
     items.forEach((n, i) => {
@@ -281,7 +341,8 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
   const a = p.attrs;
   const align = a?.textAlign ?? "left";
   const inline = align === "center" || align === "right";
-  const lines = linesOf(p.content);
+  const tabStops = cleanTabStops(a?.tabStops) ?? null;
+  const lines = linesOf(p.content, tabStops);
   const firstRun = lines.flatMap((l) => [...l.left, ...(l.right ?? [])])[0];
   const strutPt = paragraphStrutPt(p.content);
   const style = { ...(firstRun?.style ?? DEFAULT_STYLE), sizePt: strutPt };
@@ -303,6 +364,7 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
     textIndentPt,
     marker: list?.bullet ? markerOf(list, style) : null,
     markerInline: list?.bullet === true && inline,
+    tabStops,
     lines,
   };
 }

@@ -2,16 +2,14 @@ import { Document, Link, Page, Text, View } from "@react-pdf/renderer";
 import { createElement as h, type ReactElement } from "react";
 import { pdfFontFor, registerPdfFonts } from "@/lib/pdfFonts";
 import {
-  PX_PER_IN, hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, splitAtTabs, tabGapsPx, type Run, type RenderLine,
-  type RenderMarker, type RenderParagraph, type RunStyle,
+  PT_PER_PX, hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, splitAtTabs, tabGapsPx, tabStopLayout, type Run,
+  type RenderLine, type RenderMarker, type RenderParagraph, type RunStyle,
 } from "@/lib/docRender";
 import { textWidthPt } from "@/lib/pdfTextWidths";
 import { resumeDoc } from "@/lib/resume";
 import type { Resume } from "@/lib/types";
 
 const POINTS_PER_INCH = 72;
-/** A px at 96dpi is three quarters of a point: the stop math works in px, the PDF in pt. */
-const PT_PER_PX = POINTS_PER_INCH / PX_PER_IN;
 const RULE = { borderBottomWidth: 0.75, borderBottomColor: "#000" };
 /** Carlito has no "◦" or "▪": those markers are drawn as shapes, and inline ones use an en dash. */
 const SHAPE_MARKERS = new Set(["◦", "▪"]);
@@ -42,30 +40,63 @@ function runNodes(runs: Run[], lineHeight: number): ReactElement[] {
   });
 }
 
-/** The width of a run of text in px, from the PDF face's metrics (see pdfTextWidths). */
-function runsWidthPx(runs: Run[]): number {
-  const pt = runs.reduce(
-    (sum, r) => sum + textWidthPt(r.text, r.style.fontFamily, r.style.bold, r.style.italic, r.style.sizePt),
-    0,
-  );
-  return pt / PT_PER_PX;
+/** The width of a run of text in points, from the PDF face's metrics (see pdfTextWidths). */
+function runsWidthPt(runs: Run[]): number {
+  return runs.reduce((sum, r) => sum + textWidthPt(r.text, r.style.fontFamily, r.style.bold, r.style.italic, r.style.sizePt), 0);
 }
 
 /**
- * The left side of a line. Without earlier tabs it is one text. With them, each part is drawn where the editor puts
- * it: the parts sit in a row, and a fixed-width gap after each part carries it to the next 0.5in stop (tabGapsPx),
- * so no line is laid out by guesswork.
+ * The width of each part of a line and the width after it, in points: the paragraph's tab stops when it has them
+ * (tabStopLayout), else the editor's 0.5in stops (tabGapsPx, which works in px).
+ */
+function partsAndGapsPt(parts: Run[][], p: RenderParagraph): { widths: number[]; gaps: number[] } {
+  const widths = parts.map(runsWidthPt);
+  if (p.tabStops) return { widths, gaps: tabStopLayout(widths, p.tabStops) };
+  return { widths, gaps: tabGapsPx(widths.map((w) => w / PT_PER_PX)).map((g) => g * PT_PER_PX) };
+}
+
+/**
+ * The left side of a line. Without earlier tabs it is one text. Without tab stops, the parts sit in a row with a
+ * fixed-width gap after each part (the editor's 0.5in stops). With stops, each part is placed absolutely at the x its
+ * stop gives it (partsAndGapsPt): a row would shrink its parts when a stop lies past the text area (react-pdf reads
+ * flexShrink 0 as 1), and a part would then move off its stop.
  */
 function leftNode(runs: Run[], p: RenderParagraph): ReactElement {
   const parts = splitAtTabs(runs);
   if (parts.length === 1) return h(Text, { style: { textAlign: p.align, flexShrink: 1 } }, ...runNodes(runs, p.lineHeight));
-  const gaps = tabGapsPx(parts.map(runsWidthPx));
+  const { widths, gaps } = partsAndGapsPt(parts, p);
+  return p.tabStops ? partsAtStops(runs, parts, widths, gaps, p) : partsInRow(parts, gaps, p);
+}
+
+/** Parts in a row, each followed by its gap (the paragraphs without tab stops). */
+function partsInRow(parts: Run[][], gaps: number[], p: RenderParagraph): ReactElement {
   const children: ReactElement[] = [];
   parts.forEach((part, i) => {
     if (part.length) children.push(h(Text, { key: `t${i}` }, ...runNodes(part, p.lineHeight)));
-    if (i < gaps.length) children.push(h(View, { key: `g${i}`, style: { width: gaps[i] * PT_PER_PX } }));
+    if (i < gaps.length) children.push(h(View, { key: `g${i}`, style: { width: gaps[i] } }));
   });
   return h(View, { style: { flexDirection: "row", flexShrink: 1 } }, ...children);
+}
+
+/** Parts placed at their stops: each one absolutely at its x, in a box as tall as the line's text. */
+function partsAtStops(runs: Run[], parts: Run[][], widths: number[], gaps: number[], p: RenderParagraph): ReactElement {
+  const children: ReactElement[] = [];
+  let x = 0;
+  parts.forEach((part, i) => {
+    // A little slack on the box's width, so that rounding never wraps a part's last character.
+    if (part.length) {
+      children.push(
+        h(
+          View,
+          { key: `t${i}`, style: { position: "absolute", left: x, top: 0, width: widths[i] + 1 } },
+          h(Text, null, ...runNodes(part, p.lineHeight)),
+        ),
+      );
+    }
+    x += widths[i] + (i < gaps.length ? gaps[i] : 0);
+  });
+  const heightPt = Math.max(p.strutPt, ...runs.map((r) => r.style.sizePt)) * p.lineHeight;
+  return h(View, { style: { height: heightPt } }, ...children);
 }
 
 /** A line: its text, or the text before a tab at the left and after it at the right margin. */

@@ -17,6 +17,10 @@ import {
   type ListAttrs,
   type ListNumberType,
   type ParagraphAttrs,
+  type TabStop,
+  type TabStopAlign,
+  MAX_TAB_STOPS,
+  TAB_STOP_MAX_PT,
 } from "./types";
 
 /** An 8-character random id (same alphabet and style as uid() in resume.ts). */
@@ -426,6 +430,40 @@ function inlineFrom(nodes: unknown[]): DocInline[] {
 const numIn = (v: unknown, min: number, max: number): number | undefined =>
   typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : undefined;
 
+const TAB_ALIGNS = new Set<string>(["left", "center", "right"]);
+
+/**
+ * The tab stops a paragraph may keep: a valid pos (0 < pos <= TAB_STOP_MAX_PT) and a known alignment. The first stop at
+ * each pos wins, the rest are sorted by pos, and at most MAX_TAB_STOPS are kept. Undefined when none is left.
+ */
+export function cleanTabStops(raw: unknown): TabStop[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const byPos = new Map<number, TabStop>();
+  for (const s of raw) {
+    if (!isObj(s) || typeof s.align !== "string" || !TAB_ALIGNS.has(s.align)) continue;
+    const pos = numIn(s.pos, Number.MIN_VALUE, TAB_STOP_MAX_PT);
+    if (pos === undefined || byPos.has(pos)) continue;
+    byPos.set(pos, { pos, align: s.align as TabStopAlign });
+  }
+  const stops = [...byPos.values()].sort((a, b) => a.pos - b.pos).slice(0, MAX_TAB_STOPS);
+  return stops.length ? stops : undefined;
+}
+
+/** The stops as the data-tabs attribute of a paragraph, e.g. "72:left,540:right" (see parseTabStops). */
+export function formatTabStops(stops: TabStop[]): string {
+  return stops.map((s) => `${s.pos}:${s.align}`).join(",");
+}
+
+/** The stops read from a data-tabs attribute (see formatTabStops), cleaned as cleanTabStops does; null when none. */
+export function parseTabStops(attr: string | null | undefined): TabStop[] | null {
+  if (!attr) return null;
+  const raw = attr.split(",").map((part) => {
+    const [pos, align] = part.split(":");
+    return { pos: Number(pos), align };
+  });
+  return cleanTabStops(raw) ?? null;
+}
+
 function paragraphFrom(n: Record<string, unknown>): DocParagraph {
   const a = isObj(n.attrs) ? n.attrs : {};
   const attrs: ParagraphAttrs = { id: typeof a.id === "string" && a.id ? a.id : newId() };
@@ -437,6 +475,8 @@ function paragraphFrom(n: Record<string, unknown>): DocParagraph {
   const lh = numIn(a.lineHeight, 0.8, 3);
   if (lh !== undefined) attrs.lineHeight = lh;
   if (typeof a.borderBottom === "boolean") attrs.borderBottom = a.borderBottom;
+  const tabStops = cleanTabStops(a.tabStops);
+  if (tabStops) attrs.tabStops = tabStops;
   const content = inlineFrom(arr(n.content));
   return content.length ? { type: "paragraph", attrs, content } : { type: "paragraph", attrs };
 }
@@ -512,7 +552,7 @@ function canon(v: unknown): unknown {
     for (const k of Object.keys(v).sort()) {
       const x = (v as Record<string, unknown>)[k];
       if (x === null || x === undefined) continue;
-      if ((k === "content" || k === "marks") && Array.isArray(x) && x.length === 0) continue;
+      if ((k === "content" || k === "marks" || k === "tabStops") && Array.isArray(x) && x.length === 0) continue;
       const c = canon(x);
       // Attrs with only null or unset values are no attrs (TipTap writes an attrs object on every list node).
       if (k === "attrs" && isObj(c) && Object.keys(c).length === 0) continue;

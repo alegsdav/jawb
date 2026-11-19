@@ -6,10 +6,10 @@ import { FontSize, TextStyle } from "@tiptap/extension-text-style";
 import Link from "@tiptap/extension-link";
 import { TextAlign } from "@tiptap/extension-text-align";
 import StarterKit from "@tiptap/starter-kit";
-import { paragraphStrutPt, tabGapPx } from "../docRender";
+import { paragraphStrutPt, tabGapPx, tabGapsPxFor } from "../docRender";
 import { cssFontStack } from "./fonts";
-import { normalizeHref } from "./model";
-import { DEFAULT_FONT_SIZE_PT, type DocJSON, clampIndentPt } from "./types";
+import { formatTabStops, normalizeHref, parseTabStops } from "./model";
+import { DEFAULT_FONT_SIZE_PT, type DocJSON, type TabStop, clampIndentPt } from "./types";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -122,6 +122,12 @@ const ParagraphFormat = Extension.create({
             parseHTML: (element: HTMLElement) => (element.style.borderBottom ? true : null),
             renderHTML: (attrs: { borderBottom?: boolean | null }) =>
               attrs.borderBottom ? { style: "border-bottom: 1px solid currentColor; padding-bottom: 1px" } : {},
+          },
+          tabStops: {
+            default: null,
+            parseHTML: (element: HTMLElement) => parseTabStops(element.getAttribute("data-tabs")),
+            renderHTML: (attrs: { tabStops?: TabStop[] | null }) =>
+              attrs.tabStops?.length ? { "data-tabs": formatTabStops(attrs.tabStops) } : {},
           },
         },
       },
@@ -352,6 +358,62 @@ export function tabWidth(m: { contentRight: number; tabLeft: number; afterWidth:
   return Math.max(MIN_TAB_PX, Math.floor(free) - 1);
 }
 
+/** A paragraph's line box, the scale the page is zoomed by (1 unscaled), and the block whose padding bounds the line. */
+function lineBoxOf(paragraph: HTMLElement): { lineBlock: HTMLElement; lineBox: DOMRect; scale: number } {
+  // A paragraph inside a list item is inline: its box is its text, so the line's edge is the item's.
+  const lineStyle = getComputedStyle(paragraph);
+  const lineBlock = lineStyle.display === "inline" && paragraph.parentElement ? paragraph.parentElement : paragraph;
+  const lineBox = lineBlock.getBoundingClientRect();
+  const scale = lineBlock.offsetWidth > 0 ? lineBox.width / lineBlock.offsetWidth : 1;
+  return { lineBlock, lineBox, scale };
+}
+
+/**
+ * A paragraph with tab stops: each tab is sized by the stops (tabGapsPxFor) from the widths of the text between the
+ * tabs, measured in unscaled px. The stops are measured from where the paragraph's text starts, as the other renderers do.
+ */
+function layoutStopTabs(paragraph: HTMLElement, tabs: HTMLElement[], stops: TabStop[]): void {
+  const { scale } = lineBoxOf(paragraph);
+  const ends: (HTMLElement | null)[] = [...tabs, null];
+  const widths = ends.map((end, i) => {
+    const range = document.createRange();
+    if (i === 0) range.setStart(paragraph, 0);
+    else range.setStartAfter(tabs[i - 1]);
+    if (end) range.setEndBefore(end);
+    else range.setEnd(paragraph, paragraph.childNodes.length);
+    return range.getBoundingClientRect().width / scale;
+  });
+  tabGapsPxFor(widths, stops).forEach((w, i) => {
+    tabs[i].style.width = `${w}px`;
+  });
+}
+
+/**
+ * A paragraph without tab stops: its LAST tab right-aligns what follows, and an earlier tab (Tab pressed at the start
+ * of a line, or twice) is an ordinary indent to the next 0.5in stop, as in Docs.
+ */
+function layoutRightTab(paragraph: HTMLElement, tabs: HTMLElement[]): void {
+  const tab = tabs[tabs.length - 1];
+  const { lineBlock, lineBox, scale } = lineBoxOf(paragraph);
+  const contentLeft = lineBox.left + parseFloat(getComputedStyle(lineBlock).paddingLeft || "0") * scale;
+  for (const t of tabs) {
+    if (t === tab) break;
+    t.style.width = `${tabGapPx((t.getBoundingClientRect().left - contentLeft) / scale)}px`;
+  }
+  const contentRight = lineBox.right - parseFloat(getComputedStyle(lineBlock).paddingRight || "0") * scale;
+  const tabLeft = tab.getBoundingClientRect().left;
+
+  const after = document.createRange();
+  after.setStartAfter(tab);
+  after.setEnd(paragraph, paragraph.childNodes.length);
+  const rects = Array.from(after.getClientRects()).filter((r) => r.width > 0);
+  // A styled run reports both its element box and its text box on the same line, so count lines, not rects.
+  const wraps = new Set(rects.map((r) => Math.round(r.top / scale))).size > 1;
+  const afterWidth = rects.length ? after.getBoundingClientRect().width : 0;
+  tab.style.width = `${tabWidth({ contentRight, tabLeft, afterWidth, scale, wraps })}px`;
+}
+
+/** Sizes every tab in the editor: a paragraph with tab stops by its stops, any other by the default rule. */
 function layoutTabs(root: HTMLElement): void {
   const paragraphs = new Set<HTMLElement>();
   for (const tab of Array.from(root.querySelectorAll<HTMLElement>("span.doc-tab"))) {
@@ -360,36 +422,13 @@ function layoutTabs(root: HTMLElement): void {
   }
   for (const paragraph of paragraphs) {
     const tabs = Array.from(paragraph.querySelectorAll<HTMLElement>("span.doc-tab"));
-    // The LAST tab is the right-aligned one: it stretches so what follows ends at the margin. A tab before it
-    // (Tab pressed at the start of a line, or twice) is an ordinary indent to the next 0.5in stop, as in Docs.
-    const tab = tabs[tabs.length - 1];
-    // A paragraph inside a list item is inline: its box is its text, so the line's edge is the item's.
-    const lineStyle = getComputedStyle(paragraph);
-    const lineBlock = lineStyle.display === "inline" && paragraph.parentElement ? paragraph.parentElement : paragraph;
-    const lineBox = lineBlock.getBoundingClientRect();
-    const lineScale = lineBlock.offsetWidth > 0 ? lineBox.width / lineBlock.offsetWidth : 1;
-    const contentLeft = lineBox.left + parseFloat(getComputedStyle(lineBlock).paddingLeft || "0") * lineScale;
     for (const t of tabs) {
       t.style.display = "inline-block";
       t.style.width = "0px";
     }
-    for (const t of tabs) {
-      if (t === tab) break;
-      t.style.width = `${tabGapPx((t.getBoundingClientRect().left - contentLeft) / lineScale)}px`;
-    }
-    const box = lineBox;
-    const scale = lineScale;
-    const contentRight = box.right - parseFloat(getComputedStyle(lineBlock).paddingRight || "0") * scale;
-    const tabLeft = tab.getBoundingClientRect().left;
-
-    const after = document.createRange();
-    after.setStartAfter(tab);
-    after.setEnd(paragraph, paragraph.childNodes.length);
-    const rects = Array.from(after.getClientRects()).filter((r) => r.width > 0);
-    // A styled run reports both its element box and its text box on the same line, so count lines, not rects.
-    const wraps = new Set(rects.map((r) => Math.round(r.top / scale))).size > 1;
-    const afterWidth = rects.length ? after.getBoundingClientRect().width : 0;
-    tab.style.width = `${tabWidth({ contentRight, tabLeft, afterWidth, scale, wraps })}px`;
+    const stops = parseTabStops(paragraph.getAttribute("data-tabs"));
+    if (stops) layoutStopTabs(paragraph, tabs, stops);
+    else layoutRightTab(paragraph, tabs);
   }
 }
 

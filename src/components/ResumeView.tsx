@@ -1,8 +1,9 @@
 import { Fragment, useLayoutEffect, useRef, type CSSProperties } from "react";
 import { cssFontStack } from "@/lib/doc/fonts";
-import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_PT, DEFAULT_LINE_HEIGHT } from "@/lib/doc/types";
+import { formatTabStops, parseTabStops } from "@/lib/doc/model";
+import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_PT, DEFAULT_LINE_HEIGHT, type TabStop } from "@/lib/doc/types";
 import {
-  hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, splitAtTabs, tabGapsPx, type Run, type RenderLine,
+  hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, splitAtTabs, tabGapsPxFor, type Run, type RenderLine,
   type RenderParagraph, type RunStyle,
 } from "@/lib/docRender";
 import { resumeDoc } from "@/lib/resume";
@@ -67,9 +68,13 @@ function LeftRuns({ runs }: { runs: Run[] }) {
   );
 }
 
-/** One line: the text, or the text before a tab on the left and the text after it on the right margin. */
-function LineView({ line }: { line: RenderLine }) {
-  if (!line.right) return <div data-tab-line><LeftRuns runs={line.left} /></div>;
+/**
+ * One line: the text, or the text before a tab on the left and the text after it on the right margin. A paragraph with
+ * tab stops carries them on its line (data-tabs), so layoutTabStops sizes the gaps by them.
+ */
+function LineView({ line, stops }: { line: RenderLine; stops: TabStop[] | null }) {
+  const tabs = stops ? formatTabStops(stops) : undefined;
+  if (!line.right) return <div data-tab-line data-tabs={tabs}><LeftRuns runs={line.left} /></div>;
   return (
     <div data-tab-line style={{ display: "flex", justifyContent: "space-between" }}>
       <span><LeftRuns runs={line.left} /></span>
@@ -79,17 +84,17 @@ function LineView({ line }: { line: RenderLine }) {
 }
 
 /**
- * Sizes every earlier-tab gap under `root` from the measured widths of the parts before it. The same stop rule as the
- * editor (tabGapsPx), so a line reads the same here as in the editor. Parts are measured in order, so each gap's
- * position is known before it is sized. offsetWidth (not getBoundingClientRect) is the unscaled layout width: the
- * page is zoomed by a CSS transform (ZoomFrame), so the stops stay the same at every zoom and need no re-measure.
+ * Sizes every tab gap under `root` from the measured widths of the parts before it: the same rules as the editor
+ * (tabGapsPxFor), so a line reads the same here as in the editor. offsetWidth (not getBoundingClientRect) is the unscaled
+ * layout width: the page is zoomed by a CSS transform (ZoomFrame), so the stops stay the same at every zoom and need no
+ * re-measure.
  */
 function layoutTabStops(root: HTMLElement): void {
   for (const line of Array.from(root.querySelectorAll<HTMLElement>("[data-tab-line]"))) {
     const gaps = Array.from(line.querySelectorAll<HTMLElement>("[data-tab-gap]"));
     for (const g of gaps) g.style.width = "0px";
     const widths = Array.from(line.querySelectorAll<HTMLElement>("[data-tab-part]")).map((p) => p.offsetWidth);
-    tabGapsPx(widths).forEach((w, i) => {
+    tabGapsPxFor(widths, parseTabStops(line.getAttribute("data-tabs"))).forEach((w, i) => {
       gaps[i].style.width = `${w}px`;
     });
   }
@@ -126,7 +131,7 @@ function ParagraphView({ p }: { p: RenderParagraph }) {
         )}
         <div style={{ flex: 1, minWidth: 0, whiteSpace: "pre-wrap" }}>
           {linesWithMarker(p).map((line, i) => (
-            <LineView key={i} line={line} />
+            <LineView key={i} line={line} stops={p.tabStops} />
           ))}
         </div>
       </div>
