@@ -242,3 +242,41 @@ ${JSON.stringify(experiences.map((x) => ({ id: x.id, type: x.type, organization:
 
 Return ONLY JSON: { "bullets": { "<experience id>": ["...", "..."] } }`;
 }
+
+/**
+ * Pasted resume text (or a .txt/.md upload) as JSON. The text has no formatting, so the model works out the
+ * structure. It copies the wording exactly and never invents anything.
+ */
+export function parseResumePrompt(text: string) {
+  return `Convert this resume text into JSON. The text is unformatted: work out the structure yourself, meaning the name,
+the contact line, the section headings (Education, Experience, Projects, Skills...), and within each section each entry
+(a job, school, project or activity) with its dates and its bullets.
+Preserve the wording exactly; do not improve, correct or invent anything.
+
+Shape:
+{
+  "header": { "name": "the candidate's name", "contact": "one line: location • email • phone • links, as written" },
+  "sections": [
+    { "title": "section heading exactly as written (e.g. Education, Experience, Projects, Skills)",
+      "items": [ {
+        "title": "organization, school or project name (\\"\\" if none)",
+        "subtitle": "job title/position, degree, or tech stack (\\"\\" if none)",
+        "location": "city/state or Remote (\\"\\" if none)",
+        "dates": "date range or graduation date (\\"\\" if none)",
+        "bullets": ["one string per bullet, without the bullet glyph"] } ] }
+  ]
+}
+
+Rules:
+- NEVER invent facts, numbers, dates, names, employers, tools or results. Copy the candidate's words verbatim.
+- A line that is a single labelled list, such as "Languages: Python, SQL", is an item whose "title" is the label
+  ("Languages"), whose "subtitle" is the value ("Python, SQL"), with "location": "", "dates": "" and "bullets": [].
+- Lines under an entry that start with a bullet glyph (•, -, *, ●) or are clearly separate points are its "bullets".
+- Keep [placeholders] exactly as written, brackets included.
+- Use "" for anything not stated. Return ONLY the JSON.
+
+RESUME TEXT:
+"""
+${text}
+"""`;
+}

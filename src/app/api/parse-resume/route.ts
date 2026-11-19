@@ -5,19 +5,28 @@ import { flattenDoc } from "@/lib/doc/model";
 import type { DocJSON } from "@/lib/doc/types";
 import type { Resume } from "@/lib/types";
 import { friendlyError } from "@/lib/api";
+import { geminiJSON } from "@/lib/gemini";
+import { parseResumePrompt } from "@/lib/prompts";
+import { budgetErrorResponse, withAiBudget } from "@/lib/aiBudget";
 import { NoTextError, pdfToDoc } from "@/lib/import/pdfToDoc";
-import { textToDoc } from "@/lib/import/textToDoc";
+import { harvardFromParsed } from "@/lib/import/textToHarvard";
+
+// AI calls can be slow; Vercel (Fluid compute) allows up to 300s.
+export const maxDuration = 120;
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024; // Vercel caps request bodies at ~4.5 MB
+const MAX_TEXT_CHARS = 60_000;
 
 const hasText = (doc: DocJSON) => flattenDoc(doc).some((p) => p.text.trim());
 
 /**
- * Accepts JSON {text} or multipart form-data with a "file" (PDF or .txt/.md). Returns {resume}: a version 4 resume
- * whose document is the import as it is. Nothing is rewritten: a PDF keeps its fonts, sizes, lines and margins.
+ * Accepts JSON {text} or multipart form-data with a "file" (PDF or .txt/.md). Returns {resume}, a version 4 resume.
+ * A PDF is imported exactly as it is (no AI): its document keeps its fonts, sizes, lines and margins.
+ * Pasted text and .txt/.md files have no formatting, so the AI works out the structure and the result is laid out
+ * in the Harvard template (the look of the guided builder).
  */
 export async function POST(req: Request) {
-  const { user } = await requireUser();
+  const { supabase, user } = await requireUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
   let text: string | null = null;
@@ -31,6 +40,7 @@ export async function POST(req: Request) {
       pdf = new Uint8Array(await file.arrayBuffer());
     } else if (file.type.startsWith("text/") || /\.(txt|md)$/i.test(file.name)) {
       text = await file.text();
+      if (!text.trim()) return NextResponse.json({ error: "Couldn't find any text in that file." }, { status: 422 });
     } else {
       return NextResponse.json(
         { error: "Upload a PDF or text file. For Word/Google Docs, use File → Download → PDF first." },
@@ -42,19 +52,40 @@ export async function POST(req: Request) {
     if (!text.trim()) return NextResponse.json({ error: "Paste your resume text." }, { status: 400 });
   }
 
-  try {
-    if (pdf) {
+  if (pdf) {
+    try {
       const { doc, page } = await pdfToDoc(pdf);
       return resumeResponse(withDoc({ ...emptyResume(), page }, doc), doc);
+    } catch (e) {
+      if (e instanceof NoTextError) return NextResponse.json({ error: e.message }, { status: 422 });
+      console.error("parse-resume failed:", e);
+      return NextResponse.json(
+        { error: friendlyError(e, "Couldn't read that file. Export it again as a text PDF, or paste the text.") },
+        { status: 422 },
+      );
     }
-    const doc = textToDoc(text ?? "");
-    return resumeResponse(withDoc(emptyResume(), doc), doc);
+  }
+
+  const source = text ?? "";
+  if (source.length > MAX_TEXT_CHARS) {
+    return NextResponse.json({ error: "That text is over 60,000 characters. Paste only the resume." }, { status: 413 });
+  }
+  try {
+    const parsed = await withAiBudget(supabase, { action: "parse_resume" }, (meter) =>
+      geminiJSON<unknown>(parseResumePrompt(source), { temperature: 0, onUsage: meter.add }),
+    );
+    const resume = harvardFromParsed(parsed);
+    if (!resume.sections.length) {
+      return NextResponse.json({ error: "Couldn't find any resume sections in that file." }, { status: 422 });
+    }
+    return NextResponse.json({ resume });
   } catch (e) {
-    if (e instanceof NoTextError) return NextResponse.json({ error: e.message }, { status: 422 });
+    const limited = budgetErrorResponse(e);
+    if (limited) return limited;
     console.error("parse-resume failed:", e);
     return NextResponse.json(
-      { error: friendlyError(e, "Couldn't read that file. Export it again as a text PDF, or paste the text.") },
-      { status: 422 },
+      { error: friendlyError(e, "Couldn't read that resume. Try again, or paste the text instead.") },
+      { status: 502 },
     );
   }
 }
