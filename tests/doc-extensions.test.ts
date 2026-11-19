@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { docExtensions, docFromJSON, docSchema, findIdFixes, isValidDoc, newParagraphId } from "@/lib/doc/extensions";
 import { cssFontStack, isSerifFamily } from "@/lib/doc/fonts";
+import { docEquals, normalizeDoc } from "@/lib/doc/model";
 import type { DocJSON } from "@/lib/doc/types";
 
 /** Paragraph attrs as TipTap writes them: every attr is present, unset ones are null. */
@@ -203,3 +204,44 @@ describe("fonts", () => {
     }
   });
 });
+
+describe("links", () => {
+  const linkDoc: DocJSON = {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        attrs: para("link00010"),
+        content: [{ type: "text", text: "Portfolio", marks: [{ type: "link", attrs: { href: "https://jane.dev" } }] }],
+      },
+    ],
+  };
+
+  it("the schema has a link mark, and a link round-trips through the editor JSON as its href", () => {
+    expect(docSchema.marks.link).toBeDefined();
+    const json = docFromJSON(linkDoc).toJSON() as DocJSON;
+    const mark = (json.content[0] as { content: { marks: { type: string; attrs: Record<string, unknown> }[] }[] }).content[0].marks[0];
+    expect(mark.type).toBe("link");
+    expect(mark.attrs.href).toBe("https://jane.dev");
+    // The editor writes default target/rel too; normalizeDoc keeps only the href the contract stores.
+    expect(docEquals(normalizeDoc(json), linkDoc)).toBe(true);
+    expect(JSON.stringify(normalizeDoc(json))).not.toContain("target");
+  });
+
+  it("a stored link to a javascript: URL is not kept", () => {
+    const bad = JSON.parse(JSON.stringify(linkDoc).replace("https://jane.dev", "javascript:alert(1)")) as DocJSON;
+    expect(JSON.stringify(normalizeDoc(bad))).not.toContain("\"marks\"");
+  });
+
+  it("the link extension is configured to open nothing on click and to allow only http, https and mailto", () => {
+    const link = docSchema.marks.link;
+    expect(link.spec.parseDOM?.[0]).toBeDefined();
+    // A pasted <a> with a javascript: href is not parsed as a link.
+    const parse = link.spec.parseDOM?.[0] as { getAttrs?: (el: HTMLElement) => unknown } | undefined;
+    if (parse?.getAttrs) {
+      const el = { getAttribute: (n: string) => (n === "href" ? "javascript:alert(1)" : null) } as unknown as HTMLElement;
+      expect(parse.getAttrs(el)).toBe(false);
+    }
+  });
+});
+

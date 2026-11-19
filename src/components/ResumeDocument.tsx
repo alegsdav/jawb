@@ -141,6 +141,7 @@ function commandsFor(editor: Editor, openLink: () => void): DocCommands {
         return;
       }
       const safe = normalizeHref(href);
+      console.log("DBG setLink", href, safe, editor.state.selection.empty, editor.state.selection.from, editor.state.selection.to);
       if (!safe) return;
       if (!editor.state.selection.empty) {
         chain().setLink({ href: safe }).run();
@@ -298,6 +299,7 @@ export function ResumeDocument({
   }
 
   const commands = useMemo(() => (editor ? commandsFor(editor, () => openLinkRef.current()) : null), [editor]);
+  if (typeof window !== "undefined" && editor) (window as unknown as { __ed: Editor }).__ed = editor; // DBG
 
   // The link box and bubble follow scrolling and resizing (their anchor is a viewport position).
   useEffect(() => {

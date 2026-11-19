@@ -9,6 +9,7 @@ import {
   flattenDoc,
   insertParagraphsAfter,
   normalizeDoc,
+  normalizeHref,
   paragraph,
   paragraphText,
   removeParagraphs,
@@ -362,3 +363,52 @@ describe("docEquals", () => {
     expect(docEquals(a, d)).toBe(false);
   });
 });
+
+describe("link marks", () => {
+  const linked = (href: string, text = "Site"): DocJSON => ({
+    type: "doc",
+    content: [{ type: "paragraph", attrs: { id: "link00001" }, content: [{ type: "text", text, marks: [{ type: "link", attrs: { href } }] }] }],
+  });
+  const markOf = (doc: DocJSON) => (doc.content[0] as { content?: { marks?: unknown[] }[] }).content?.[0]?.marks;
+
+  it("keeps http, https and mailto links, with only the href", () => {
+    expect(markOf(normalizeDoc(linked("https://example.com/a?b=1")))).toEqual([{ type: "link", attrs: { href: "https://example.com/a?b=1" } }]);
+    expect(markOf(normalizeDoc(linked("http://example.com")))).toEqual([{ type: "link", attrs: { href: "http://example.com" } }]);
+    expect(markOf(normalizeDoc(linked("mailto:jane@example.com")))).toEqual([{ type: "link", attrs: { href: "mailto:jane@example.com" } }]);
+  });
+
+  it("drops the editor's default attrs (target, rel, class, title)", () => {
+    const withAttrs: DocJSON = {
+      type: "doc",
+      content: [{ type: "paragraph", attrs: { id: "link00002" }, content: [{ type: "text", text: "x", marks: [{ type: "link", attrs: { href: "https://a.com", target: "_blank", rel: "noopener", class: null, title: null } as never }] }] }],
+    };
+    expect(markOf(normalizeDoc(withAttrs))).toEqual([{ type: "link", attrs: { href: "https://a.com" } }]);
+  });
+
+  it("gives a bare host an https:// address", () => {
+    expect(markOf(normalizeDoc(linked("www.example.com")))).toEqual([{ type: "link", attrs: { href: "https://www.example.com" } }]);
+    expect(markOf(normalizeDoc(linked("  linkedin.com/in/jane  ")))).toEqual([{ type: "link", attrs: { href: "https://linkedin.com/in/jane" } }]);
+  });
+
+  it("drops javascript:, data:, other schemes, bad mailto and whitespace-laden hrefs (the text stays)", () => {
+    for (const href of ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,hi", "ftp://x.com", "mailto:nope", "https://", "not a url", "", 42]) {
+      const doc = normalizeDoc(linked(href as string));
+      expect(markOf(doc)).toBeUndefined();
+      expect(docPlainText(doc)).toBe("Site");
+    }
+  });
+});
+
+describe("normalizeHref", () => {
+  it("accepts http(s) and mailto and returns the trimmed value", () => {
+    expect(normalizeHref(" https://x.com/p ")).toBe("https://x.com/p");
+    expect(normalizeHref("mailto:a@b.co")).toBe("mailto:a@b.co");
+  });
+  it("adds https:// to bare hosts and refuses other schemes", () => {
+    expect(normalizeHref("github.com/jane")).toBe("https://github.com/jane");
+    expect(normalizeHref("javascript:alert(1)")).toBeNull();
+    expect(normalizeHref("vbscript:x")).toBeNull();
+    expect(normalizeHref("localhost")).toBeNull();
+  });
+});
+
