@@ -254,3 +254,18 @@ describe("resumeFromDocx", () => {
     expect(() => resumeFromDocx(makeDocx(`<w:p/><w:p><w:r><w:t>   </w:t></w:r></w:p>`))).toThrow(EMPTY_DOCX_MESSAGE);
   });
 });
+
+describe("docxToDoc limits", () => {
+  it("refuses a zip whose parts inflate past the limit, before inflating them", () => {
+    const huge = new Uint8Array(40 * 1024 * 1024); // zeros compress to a few KB
+    const zip = zipSync({ "word/document.xml": huge });
+    expect(zip.length).toBeLessThan(1024 * 1024);
+    expect(() => docxToDoc(zip)).toThrow(/too large/);
+  });
+
+  it("refuses absurdly deep XML", () => {
+    const deep = "<w:document><w:body>" + "<w:p>".repeat(5000) + "</w:body></w:document>";
+    const zip = zipSync({ "word/document.xml": new TextEncoder().encode(deep) });
+    expect(() => docxToDoc(zip)).toThrow(/readable Word/);
+  });
+});

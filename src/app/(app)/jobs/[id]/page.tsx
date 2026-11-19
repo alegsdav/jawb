@@ -796,6 +796,7 @@ export default function JobPage() {
    */
   async function resetToMaster() {
     if (applied || analyzing) return;
+    if (conflictRef.current) return setError("Resolve the save conflict above before resetting to your master resume.");
     if (!confirm(
       "Replace this job's resume with your current master resume (all its text and formatting)? " +
       "Edits you made for this job are replaced. Then the AI re-analyzes it for this job.",
@@ -807,6 +808,13 @@ export default function JobPage() {
     setMaster(fresh);
     // showDoc (not setResume) so the autosave and analyze below read the new copy, not the one on screen before this render.
     showDoc(cloneForJob(fresh));
+    // Save first, and stop if that fails: the analysis reads the saved copy, so it must be the reset one.
+    try {
+      await persistResume();
+    } catch (e) {
+      return fail(e, "Couldn't save the reset resume. Check your connection, then try again.");
+    }
+    if (conflictRef.current) return; // the conflict banner asks what to keep; analyze after that
     showFlash("Reset to your master resume. Re-analyzing…", 5000);
     await analyze();
   }

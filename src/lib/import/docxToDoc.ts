@@ -52,14 +52,19 @@ export function parseXml(src: string): XNode {
       top.text += m[1];
     } else if (m[2] !== undefined) {
       const tag = localName(m[2].trim());
-      const idx = stack.map((n) => n.tag).lastIndexOf(tag);
+      let idx = stack.length - 1;
+      while (idx > 0 && stack[idx].tag !== tag) idx--;
       if (idx > 0) stack.length = idx;
     } else if (m[3] !== undefined) {
       const attrs: Record<string, string> = {};
       for (const a of (m[4] ?? "").matchAll(ATTR)) attrs[a[1]] = decode(a[2] ?? a[3] ?? "");
       const node: XNode = { tag: localName(m[3]), attrs, kids: [], text: "" };
       top.kids.push(node);
-      if (m[5] !== "/") stack.push(node);
+      if (m[5] !== "/") {
+        // Real documents nest a few dozen levels; a file nested thousands deep is broken or hostile.
+        if (stack.length > MAX_XML_DEPTH) throw new DocxError("That file isn't a readable Word (.docx) document.");
+        stack.push(node);
+      }
     } else if (m[6] !== undefined) {
       top.text += decode(m[6]);
     }
@@ -188,6 +193,12 @@ type Ctx = {
   /** Relationship id -> external target (hyperlinks). */
   rels: Map<string, string>;
 };
+
+/** Limits on what a .docx may inflate to (a long resume's document.xml is well under 1 MB). */
+const MAX_PART_BYTES = 30 * 1024 * 1024;
+const MAX_UNPACKED_BYTES = 60 * 1024 * 1024;
+const TOO_BIG = "That Word file is too large to open. Save it as PDF, or remove images and try again.";
+const MAX_XML_DEPTH = 1000;
 
 const KEEP = new Set([
   "word/document.xml",
@@ -503,8 +514,18 @@ function pageOf(body: XNode): PageSetup {
 export function docxToDoc(data: Uint8Array): { doc: DocJSON; page: PageSetup } {
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipSync(data, { filter: (f) => KEEP.has(f.name) });
-  } catch {
+    let unpacked = 0;
+    files = unzipSync(data, {
+      filter: (f) => {
+        if (!KEEP.has(f.name)) return false;
+        // Sizes come from the zip header, before inflating: refuse a "zip bomb" instead of filling memory.
+        unpacked += f.originalSize;
+        if (f.originalSize > MAX_PART_BYTES || unpacked > MAX_UNPACKED_BYTES) throw new DocxError(TOO_BIG);
+        return true;
+      },
+    });
+  } catch (e) {
+    if (e instanceof DocxError) throw e;
     throw new DocxError("That file isn't a readable Word (.docx) document.");
   }
   const { ctx, body } = readContext(files);

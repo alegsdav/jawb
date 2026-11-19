@@ -220,3 +220,13 @@ describe("links in the read-only layout and the PDF", () => {
     ]);
   });
 });
+
+describe("tab rows in the view and PDF follow the editor's last-tab rule", () => {
+  it("right-aligns after the last tab; an earlier tab is an indent on the left", () => {
+    const d: DocJSON = { type: "doc", content: [paragraph("\tAcme Corp\tBoston, MA")] };
+    const [p] = renderBlocks(d) as RenderParagraph[];
+    const [line] = p.lines;
+    expect(line.left.map((r) => r.text).join("")).toBe("    Acme Corp");
+    expect(line.right?.map((r) => r.text).join("")).toBe("Boston, MA");
+  });
+});

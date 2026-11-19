@@ -24,7 +24,7 @@ const BULLETS = ["•", "◦", "▪"];
 export type RunStyle = { bold: boolean; italic: boolean; underline: boolean; sizePt: number; fontFamily: string };
 /** A run of text; href is set when a link mark covers it (http(s) or mailto). */
 export type Run = { text: string; style: RunStyle; href?: string };
-/** One visual line (a hard break starts a new one). With a tab, `right` is the text after the first tab. */
+/** One visual line (a hard break starts a new one). With a tab, `right` is the text after the last tab. */
 export type RenderLine = { left: Run[]; right: Run[] | null };
 /** A bullet or number at x (points from the left margin); the paragraph's text starts at textIndentPt. */
 export type RenderMarker = { text: string; x: number; style: RunStyle };
@@ -79,25 +79,34 @@ function hrefOfMarks(marks: DocMark[] | undefined): string | undefined {
   return raw ? normalizeHref(raw) ?? undefined : undefined;
 }
 
-/** Lines of a paragraph: split at hard breaks, and each line at its first tab (text after a second tab joins the right). */
+/**
+ * Lines of a paragraph: split at hard breaks, and each line at its LAST tab, which right-aligns what follows (the
+ * editor's rule, see layoutTabs). An earlier tab is an indent; here it is drawn as a fixed gap (four spaces),
+ * an approximation of the editor's 0.5in stops.
+ */
 function linesOf(content: DocInline[] | undefined): RenderLine[] {
-  const lines: RenderLine[] = [];
-  let cur: RenderLine = { left: [], right: null };
+  const groups: DocInline[][] = [[]];
   for (const n of content ?? []) {
-    if (n.type === "hardBreak") {
-      lines.push(cur);
-      cur = { left: [], right: null };
-    } else if (n.type === "tab") {
-      cur.right ??= [];
-    } else if (n.text) {
-      const run: Run = { text: n.text, style: styleOf(n.marks) };
-      const href = hrefOfMarks(n.marks);
-      if (href) run.href = href;
-      (cur.right ?? cur.left).push(run);
-    }
+    if (n.type === "hardBreak") groups.push([]);
+    else groups[groups.length - 1].push(n);
   }
-  lines.push(cur);
-  return lines.map((l) => ({ left: l.left, right: l.right?.length ? l.right : null }));
+  return groups.map((items) => {
+    const last = items.map((n) => n.type).lastIndexOf("tab");
+    const left: Run[] = [];
+    const right: Run[] = [];
+    items.forEach((n, i) => {
+      const into = last >= 0 && i > last ? right : left;
+      if (n.type === "tab") {
+        if (i !== last) into.push({ text: "    ", style: styleOf(undefined) });
+      } else if (n.type === "text" && n.text) {
+        const run: Run = { text: n.text, style: styleOf(n.marks) };
+        const href = hrefOfMarks(n.marks);
+        if (href) run.href = href;
+        into.push(run);
+      }
+    });
+    return { left, right: right.length ? right : null };
+  });
 }
 
 /** Position of a paragraph inside a list: its level (1 = top), its type, and whether it is the item's first paragraph. */
