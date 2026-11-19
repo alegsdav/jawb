@@ -86,13 +86,9 @@ export function ResumeView({ value }: { value: Resume }) {
             lineHeight: DEFAULT_LINE_HEIGHT,
           }}
         >
-          {blocks.map((b, i) =>
-            b.kind === "rule" ? (
-              <hr key={i} style={{ border: 0, borderTop: RULE_BORDER, margin: "4pt 0" }} />
-            ) : (
-              <ParagraphView key={i} p={b} />
-            ),
-          )}
+          {blocks.map((p, i) => (
+            <ParagraphView key={i} p={p} />
+          ))}
         </div>
       </div>
     </div>

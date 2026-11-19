@@ -97,7 +97,7 @@ describe("pdfToDoc: a Harvard-style resume keeps its layout", () => {
     expect(paraNamed(doc, "EDUCATION").attrs.borderBottom).toBe(true);
     expect(paraNamed(doc, "EXPERIENCE").attrs.borderBottom).toBe(true);
     expect(paraNamed(doc, "Skills").attrs.borderBottom).toBeUndefined();
-    expect(doc.content.some((b) => b.type === "horizontalRule")).toBe(false);
+    expect(doc.content.every((b) => b.type === "paragraph" || b.type === "bulletList" || b.type === "orderedList")).toBe(true);
   });
 
   it("gives the heading the space above it", async () => {
@@ -110,11 +110,11 @@ describe("pdfToDoc: a Harvard-style resume keeps its layout", () => {
     await ready;
     const name = marksOfText(paraNamed(doc, "Ada Lovelace"), "Ada Lovelace");
     expect(hasMark(name, "bold")).toBe(true);
-    expect(textStyle(name)).toEqual({ fontSize: "16pt", fontFamily: "Times" });
+    expect(textStyle(name)).toEqual({ fontSize: "16pt", fontFamily: "Times New Roman" });
 
     const row = paraNamed(doc, "Harvard University");
     expect(hasMark(marksOfText(row, "Harvard University"), "bold")).toBe(true);
-    expect(textStyle(marksOfText(row, "Cambridge, MA"))).toEqual({ fontSize: "10pt", fontFamily: "Times" });
+    expect(textStyle(marksOfText(row, "Cambridge, MA"))).toEqual({ fontSize: "10pt", fontFamily: "Times New Roman" });
 
     const degree = marksOfText(paraNamed(doc, "B.A. in Economics"), "B.A. in Economics");
     expect(hasMark(degree, "italic")).toBe(true);
@@ -151,10 +151,11 @@ describe("pdfToDoc: other documents and edge cases", () => {
     expect(page.marginLeft).toBeCloseTo(60 / PT, 1);
   });
 
-  it("turns a rule far from the text above it into a rule block", async () => {
+  it("turns a rule far from the text above it into an empty paragraph with a bottom border", async () => {
     const { doc } = await pdfToDoc(bytes(await ruledPdf()));
-    const types = doc.content.map((b) => (b.type === "paragraph" ? paragraphText(b) : b.type));
-    expect(types).toEqual(["Top line", "horizontalRule", "Below line"]);
+    const texts = doc.content.map((b) => (b.type === "paragraph" ? paragraphText(b) : b.type));
+    expect(texts).toEqual(["Top line", "", "Below line"]);
+    expect(doc.content[1]).toMatchObject({ type: "paragraph", attrs: { borderBottom: true } });
     expect(paraNamed(doc, "Top line").attrs.borderBottom).toBeUndefined();
   });
 

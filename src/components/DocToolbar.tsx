@@ -26,7 +26,7 @@ const onDocFocusIn = (e: FocusEvent) => {
  * Remembers the last focused document target (see DOC_FIELD_SELECTOR) so that menu commands like
  * Cut/Copy/Paste/Select all can act on it. Installs one document listener, shared by all callers.
  */
-export function useDocFieldTracker(): void {
+function useDocFieldTracker(): void {
   useEffect(() => {
     docFieldTrackerRefs += 1;
     if (docFieldTrackerRefs === 1) document.addEventListener("focusin", onDocFocusIn);
@@ -309,7 +309,7 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
 }
 
 /** "Feedback: On" / "Feedback: Off": the same words on the toolbar toggle and in the phone's More menu. */
-export const toggleLabel = (label: string, on: boolean) => `${label}: ${on ? "On" : "Off"}`;
+const toggleLabel = (label: string, on: boolean) => `${label}: ${on ? "On" : "Off"}`;
 
 const Dot = ({ color }: { color: string }) => <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />;
 

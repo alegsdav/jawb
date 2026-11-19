@@ -31,7 +31,7 @@ export type DocCommands = {
   adjustSpaceBefore(deltaPt: number): void;
   adjustSpaceAfter(deltaPt: number): void;
   toggleBorderBottom(): void;
-  insertHorizontalRule(): void;
+  insertHorizontalLine(): void;
   /** Remove all text formatting and paragraph formatting from the selected paragraphs. */
   clearFormatting(): void;
 };

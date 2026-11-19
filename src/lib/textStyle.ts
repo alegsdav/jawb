@@ -6,7 +6,7 @@ import type { Item, TextStyle } from "./types";
  * normalizeResume in resume.ts), so nothing else should read this file.
  */
 
-export type StyleField = "name" | "contact" | "sectionTitle" | "title" | "subtitle" | "location" | "dates";
+type StyleField = "name" | "contact" | "sectionTitle" | "title" | "subtitle" | "location" | "dates";
 
 // Same predicate as isInlineItem in resume.ts. Inlined here because resume.ts imports cleanStyle from
 // this file, so importing back would be circular.

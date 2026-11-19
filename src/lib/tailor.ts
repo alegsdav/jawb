@@ -202,7 +202,7 @@ function rebase(copy: Resume, master: Resume, plan: PullPlan): Record<string, st
   return next;
 }
 
-/** A document node transform for every paragraph (list paragraphs included). Horizontal rules are kept. */
+/** A document node transform for every paragraph (list paragraphs included). */
 function mapParagraphs(doc: DocJSON, fn: (p: DocParagraph) => DocParagraph): DocJSON {
   const mapList = (list: DocList): DocList =>
     ({
@@ -214,7 +214,7 @@ function mapParagraphs(doc: DocJSON, fn: (p: DocParagraph) => DocParagraph): Doc
     }) as DocList;
   return {
     ...doc,
-    content: (doc.content ?? []).map((b) => (b.type === "paragraph" ? fn(b) : b.type === "horizontalRule" ? b : mapList(b))),
+    content: (doc.content ?? []).map((b) => (b.type === "paragraph" ? fn(b) : mapList(b))),
   };
 }
 

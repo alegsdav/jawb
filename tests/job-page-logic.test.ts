@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  addAllFromMaster, addFromMaster, applyPull, cloneForJob, dismissAdditions, HEADER_CONTACT, HEADER_NAME, makeBaseline,
-  missingOptionalColumns, planPull, resolveRemoval,
+  addAllFromMaster, addFromMaster, applyPull, cloneForJob, dismissAdditions, makeBaseline, missingOptionalColumns, planPull,
+  readBaseline, resolveRemoval,
 } from "@/lib/tailor";
 import {
   answerFact, carryClientState, guardAnalysisNumbers, guardNumbers, missingAnswerFacts, normalizeAnalysis, saveAnswersInOrder,
@@ -9,148 +9,159 @@ import {
 import { createSaveQueue, type SaveState, type Timers } from "@/lib/saveQueue";
 import { friendlyError, GENERIC_MESSAGE, NETWORK_MESSAGE, postApi, SERVER_DOWN_MESSAGE, SIGNED_OUT_MESSAGE } from "@/lib/api";
 import { MIGRATION_HINT, OPTIONAL_JOB_COLUMNS } from "@/lib/db";
-import { bulletTextMap } from "@/lib/resume";
-import type { Analysis, Item, Resume } from "@/lib/types";
+import { buildDoc, flattenDoc, insertParagraphsAfter, paragraph, removeParagraphs, setParagraphText, type FlatEntry } from "@/lib/doc/model";
+import { bulletTextMap, emptyResume, resumeDoc, withDoc } from "@/lib/resume";
+import type { Analysis, Resume } from "@/lib/types";
 
-// ---------- fixtures ----------
+// ---------- fixtures: v4 resumes (paragraphs, as the editor stores them) ----------
 
-const item = (id: string, title: string, bullets: Record<string, string>): Item => ({
-  id, title, subtitle: "", location: "", dates: "", bullets: Object.entries(bullets).map(([bid, text]) => ({ id: bid, text })),
+const line = (id: string, text: string, attrs: Record<string, unknown> = {}): FlatEntry => ({
+  node: paragraph(text, { attrs: { id, ...attrs } }),
+  listType: null,
+  depth: 0,
+  bullet: false,
 });
-
-const master1 = (): Resume => ({
-  version: 2,
-  header: { name: "Ann", contact: "ann@x.com" },
-  sections: [
-    { id: "exp", title: "Experience", items: [item("acme", "Acme", { a: "A1", b: "B1" }), item("beta", "Beta", { c: "C1" })] },
-    { id: "edu", title: "Education", items: [item("uni", "State U", { g: "GPA 3.9" })] },
-  ],
-  facts: ["secret"],
+const bulletLine = (id: string, text: string): FlatEntry => ({
+  node: paragraph(text, { attrs: { id } }),
+  listType: "bulletList",
+  depth: 1,
+  bullet: true,
 });
+/** A section heading: a line with a bottom border (see doc/outline.ts). */
+const heading = (id: string, text: string): FlatEntry => line(id, text, { borderBottom: true, spaceBefore: 6 });
 
-const ids = (r: Resume) => r.sections.map((s) => `${s.id}(${s.items.map((it) => `${it.id}:${it.bullets.map((b) => b.id).join("")}`).join(",")})`).join(" ");
+/** Name, contact, then Experience (Acme with two bullets, Beta with one) and Education (State U with a bullet). */
+const master1 = (): Resume =>
+  withDoc({ ...emptyResume(), facts: ["secret"] }, buildDoc([
+    line("name", "Ann", { textAlign: "center" }),
+    line("contact", "ann@x.com", { textAlign: "center" }),
+    heading("exp", "Experience"),
+    line("acme", "Acme"),
+    bulletLine("a", "A1"),
+    bulletLine("b", "B1"),
+    line("beta", "Beta"),
+    bulletLine("c", "C1"),
+    heading("edu", "Education"),
+    line("uni", "State U"),
+    bulletLine("g", "GPA 3.9"),
+  ]));
 
-// ---------- pull: additions, removals, three-way header ----------
+/** The paragraph ids in document order: the shape of a resume in one string. */
+const ids = (r: Resume) => flattenDoc(resumeDoc(r)).map((p) => p.id).join(" ");
+const withInserted = (r: Resume, afterId: string, entries: FlatEntry[]): Resume =>
+  withDoc(r, insertParagraphsAfter(resumeDoc(r), afterId, entries));
+const without = (r: Resume, drop: string[]): Resume => withDoc(r, removeParagraphs(resumeDoc(r), drop));
+const retext = (r: Resume, id: string, text: string): Resume => withDoc(r, setParagraphText(resumeDoc(r), id, text));
+
+// ---------- pull from master: new content ----------
 
 describe("pull from master: new content", () => {
-  it("offers new bullets, entries and sections the copy lacks, and adds them in the master's position", () => {
+  it("offers new lines, entries and sections the copy lacks, and adds them in the master's position", () => {
     const copy = cloneForJob(master1());
-    const m2 = master1();
-    m2.sections[0].items[0].bullets.splice(1, 0, { id: "a2", text: "New Acme bullet" });
-    m2.sections[0].items.splice(1, 0, item("gamma", "Gamma", { x: "X1" }));
-    m2.sections.splice(1, 0, { id: "awards", title: "Awards", items: [item("prize", "Hackathon winner", {})] });
+    let m2 = withInserted(master1(), "a", [bulletLine("a2", "New Acme bullet")]);
+    m2 = withInserted(m2, "b", [line("gamma", "Gamma"), bulletLine("x", "X1")]);
+    m2 = withInserted(m2, "c", [heading("awards", "Awards"), line("prize", "Hackathon winner")]);
 
     const plan = planPull(copy, m2);
     expect(plan.total).toBe(0);
     expect(plan.additions).toEqual([
-      { kind: "bullet", id: "a2", itemId: "acme", text: "New Acme bullet", where: "Acme" },
-      { kind: "item", id: "gamma", sectionId: "exp", label: "Gamma", where: "Experience", bullets: 1 },
-      { kind: "section", id: "awards", label: "Awards", items: 1 },
+      { kind: "bullet", id: "a2", label: "New Acme bullet", where: "Acme", ids: ["a2"] },
+      { kind: "item", id: "gamma", label: "Gamma", where: "Experience", ids: ["gamma", "x"] },
+      { kind: "section", id: "awards", label: "Awards", where: "", ids: ["awards", "prize"] },
     ]);
 
     const one = addFromMaster(copy, m2, plan.additions[1]);
-    expect(ids(one)).toBe("exp(acme:ab,gamma:x,beta:c) edu(uni:g)");
-    expect(one.baseline?.["item:gamma"]).toBe("Gamma");
+    expect(ids(one)).toBe("name contact exp acme a b gamma x beta c edu uni g");
+    expect(one.baseline?.gamma).toBe("Gamma");
     expect(one.baseline?.x).toBe("X1");
     expect(planPull(one, m2).additions.map((a) => a.id)).toEqual(["a2", "awards"]);
 
     const all = addAllFromMaster(copy, m2);
-    expect(ids(all)).toBe("exp(acme:aa2b,gamma:x,beta:c) awards(prize:) edu(uni:g)");
+    expect(ids(all)).toBe("name contact exp acme a a2 b gamma x beta c awards prize edu uni g");
     expect(planPull(all, m2).additions).toEqual([]);
     expect(all.facts).toBeUndefined(); // facts never come along
   });
 
   it("doesn't offer what the user deleted in this copy", () => {
-    const copy = cloneForJob(master1());
-    copy.sections[0].items[0].bullets = copy.sections[0].items[0].bullets.filter((b) => b.id !== "b");
-    copy.sections[0].items = copy.sections[0].items.filter((it) => it.id !== "beta");
-    copy.sections = copy.sections.filter((s) => s.id !== "edu");
+    const copy = without(cloneForJob(master1()), ["b", "beta", "c", "edu", "uni", "g"]);
     expect(planPull(copy, master1()).additions).toEqual([]);
   });
 
   it("'Leave out' stops offering additions without changing the copy", () => {
     const copy = cloneForJob(master1());
-    const m2 = master1();
-    m2.sections[1].items.push(item("uni2", "College", {}));
+    const m2 = withInserted(master1(), "g", [line("uni2", "College")]);
     const plan = planPull(copy, m2);
     expect(plan.additions).toHaveLength(1);
     const left = dismissAdditions(copy, m2, plan.additions);
-    expect(left.sections).toEqual(copy.sections);
+    expect(ids(left)).toBe(ids(copy));
     expect(planPull(left, m2).additions).toEqual([]);
   });
 
-  it("old baselines without sections/entries still detect a new entry by its bullets, and get upgraded by a pull", () => {
+  it("a baseline from before v4 (with its old header key) still offers new lines, and a pull keeps them offered", () => {
     const m1 = master1();
-    const legacy = { ...cloneForJob(m1), baseline: Object.fromEntries(Object.entries(makeBaseline(m1)).filter(([k]) => !k.includes(":"))) };
-    const m2 = master1();
-    m2.sections[0].items.push(item("delta", "Delta", { d: "D1" }));
-    m2.header.name = "Ann Lee";
+    const legacy = { ...cloneForJob(m1), baseline: readBaseline({ baseline: { ...makeBaseline(m1), "header.name": "Ann" } }) };
+    expect(legacy.baseline).not.toHaveProperty("header.name");
+    const m2 = retext(withInserted(m1, "c", [line("delta", "Delta"), bulletLine("d", "D1")]), "name", "Ann Lee");
     expect(planPull(legacy, m2).additions.map((a) => a.id)).toEqual(["delta"]);
+
     const pulled = applyPull(legacy, m2).resume;
-    expect(pulled.baseline?.["section:exp"]).toBe("Experience");
-    expect(pulled.baseline?.["item:delta"]).toBeUndefined(); // still to be offered
+    expect(pulled.header.name).toBe("Ann Lee");
+    expect(pulled.baseline?.delta).toBeUndefined(); // still to be offered
     expect(planPull(pulled, m2).additions.map((a) => a.id)).toEqual(["delta"]);
   });
 });
 
-describe("pull from master: header is three-way", () => {
+// ---------- pull from master: name and contact lines are ordinary paragraphs ----------
+
+describe("pull from master: name and contact lines", () => {
   it("takes the master's change only where the copy still matches the baseline", () => {
-    const copy = cloneForJob(master1());
-    copy.header.contact = "ann@x.com • for Acme"; // edited only in the copy
-    const m2 = master1();
-    m2.header = { name: "Ann Lee", contact: "ann@new.com" };
-    const plan = planPull(copy, m2);
-    expect(plan).toMatchObject({ header: true, headerKept: true, total: 1 });
-    const r = applyPull(copy, m2);
-    expect(r.resume.header).toEqual({ name: "Ann Lee", contact: "ann@x.com • for Acme" });
-    expect(r.resume.baseline?.[HEADER_NAME]).toBe("Ann Lee");
-    expect(r.resume.baseline?.[HEADER_CONTACT]).toBe("ann@new.com");
-    expect(planPull(r.resume, m2)).toMatchObject({ header: false, headerKept: false, total: 0 });
+    const copy = retext(cloneForJob(master1()), "contact", "ann@x.com • for Acme"); // edited only in the copy
+    const m2 = retext(retext(master1(), "name", "Ann Lee"), "contact", "ann@new.com");
+    expect(planPull(copy, m2)).toMatchObject({ total: 1, skipped: 1 });
+    const r = applyPull(copy, m2).resume;
+    expect(r.header).toEqual({ name: "Ann Lee", contact: "ann@x.com • for Acme" });
+    expect(r.baseline?.name).toBe("Ann Lee");
+    expect(r.baseline?.contact).toBe("ann@new.com");
+    expect(planPull(r, m2)).toMatchObject({ total: 0, skipped: 0 });
   });
 
   it("an edit in the copy alone is never an update", () => {
-    const copy = cloneForJob(master1());
-    copy.header.contact = "mine";
-    expect(planPull(copy, master1())).toMatchObject({ header: false, headerKept: false, total: 0 });
+    const copy = retext(cloneForJob(master1()), "contact", "mine");
+    expect(planPull(copy, master1())).toMatchObject({ total: 0, skipped: 0 });
     expect(applyPull(copy, master1()).resume.header.contact).toBe("mine");
   });
 });
 
+// ---------- pull from master: removed content ----------
+
 describe("pull from master: removed content", () => {
-  const removedMaster = () => {
-    const m2 = master1();
-    m2.sections[0].items[0].bullets = m2.sections[0].items[0].bullets.filter((b) => b.id !== "b"); // bullet gone
-    m2.sections[0].items = m2.sections[0].items.filter((it) => it.id !== "beta"); // entry gone
-    m2.sections = m2.sections.filter((s) => s.id !== "edu"); // section gone
-    return m2;
-  };
+  // A bullet, an entry and a section are removed, each separated from the next by lines that stay, so each is one offer.
+  const removedMaster = () => without(master1(), ["a", "beta", "edu", "uni", "g"]);
 
   it("lists them once each (not their contents) and never deletes them automatically", () => {
     const copy = cloneForJob(master1());
     const m2 = removedMaster();
-    const plan = planPull(copy, m2);
-    expect(plan.removals).toEqual([
-      { kind: "bullet", id: "b", label: "B1" },
-      { kind: "item", id: "beta", label: "Beta" },
-      { kind: "section", id: "edu", label: "Education" },
+    expect(planPull(copy, m2).removals).toEqual([
+      { kind: "bullet", id: "a", label: "A1", where: "Acme", ids: ["a"] },
+      { kind: "item", id: "beta", label: "Beta", where: "Experience", ids: ["beta"] },
+      { kind: "section", id: "edu", label: "Education", where: "", ids: ["edu", "uni", "g"] },
     ]);
     const pulled = applyPull(copy, m2).resume;
     expect(ids(pulled)).toBe(ids(copy));
-    // Still listed after an automatic pull: the baseline keeps their old entries.
-    expect(planPull(pulled, m2).removals.map((r) => r.id)).toEqual(["b", "beta", "edu"]);
+    // Still listed after an automatic pull: the baseline keeps their old text.
+    expect(planPull(pulled, m2).removals.map((r) => r.id)).toEqual(["a", "beta", "edu"]);
   });
 
   it("'Remove here' deletes from the copy; 'Keep' keeps it as added here; both stop the listing", () => {
     const copy = cloneForJob(master1());
-    const m2 = removedMaster();
-    const [bullet, entry, section] = planPull(copy, m2).removals;
-    let r = resolveRemoval(copy, bullet, "remove");
-    r = resolveRemoval(r, section, "remove");
-    r = resolveRemoval(r, entry, "keep");
-    expect(ids(r)).toBe("exp(acme:a,beta:c)");
-    expect(planPull(r, m2).removals).toEqual([]);
-    expect(r.baseline?.["item:beta"]).toBeUndefined();
-    expect(r.baseline?.c).toBeUndefined(); // now counts as "added in this tailored copy"
+    const [bulletGroup, entryGroup, sectionGroup] = planPull(copy, removedMaster()).removals;
+    let r = resolveRemoval(copy, bulletGroup, "remove");
+    r = resolveRemoval(r, sectionGroup, "remove");
+    r = resolveRemoval(r, entryGroup, "keep");
+    expect(ids(r)).toBe("name contact exp acme b beta c");
+    expect(planPull(r, removedMaster()).removals).toEqual([]);
+    expect(r.baseline?.a).toBeUndefined();
+    expect(r.baseline?.beta).toBeUndefined(); // now counts as "added in this tailored copy"
   });
 });
 

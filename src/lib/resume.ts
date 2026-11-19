@@ -9,14 +9,6 @@ import type { DocJSON, FlatParagraph, PageSetup } from "./doc/types";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
-export const emptyItem = (): Item => ({
-  id: uid(), title: "", subtitle: "", location: "", dates: "", bullets: [{ id: uid(), text: "" }],
-});
-
-export const emptySection = (title = "Section"): Section => ({
-  id: uid(), title, items: [emptyItem()],
-});
-
 /**
  * 4 = the resume is a document (`doc`, see ./doc/types.ts); `header` and `sections` are derived from it.
  * Older data is migrated by normalizeResume: versions 1-3 are read as before and then converted to a document
@@ -48,7 +40,7 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const idOf = (v: unknown): string => (typeof v === "string" && v ? v : uid());
 
 /** A copy of `o` without its undefined-valued keys; undefined when nothing is left. */
-export function compact<T extends object>(o: T): T | undefined {
+function compact<T extends object>(o: T): T | undefined {
   const out: Partial<T> = {};
   for (const k of Object.keys(o) as (keyof T)[]) if (o[k] !== undefined) out[k] = o[k];
   return Object.keys(out).length ? (out as T) : undefined;
@@ -188,7 +180,7 @@ function normalizeBullet(v: unknown, legacy: boolean): Bullet {
 }
 
 /** True when an item renders as a single inline line (skills, publications, memberships). */
-export const isInlineItem = (it: Item) => !it.bullets.length && !it.dates && !it.location;
+const isInlineItem = (it: Item) => !it.bullets.length && !it.dates && !it.location;
 
 /**
  * Plain-text rendering with bullet ids, used in AI prompts. Plain text only: formatting never reaches the AI.
@@ -312,9 +304,3 @@ export function reconcileIds(prev: Resume, next: Resume): Resume {
   return withDoc(out, doc);
 }
 
-/** The bullet with new text: its marks belonged to the old text, so they go; the paragraph stays. */
-export function withBulletText(b: Bullet, text: string): Bullet {
-  const out: Bullet = { ...b, text };
-  setOpt(out, "marks", undefined);
-  return out;
-}

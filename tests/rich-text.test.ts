@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  cleanFormat, cleanMarks, cleanPara, joinRich, marksEqual, paraEqual, shiftMarks, sliceMarks, toRuns, wholeMarks,
-} from "@/lib/richText";
+import { cleanFormat, cleanMarks, cleanPara, joinRich, shiftMarks, toRuns, wholeMarks } from "@/lib/richText";
 
 describe("cleanFormat", () => {
   it("keeps only flags that are exactly true", () => {
@@ -122,23 +120,10 @@ describe("wholeMarks", () => {
   });
 });
 
-describe("shiftMarks and sliceMarks", () => {
-  it("shiftMarks moves every range without cleaning", () => {
+describe("shiftMarks", () => {
+  it("moves every range without cleaning", () => {
     expect(shiftMarks([{ from: 1, to: 2, bold: true }], 3)).toEqual([{ from: 4, to: 5, bold: true }]);
     expect(shiftMarks(undefined, 3)).toEqual([]);
-  });
-
-  it("sliceMarks re-bases the part inside the window", () => {
-    expect(sliceMarks([{ from: 0, to: 10, bold: true }], 3, 6)).toEqual([{ from: 0, to: 3, bold: true }]);
-  });
-
-  it("sliceMarks cuts a mark that crosses the window boundary", () => {
-    expect(sliceMarks([{ from: 2, to: 8, italic: true }], 5, 10)).toEqual([{ from: 0, to: 3, italic: true }]);
-  });
-
-  it("sliceMarks drops marks outside the window", () => {
-    expect(sliceMarks([{ from: 0, to: 2, bold: true }], 5, 9)).toEqual([]);
-    expect(sliceMarks(undefined, 0, 5)).toEqual([]);
   });
 });
 
@@ -187,29 +172,5 @@ describe("toRuns", () => {
 
   it("gives no runs for empty text", () => {
     expect(toRuns("", [{ from: 0, to: 3, bold: true }])).toEqual([]);
-  });
-});
-
-describe("marksEqual", () => {
-  it("treats [], undefined and a format-less range as equal", () => {
-    expect(marksEqual([], undefined)).toBe(true);
-    expect(marksEqual(undefined, [{ from: 0, to: 3 }])).toBe(true);
-    expect(marksEqual([], [{ from: 0, to: 3 }])).toBe(true);
-  });
-
-  it("compares canonical forms", () => {
-    expect(marksEqual([{ from: 0, to: 3, bold: true }], [{ from: 0, to: 3, bold: true }])).toBe(true);
-    expect(marksEqual([{ from: 0, to: 3, bold: true }, { from: 3, to: 6, bold: true }], [{ from: 0, to: 6, bold: true }])).toBe(true);
-    expect(marksEqual([{ from: 0, to: 3, bold: true }], [{ from: 0, to: 3, italic: true }])).toBe(false);
-    expect(marksEqual([{ from: 0, to: 3, bold: true }], [{ from: 0, to: 4, bold: true }])).toBe(false);
-  });
-});
-
-describe("paraEqual", () => {
-  it("compares cleaned paragraph formats", () => {
-    expect(paraEqual(undefined, {})).toBe(true);
-    expect(paraEqual({ align: "center" }, { align: "right" })).toBe(false);
-    expect(paraEqual({ spaceBefore: 6 }, { spaceBefore: 6.04 })).toBe(true);
-    expect(paraEqual({ rule: true }, undefined)).toBe(false);
   });
 });

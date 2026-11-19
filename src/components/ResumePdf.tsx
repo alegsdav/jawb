@@ -2,7 +2,7 @@ import { Document, Page, Text, View } from "@react-pdf/renderer";
 import { createElement as h, type ReactElement } from "react";
 import { pdfFontFor, registerPdfFonts } from "@/lib/pdfFonts";
 import {
-  hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, type Run, type RenderBlock, type RenderLine, type RenderMarker,
+  hangingMarkerOf, linesWithMarker, pageOf, renderBlocks, type Run, type RenderLine, type RenderMarker,
   type RenderParagraph, type RunStyle,
 } from "@/lib/docRender";
 import { resumeDoc } from "@/lib/resume";
@@ -84,12 +84,6 @@ function paragraphNode(p: RenderParagraph, key: number): ReactElement {
   );
 }
 
-function blockNode(b: RenderBlock, key: number): ReactElement {
-  return b.kind === "rule"
-    ? h(View, { key, style: { ...RULE, marginTop: 4, marginBottom: 4 } })
-    : paragraphNode(b, key);
-}
-
 /**
  * The resume as a PDF, laid out from the same model as the read-only page (see src/lib/docRender.ts): US Letter
  * with the page setup's margins. Built with createElement (not JSX) so the test runner can import this file
@@ -113,7 +107,7 @@ export function ResumePdf({ resume }: { resume: Resume }) {
           paddingRight: page.marginRight * POINTS_PER_INCH,
         },
       },
-      ...blocks.map(blockNode),
+      ...blocks.map((p, i) => paragraphNode(p, i)),
     ),
   );
 }

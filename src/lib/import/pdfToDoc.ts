@@ -44,6 +44,8 @@ const ITALIC_NAME = /italic|oblique/i;
 
 export type FontInfo = { family?: string; bold: boolean; italic: boolean };
 
+const FAMILY_ALIASES: Record<string, string> = { times: "Times New Roman", "times roman": "Times New Roman" };
+
 /**
  * The family, bold and italic of a PDF font from its name (e.g. "ABCDEF+Calibri-Bold", "TimesNewRomanPSMT",
  * "Garamond,BoldItalic") and its flags. The family drops the subset prefix, the style and the PostScript suffixes
@@ -52,7 +54,9 @@ export type FontInfo = { family?: string; bold: boolean; italic: boolean };
 export function fontInfo(rawName: string, flags: { bold?: boolean; italic?: boolean } = {}): FontInfo {
   const name = rawName.replace(SUBSET_PREFIX, "");
   const base = name.split(/[-,]/)[0].replace(/(PSMT|MT|PS)$/, "").replace(STYLE_SUFFIX, "");
-  const family = base.replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+  const spaced = base.replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+  // The standard PDF names for the system fonts a resume was typed in.
+  const family = FAMILY_ALIASES[spaced.toLowerCase()] ?? spaced;
   return {
     family: family && !GENERATED_NAME.test(name) ? family : undefined,
     bold: !!flags.bold || BOLD_NAME.test(name),

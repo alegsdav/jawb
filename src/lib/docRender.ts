@@ -33,7 +33,7 @@ export type RenderParagraph = {
   spaceAfterPt: number;
   /** Line spacing multiplier. */
   lineHeight: number;
-  /** A thin full-width rule under the paragraph. */
+  /** A thin full-width rule under the paragraph (an empty paragraph with a bottom border is a horizontal line). */
   rule: boolean;
   /** Left edge of the text in points (list levels indent it). */
   textIndentPt: number;
@@ -43,8 +43,6 @@ export type RenderParagraph = {
   markerInline: boolean;
   lines: RenderLine[];
 };
-export type RenderRule = { kind: "rule" };
-export type RenderBlock = RenderParagraph | RenderRule;
 
 const DEFAULT_STYLE: RunStyle = {
   bold: false,
@@ -147,7 +145,7 @@ export function linesWithMarker(p: RenderParagraph, glyph: (text: string) => str
 }
 
 /** A list's items in order, nested lists one level deeper. Only an item's first paragraph carries the marker. */
-function walkList(list: DocList, depth: number, out: RenderBlock[]): void {
+function walkList(list: DocList, depth: number, out: RenderParagraph[]): void {
   const start = list.type === "orderedList" ? (list.attrs?.start ?? 1) : 1;
   list.content.forEach((item, i) => {
     item.content.forEach((child, j) => {
@@ -161,12 +159,11 @@ function walkList(list: DocList, depth: number, out: RenderBlock[]): void {
   });
 }
 
-/** The document as display blocks, in order. */
-export function renderBlocks(doc: DocJSON): RenderBlock[] {
-  const out: RenderBlock[] = [];
+/** The document as display paragraphs, in order. A horizontal line is a paragraph with `rule` set. */
+export function renderBlocks(doc: DocJSON): RenderParagraph[] {
+  const out: RenderParagraph[] = [];
   for (const b of doc.content ?? []) {
     if (b.type === "paragraph") out.push(paragraphBlock(b, null));
-    else if (b.type === "horizontalRule") out.push({ kind: "rule" });
     else walkList(b, 1, out);
   }
   return out;

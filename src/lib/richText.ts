@@ -5,8 +5,8 @@
 import type { Mark, Para } from "./types";
 
 export const DEFAULT_SIZE = 11;
-export const MIN_SIZE = 8;
-export const MAX_SIZE = 28;
+const MIN_SIZE = 8;
+const MAX_SIZE = 28;
 
 /** The format part of a Mark. */
 export type Format = { bold?: true; italic?: true; underline?: true; size?: number };
@@ -104,17 +104,6 @@ export function shiftMarks(marks: Mark[] | undefined, by: number): Mark[] {
   return (marks ?? []).map((m) => ({ ...m, from: m.from + by, to: m.to + by }));
 }
 
-export function sliceMarks(marks: Mark[] | undefined, from: number, to: number): Mark[] {
-  const out: Mark[] = [];
-  for (const m of marks ?? []) {
-    const a = Math.max(m.from, from);
-    const b = Math.min(m.to, to);
-    if (b <= a) continue;
-    out.push({ ...m, from: a - from, to: b - from });
-  }
-  return out;
-}
-
 export function joinRich(parts: Rich[]): Rich {
   let text = "";
   const all: Mark[] = [];
@@ -149,20 +138,4 @@ export function toRuns(text: string, marks?: Mark[]): Run[] {
     }
   }
   return runs;
-}
-
-export function marksEqual(a: Mark[] | undefined, b: Mark[] | undefined): boolean {
-  const x = cleanMarks(a, Infinity) ?? [];
-  const y = cleanMarks(b, Infinity) ?? [];
-  return x.length === y.length && x.every((m, i) => {
-    const n = y[i];
-    return m.from === n.from && m.to === n.to && formatKey(m) === formatKey(n);
-  });
-}
-
-const paraKey = (p: Para | undefined) =>
-  [p?.align ?? "", p?.rule ? 1 : 0, p?.caps ? 1 : 0, p?.spaceBefore ?? 0].join("|");
-
-export function paraEqual(a: Para | undefined, b: Para | undefined): boolean {
-  return paraKey(cleanPara(a)) === paraKey(cleanPara(b));
 }

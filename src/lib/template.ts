@@ -11,7 +11,7 @@ import type { DocInline, DocMark, DocParagraph, PageSetup, ParagraphAttrs } from
 import type { Format } from "./richText";
 import type { Para } from "./types";
 
-export const HARVARD_FONT = "Times New Roman";
+const HARVARD_FONT = "Times New Roman";
 
 /** 0.5 in top and bottom, 0.75 in left and right. */
 export const HARVARD_PAGE: PageSetup = { marginTop: 0.5, marginBottom: 0.5, marginLeft: 0.75, marginRight: 0.75 };

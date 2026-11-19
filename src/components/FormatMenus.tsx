@@ -76,7 +76,7 @@ export function FormatMenu({ commandsRef, fmt }: MenuProps) {
       <MenuItem onSelect={run((c) => c.toggleBorderBottom())} disabled={off}>
         <Tick on={fmt.borderBottom}>Paragraph border below</Tick>
       </MenuItem>
-      <MenuItem onSelect={run((c) => c.insertHorizontalRule())} disabled={off}>Horizontal line</MenuItem>
+      <MenuItem onSelect={run((c) => c.insertHorizontalLine())} disabled={off}>Horizontal line</MenuItem>
       <MenuSeparator />
       <MenuItem onSelect={run((c) => c.clearFormatting())} disabled={off} shortcut="Ctrl+\">
         Clear formatting

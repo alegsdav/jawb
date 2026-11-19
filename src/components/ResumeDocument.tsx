@@ -129,7 +129,7 @@ function commandsFor(editor: Editor): DocCommands {
     adjustSpaceBefore: (delta) => adjust("spaceBefore", delta),
     adjustSpaceAfter: (delta) => adjust("spaceAfter", delta),
     toggleBorderBottom: () => chain().toggleBorderBottom().run(),
-    insertHorizontalRule: () => insertHorizontalLine(editor),
+    insertHorizontalLine: () => insertHorizontalLine(editor),
     clearFormatting: () => {
       editor.commands.focus();
       editor.commands.clearFormatting();

@@ -41,8 +41,6 @@ const doc: DocJSON = {
 };
 
 const resume = withDoc(emptyResume(), doc);
-const paragraphs = (blocks: ReturnType<typeof renderBlocks>): RenderParagraph[] =>
-  blocks.filter((b): b is RenderParagraph => b.kind === "paragraph");
 
 describe("pdfFontFor", () => {
   it.each([
@@ -67,7 +65,7 @@ describe("pdfFontFor", () => {
 });
 
 describe("renderBlocks (the shared layout)", () => {
-  const blocks = paragraphs(renderBlocks(doc));
+  const blocks = renderBlocks(doc);
   /** The paragraph whose text starts with `start` (the blocks are in document order). */
   const at = (start: string): RenderParagraph => {
     const found = blocks.find((p) => p.lines.map((l) => l.left.concat(l.right ?? []).map((r) => r.text).join("")).join("\n").startsWith(start));
@@ -125,6 +123,13 @@ describe("renderBlocks (the shared layout)", () => {
   it("keeps an empty paragraph one line tall", () => {
     expect(empty.lines).toHaveLength(1);
     expect(empty.lines[0].left[0].text).toBe(" ");
+  });
+
+  it("draws a horizontal line as an empty paragraph with a bottom border, one line tall", () => {
+    const [line] = renderBlocks({ type: "doc", content: [para("", { borderBottom: true })] });
+    expect(line.rule).toBe(true);
+    expect(line.lines).toHaveLength(1);
+    expect(line.lines[0].left[0].text).toBe(" ");
   });
 
   it("carries the font family of each run", () => {
