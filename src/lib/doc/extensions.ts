@@ -249,7 +249,8 @@ function layoutTabs(root: HTMLElement): void {
     after.setStartAfter(tab);
     after.setEnd(paragraph, paragraph.childNodes.length);
     const rects = Array.from(after.getClientRects()).filter((r) => r.width > 0);
-    const wraps = rects.length > 1;
+    // A styled run reports both its element box and its text box on the same line, so count lines, not rects.
+    const wraps = new Set(rects.map((r) => Math.round(r.top))).size > 1;
     const afterWidth = rects.length ? after.getBoundingClientRect().width : 0;
     const width = wraps ? MIN_TAB_PX : Math.max(MIN_TAB_PX, contentRight - tabLeft - afterWidth);
     // Rounded down with 1px to spare: a width a fraction too wide would wrap the right part onto its own line.

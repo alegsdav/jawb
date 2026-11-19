@@ -3,6 +3,7 @@
  * indents and list markers. The read-only page (ResumeView) and the PDF (ResumePdf) both draw this model, so
  * they match each other and the editor. Pure: no DOM and no PDF library.
  */
+import { normalizeHref } from "./doc/model";
 import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE_PT,
@@ -72,9 +73,10 @@ export function styleOf(marks: DocMark[] | undefined): RunStyle {
   return style;
 }
 
-/** The href of a link mark, if the marks carry one. */
+/** The href of a link mark, if the marks carry one; checked again here (http(s)/mailto only) before anything renders it. */
 function hrefOfMarks(marks: DocMark[] | undefined): string | undefined {
-  return marks?.find((m): m is Extract<DocMark, { type: "link" }> => m.type === "link")?.attrs.href;
+  const raw = marks?.find((m): m is Extract<DocMark, { type: "link" }> => m.type === "link")?.attrs.href;
+  return raw ? normalizeHref(raw) ?? undefined : undefined;
 }
 
 /** Lines of a paragraph: split at hard breaks, and each line at its first tab (text after a second tab joins the right). */

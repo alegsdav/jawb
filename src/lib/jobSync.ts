@@ -194,7 +194,7 @@ export const isApplied = (j: Pick<Job, "submitted_at" | "status">) =>
 
 // ---------- tailored copy ----------
 
-/** The tailored copy stored in a `resumes` row (normalizeResume drops `baseline`, so it's read back here). */
+/** The tailored copy stored in a `resumes` row, with its baseline read defensively (readBaseline drops bad values). */
 export function tailoredFromRow(content: unknown): Resume {
   const base = readBaseline(content);
   return { ...normalizeResume(content), ...(base ? { baseline: base } : {}) };
