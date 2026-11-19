@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { emptyResume, isEmptyResume, normalizeResume, reconcileIds, uid } from "@/lib/resume";
 import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
 import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
+import { PAGE_DEFAULTS } from "@/lib/doc/types";
 import type { Fact, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
 import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
@@ -20,6 +21,7 @@ import {
   useEditorShortcuts, useZoom, ZoomSelect,
 } from "@/components/DocToolbar";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
+import { PageSetupDialog } from "@/components/PageSetupDialog";
 import { EditorCanvas } from "@/components/ZoomFrame";
 import { CopyIcon, DocIcon, DownloadIcon } from "@/components/icons";
 import { ResumeImport } from "@/components/ResumeImport";
@@ -149,6 +151,7 @@ export default function MasterResumePage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [importOpen, setImportOpen] = useState(false);
+  const [pageSetupOpen, setPageSetupOpen] = useState(false);
   const [justImported, setJustImported] = useState(false);
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
@@ -381,6 +384,9 @@ export default function MasterResumePage() {
               </MenuItem>
               <MenuItem onSelect={() => void actions.copy()}>Copy as text</MenuItem>
               <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
+              <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume} hint="Margins of every page">
+                Page setup…
+              </MenuItem>
               <MenuSeparator />
               <MenuItem onSelect={() => setImportOpen((o) => !o)}>Re-import resume</MenuItem>
             </MenuBarMenu>
@@ -532,6 +538,13 @@ export default function MasterResumePage() {
         </div>
       </div>
 
+      {pageSetupOpen && resume && (
+        <PageSetupDialog
+          page={resume.page ?? PAGE_DEFAULTS}
+          onApply={(page) => setResume((cur) => (cur ? { ...cur, page } : cur))}
+          onClose={() => setPageSetupOpen(false)}
+        />
+      )}
       {undo && (
         <UndoToast
           message={undo.message}

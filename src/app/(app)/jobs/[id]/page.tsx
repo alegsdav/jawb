@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   bulletTextMap, countChangedBullets, emptyResume, isEmptyResume, normalizeResume, resumeToPlainText, uid,
 } from "@/lib/resume";
+import { PAGE_DEFAULTS } from "@/lib/doc/types";
 import type { Analysis, Fact, Job, JobStatus, Resume } from "@/lib/types";
 import { friendlyError, postApi } from "@/lib/api";
 import { countPlaceholders, hasPlaceholder, plural } from "@/lib/facts";
@@ -51,6 +52,7 @@ import {
 import { EditorCanvas } from "@/components/ZoomFrame";
 import { BriefcaseIcon, ChevronRightIcon } from "@/components/icons";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
+import { PageSetupDialog } from "@/components/PageSetupDialog";
 import { SubmittedView } from "@/components/SubmittedView";
 import { PullBanner, SaveAsMasterDialog, TailoredConflictBanner } from "@/components/PullBanner";
 import { FlashToast } from "@/components/FlashToast";
@@ -129,6 +131,7 @@ export default function JobPage() {
   const [viewingSubmitted, setViewingSubmitted] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [pageSetupOpen, setPageSetupOpen] = useState(false);
   /** What's typed in each answer box (by question id). Lives here so a re-analysis or a merge can carry it over. */
   const [drafts, setDraftsState] = useState<Record<string, string>>({});
   /** Both devices changed the same line of the tailored copy: its autosave is paused until the user picks a side. */
@@ -1155,6 +1158,9 @@ export default function JobPage() {
           </MenuItem>
           <MenuItem onSelect={copyText}>Copy as text</MenuItem>
           <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
+          <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume} hint="Margins of this tailored copy">
+            Page setup…
+          </MenuItem>
           <MenuSeparator />
           <MenuItem
             onSelect={makeMaster}
@@ -1375,6 +1381,14 @@ export default function JobPage() {
           fileName={`${job.submitted_resume.header.name} Resume ${job.company}`}
           onClose={() => setViewingSubmitted(false)}
           onReplace={replaceSnapshot}
+        />
+      )}
+
+      {pageSetupOpen && resume && (
+        <PageSetupDialog
+          page={resume.page ?? PAGE_DEFAULTS}
+          onApply={(page) => setResume((cur) => (cur ? { ...cur, page } : cur))}
+          onClose={() => setPageSetupOpen(false)}
         />
       )}
 
