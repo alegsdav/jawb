@@ -107,14 +107,14 @@ const shape = (doc: DocJSON, prefix: string): DocInline["type"][] =>
   (flattenDoc(doc).find((p) => p.text.replace(/\t/g, "").startsWith(prefix))?.node.content ?? []).map((n) => n.type);
 
 describe("PDF import: which gaps are right tabs", () => {
-  it("a part that ends at the right margin is a tab; a left column is spaces, not a tab", async () => {
+  it("a part that ends at the right margin is a tab; a left column is a tab to a left stop at the value", async () => {
     const { doc } = await pdfToDoc(await columnsPdf());
     expect(shape(doc, "Acme")).toContain("tab");
     expect(shape(doc, "A long job")).toContain("tab");
     const lang = flattenDoc(doc).find((p) => p.text.startsWith("Languages"))!;
-    expect(shape(doc, "Languages")).not.toContain("tab");
-    // The column's spacing survives as spaces between the label and its value.
-    expect(lang.text).toMatch(/^Languages:\s{2,}English, Spanish$/);
+    expect(lang.text).toBe("Languages:\tEnglish, Spanish");
+    // The value keeps its column: one left stop where it started in the PDF.
+    expect(lang.node.attrs.tabStops).toEqual([expect.objectContaining({ align: "left" })]);
   });
 });
 

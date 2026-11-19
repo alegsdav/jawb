@@ -6,7 +6,7 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { NO_TEXT_MESSAGE, NoTextError, fontInfo, pdfToDoc, rulesSafely } from "@/lib/import/pdfToDoc";
 import {
   PAD_SIDES, PAD_TOP_BOTTOM, embeddedFontPdf, hangingBulletPdf, harvardPdf, helveticaPdf, imageOnlyPdf, linkedPdf, ruledPdf,
-  indentedBulletPdf, labelledLinesPdf, linkSeparatorsPdf, pagedPdf, shortLinesPdf, underlinePdf, wrappedPdf,
+  columnsPdf, indentedBulletPdf, labelledLinesPdf, linkSeparatorsPdf, pagedPdf, shortLinesPdf, underlinePdf, wrappedPdf,
 } from "./import-fixtures";
 
 const bytes = (b: Buffer) => new Uint8Array(b);
@@ -383,5 +383,45 @@ describe("pdfToDoc: the indent of a bulleted list is where its text starts", () 
     expect(pt).toBeGreaterThanOrEqual(6);
     expect(pt).toBeLessThanOrEqual(144);
     expect(Number.isInteger(pt * 2)).toBe(true);
+  });
+});
+
+describe("pdfToDoc: columns keep their tabs, with a stop where each column starts", () => {
+  let doc: DocJSON;
+
+  // Imported once: the fixture is rendered and read in one go.
+  const ready = (async () => {
+    ({ doc } = await pdfToDoc(bytes(await columnsPdf())));
+  })();
+
+  const stopsOf = (p: DocParagraph) => p.attrs?.tabStops;
+
+  it("turns a left column into a tab with a left stop where its value starts", async () => {
+    await ready;
+    const row = paraNamed(doc, "Languages:");
+    expect(row.content?.map((n) => n.type)).toEqual(["text", "tab", "text"]);
+    const stops = stopsOf(row) ?? [];
+    expect(stops).toHaveLength(1);
+    expect(stops[0].align).toBe("left");
+    expect(Math.abs(stops[0].pos - 110)).toBeLessThanOrEqual(1);
+  });
+
+  it("keeps every tab of a four-part row, with a stop at each column and a right stop at the margin", async () => {
+    await ready;
+    const row = paraNamed(doc, "English");
+    expect(row.content?.map((n) => n.type)).toEqual(["text", "tab", "text", "tab", "text", "tab", "text"]);
+    const stops = stopsOf(row) ?? [];
+    expect(stops.map((s) => s.align)).toEqual(["left", "left", "right"]);
+    // The columns start 90 and 180 points from the margin; the last part ends at the content's right edge (526 points).
+    expect(Math.abs(stops[0].pos - 90)).toBeLessThanOrEqual(1);
+    expect(Math.abs(stops[1].pos - 180)).toBeLessThanOrEqual(1);
+    expect(Math.abs(stops[2].pos - (612 - 2 * PAD_SIDES))).toBeLessThanOrEqual(1);
+  });
+
+  it("keeps a company row with one gap to text at the margin as a tab with no stops", async () => {
+    await ready;
+    const row = paraNamed(doc, "Company");
+    expect(row.content?.map((n) => n.type)).toEqual(["text", "tab", "text"]);
+    expect(stopsOf(row)).toBeUndefined();
   });
 });

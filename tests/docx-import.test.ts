@@ -132,6 +132,9 @@ function plain(doc: DocJSON): unknown {
   return JSON.parse(JSON.stringify(doc, (k, v) => (k === "id" ? undefined : v)));
 }
 
+/** Where the default stop after "Harvard University" (bold 11 pt Calibri, about 95 pt wide) falls: 108 pt, the next 36 pt step. */
+const HARVARD_STOP = 108;
+
 const SAMPLE = `
 <w:p><w:pPr><w:jc w:val="center"/></w:pPr>
   <w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>Ada Lovelace</w:t></w:r></w:p>
@@ -183,12 +186,13 @@ describe("docxToDoc", () => {
           content: [{ type: "text", text: "EDUCATION", marks: [{ type: "bold" }] }],
         },
         {
-          // No right-aligned stop: the tab only lines the text up in a column, so it becomes spaces.
+          // No right-aligned stop and no stop in the paragraph: the tab is a column, kept at the default stop Word puts it at.
           type: "paragraph",
-          attrs: { ...lh, spaceBefore: 6 },
+          attrs: { ...lh, spaceBefore: 6, tabStops: [{ pos: HARVARD_STOP, align: "left" }] },
           content: [
             { type: "text", text: "Harvard University", marks: [{ type: "bold" }] },
-            { type: "text", text: "    Cambridge, MA" },
+            { type: "tab" },
+            { type: "text", text: "Cambridge, MA" },
           ],
         },
         // The table row: "Acme & Co" left, a tab, "2020" (the last cell) on the right margin.
@@ -376,20 +380,49 @@ describe("paragraph rules", () => {
 
 describe("tabs", () => {
   const firstContent = (body: string) => (plain(docxToDoc(makeDocx(body)).doc) as { content: { content: unknown[] }[] }).content[0].content;
+  const firstAttrs = (body: string) => (plain(docxToDoc(makeDocx(body)).doc) as { content: { attrs: Record<string, unknown> }[] }).content[0].attrs;
 
   it("keeps a tab that has a right-aligned stop in the paragraph", () => {
     const body = `<w:p><w:pPr><w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs></w:pPr><w:r><w:t>Acme</w:t></w:r><w:r><w:tab/><w:t>Austin</w:t></w:r></w:p>`;
     expect(firstContent(body)).toEqual([{ type: "text", text: "Acme" }, { type: "tab" }, { type: "text", text: "Austin" }]);
   });
 
-  it("turns a tab with no tab stops into spaces", () => {
+  // A tab with no stops in the paragraph used to become spaces; it is now a column, kept with the stop Word puts it at.
+  it("keeps a tab with no tab stops, with a left stop at the default stop Word puts it at", () => {
     const body = `<w:p><w:r><w:t>Languages:</w:t></w:r><w:r><w:tab/><w:t>Python, Java</w:t></w:r></w:p>`;
-    expect(firstContent(body)).toEqual([{ type: "text", text: "Languages:    Python, Java" }]);
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Languages:" }, { type: "tab" }, { type: "text", text: "Python, Java" }]);
+    expect(firstAttrs(body).tabStops).toEqual([{ pos: 72, align: "left" }]);
   });
 
-  it("turns a tab at a left-aligned stop into spaces", () => {
+  it("keeps a tab at a left-aligned stop, with that stop", () => {
     const body = `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="1440"/></w:tabs></w:pPr><w:r><w:t>Skills:</w:t></w:r><w:r><w:tab/><w:t>SQL</w:t></w:r></w:p>`;
-    expect(firstContent(body)).toEqual([{ type: "text", text: "Skills:    SQL" }]);
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Skills:" }, { type: "tab" }, { type: "text", text: "SQL" }]);
+    expect(firstAttrs(body).tabStops).toEqual([{ pos: 72, align: "left" }]);
+  });
+
+  it("gives a tab's stop the alignment of its w:tab, and reads every stop of the paragraph", () => {
+    const body = `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="1440"/><w:tab w:val="center" w:pos="4320"/></w:tabs></w:pPr><w:r><w:t>English</w:t></w:r><w:r><w:tab/><w:t>Native</w:t></w:r><w:r><w:tab/><w:t>Chinese</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([
+      { type: "text", text: "English" },
+      { type: "tab" },
+      { type: "text", text: "Native" },
+      { type: "tab" },
+      { type: "text", text: "Chinese" },
+    ]);
+    expect(firstAttrs(body).tabStops).toEqual([
+      { pos: 72, align: "left" },
+      { pos: 216, align: "center" },
+    ]);
+  });
+
+  it("measures the stops from the text start: a left indent is taken off the stop", () => {
+    const body = `<w:p><w:pPr><w:ind w:left="720"/><w:tabs><w:tab w:val="left" w:pos="2160"/></w:tabs></w:pPr><w:r><w:t>Languages:</w:t></w:r><w:r><w:tab/><w:t>Python</w:t></w:r></w:p>`;
+    expect(firstAttrs(body).tabStops).toEqual([{ pos: 72, align: "left" }]);
+  });
+
+  it("drops a stop cleared in the paragraph, and a stop before the text start", () => {
+    const body = `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="1440"/><w:tab w:val="clear" w:pos="1440"/><w:tab w:val="left" w:pos="2880"/></w:tabs></w:pPr><w:r><w:t>Skills:</w:t></w:r><w:r><w:tab/><w:t>SQL</w:t></w:r></w:p>`;
+    expect(firstAttrs(body).tabStops).toEqual([{ pos: 144, align: "left" }]);
   });
 
   it("keeps a tab when the right-aligned stop is in the paragraph style", () => {
@@ -403,6 +436,7 @@ const LETTER_SECT = `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="
 
 describe("tabs set against the right margin", () => {
   const firstContent = (body: string) => (plain(docxToDoc(makeDocx(body + LETTER_SECT)).doc) as { content: { content: unknown[] }[] }).content[0].content;
+  const firstAttrs = (body: string) => (plain(docxToDoc(makeDocx(body + LETTER_SECT)).doc) as { content: { attrs: Record<string, unknown> }[] }).content[0].attrs;
 
   it("turns a left stop near the right margin, and the tab before the text, into one right-aligned tab", () => {
     const body = `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="9489"/></w:tabs></w:pPr><w:r><w:t>University of California - Santa Cruz</w:t></w:r><w:r><w:tab/><w:t xml:space="preserve">  Santa Cruz, CA</w:t></w:r></w:p>`;
@@ -419,9 +453,16 @@ describe("tabs set against the right margin", () => {
     expect(firstContent(body)).toEqual([{ type: "text", text: "B.S. Computer Engineering" }, { type: "tab" }, { type: "text", text: "2024-Expected June 2028" }]);
   });
 
-  it("keeps a tab to a 1 in stop with short text after it as spaces, a column and not a right-aligned date", () => {
+  // A column at a 1 in stop: the tab stays and gets the stop, so "Python" lands at 1 in and is not a right-aligned date.
+  it("keeps a tab to a 1 in stop with short text after it as a column, with a left stop at 1 in", () => {
     const body = `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="1440"/></w:tabs></w:pPr><w:r><w:t>Languages:</w:t></w:r><w:r><w:tab/><w:t>Python</w:t></w:r></w:p>`;
-    expect(firstContent(body)).toEqual([{ type: "text", text: "Languages:    Python" }]);
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Languages:" }, { type: "tab" }, { type: "text", text: "Python" }]);
+    expect(firstAttrs(body).tabStops).toEqual([{ pos: 72, align: "left" }]);
+  });
+
+  it("gives a right-margin tab no tab stops, so the legacy rule right-aligns it", () => {
+    const body = `<w:p><w:r><w:t>Ellis Chi, CPA</w:t></w:r><w:r><w:tab/><w:tab/><w:tab/><w:t xml:space="preserve">${" ".repeat(120)}June 2026 - Present</w:t></w:r></w:p>`;
+    expect(firstAttrs(body).tabStops).toBeUndefined();
   });
 
   it("keeps two spaces inside a sentence as typed", () => {

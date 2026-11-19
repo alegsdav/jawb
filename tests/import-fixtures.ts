@@ -368,3 +368,32 @@ export function imageOnlyPdf(): Promise<Buffer> {
     h(Document, null, h(Page, { size: "LETTER" }, h(Image, { src: png, style: { width: 100, height: 100 } }))),
   );
 }
+
+/**
+ * Lines of columns: a "Languages:" label with its value at 110 points (a left column), a four-part row whose last
+ * part is set against the right margin (English, a column of stars, Chinese, stars), and a "Company ⇥ City" row whose
+ * one gap goes to text at the margin.
+ */
+export function columnsPdf(): Promise<Buffer> {
+  const row = { flexDirection: "row" } as const;
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: s.page },
+        h(View, { style: row }, h(Text, { style: { width: 110 } }, "Languages:"), h(Text, null, "Python, SQL")),
+        h(
+          View,
+          { style: row },
+          h(Text, { style: { width: 90 } }, "English"),
+          h(Text, { style: { width: 90 } }, "*****"),
+          h(Text, { style: { width: 90 } }, "Chinese"),
+          h(Text, { style: { flex: 1, textAlign: "right" } }, "*****"),
+        ),
+        h(View, { style: { ...row, justifyContent: "space-between" } }, h(Text, null, "Company"), h(Text, null, "City, ST")),
+      ),
+    ),
+  );
+}

@@ -10,7 +10,17 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { buildDoc, newId, normalizeDoc, type FlatEntry } from "@/lib/doc/model";
 import { clampIndentPt } from "@/lib/doc/types";
-import type { DocInline, DocJSON, DocList, DocMark, DocParagraph, PageSetup, ParagraphAttrs } from "@/lib/doc/types";
+import type {
+  DocInline,
+  DocJSON,
+  DocList,
+  DocMark,
+  DocParagraph,
+  PageSetup,
+  ParagraphAttrs,
+  TabStop,
+  TabStopAlign,
+} from "@/lib/doc/types";
 
 export const NO_TEXT_MESSAGE =
   "This PDF has no selectable text (it may be a scan). Export it again as a text PDF, or paste the text.";
@@ -28,6 +38,7 @@ const LINE_TOLERANCE = 0.3; // items this close vertically (in em) share a basel
 const SPACE_GAP = 0.15; // a horizontal gap wider than this is a space between words
 const TAB_GAP = 3; // the first gap wider than this on a line is a tab (the "Company ⇥ City" layout)
 const RIGHT_PART_GAP = 1.5; // a gap this wide (em) before a part that ends at the right margin is a right tab too
+const COLUMN_GAP = 1.5; // a gap this wide (em) between two parts of a line is a column: a tab, with a stop at the next part
 const SPACE_EM = 0.28; // a space is about this wide, in em (for turning a left-aligned gap back into spaces)
 const MARGIN_TOLERANCE = 0.05; // a line ends at the right margin when within this share of the content width
 const PITCH = 1.2; // a normal line pitch, in em
@@ -111,8 +122,14 @@ type Piece = { text: string; style: Style; x: number; w: number; href?: string; 
 /** One text item from pdf.js, in top-down page coordinates. Whitespace-only items are kept for their gaps. */
 type TextItem = { str: string; x: number; y: number; w: number; style: Style; ws: boolean };
 
-/** A visual line: its baseline (top-down), its size and extent, and its pieces left to right. */
-type Line = { y: number; size: number; x0: number; x1: number; pieces: Piece[] };
+/** A tab stop of a column, at an x on the page (top-down coordinates, points from the page's left edge). */
+type ColumnStop = { x: number; align: TabStopAlign };
+
+/**
+ * A visual line: its baseline (top-down), its size and extent, and its pieces left to right. stops: the tab stops its
+ * columns need (see columnLine), empty when the line has no columns.
+ */
+type Line = { y: number; size: number; x0: number; x1: number; pieces: Piece[]; stops?: ColumnStop[] };
 
 /** A link annotation: its web or mail address and its box, in top-down page coordinates. */
 type LinkBox = { href: string; x0: number; x1: number; top: number; bottom: number };
@@ -661,26 +678,42 @@ function firstWordWidth(line: Line): number {
   return w;
 }
 
+/** A gap between two text pieces of a line: its whitespace pieces are [from, to), and piece `to` is the text after it. */
+type ColumnGap = { from: number; to: number };
+
+/** The gaps wider than COLUMN_GAP between the text pieces of a line: where its columns are. */
+function columnGaps(pieces: Piece[], size: number): ColumnGap[] {
+  const gaps: ColumnGap[] = [];
+  let prev = -1;
+  pieces.forEach((p, i) => {
+    if (p.text === " " || p.text === "\t") return;
+    if (prev >= 0 && p.x - (pieces[prev].x + pieces[prev].w) > COLUMN_GAP * size) gaps.push({ from: prev + 1, to: i });
+    prev = i;
+  });
+  return gaps;
+}
+
 /**
- * Which gaps in a line are the right-aligned tab. The editor's tab pushes everything after it to the right margin,
- * so a gap is a tab only when the text after it really ends there: "Company ⇥ City, ST" and "Role ⇥ May 2025". A gap
- * to text that does not reach the margin is a left column ("Skills: ⇥ Python, SQL", a tab stop at 1.5in), which a
- * right tab would fling to the margin, so it becomes spaces of the same width. A line that does end at the margin
- * after a wide gap (or a run of spaces) with no tab yet (a Word export that pads with spaces) gets its tab.
+ * The tabs of a line. A line with one part after a wide gap that ends at the right margin is the "Company ⇥ City, ST"
+ * and "Role ⇥ May 2025" row: a gap is a tab there only when the text after it really ends at the margin (see
+ * rightPartLine). A line with more columns, or a left column ("Skills: ⇥ Python, SQL"), is a column line (see
+ * columnLine). A line with no wide gap is text, whose spaces stay.
  */
 function resolveTabs(line: Line, right: number, width: number): Line {
   const endsAtMargin = Math.abs(line.x1 - right) <= MARGIN_TOLERANCE * width;
+  const gaps = columnGaps(line.pieces, line.size);
+  if (gaps.length > 1 || (gaps.length === 1 && !endsAtMargin)) return columnLine(line, gaps, endsAtMargin);
+  if (gaps.length === 1 && endsAtMargin) return rightPartLine(line, right, width);
+  return line;
+}
+
+/**
+ * A line with a single right-aligned part: its wide gap becomes the right tab. A gap to text that starts in the left
+ * half is left as spaces, as it always was. A tab already in the line is kept.
+ */
+function rightPartLine(line: Line, right: number, width: number): Line {
   const pieces = line.pieces;
-  const at = pieces.findIndex((p) => p.text === "\t");
-  if (at >= 0) {
-    if (endsAtMargin) return line;
-    const next = pieces[at + 1];
-    const gap = next ? next.x - pieces[at].x : 0;
-    const spaces = " ".repeat(Math.min(40, Math.max(2, Math.round(gap / (SPACE_EM * line.size)))));
-    return { ...line, pieces: pieces.map((p, i) => (i === at ? { ...p, text: spaces } : p)) };
-  }
-  if (!endsAtMargin) return line;
-  // The last gap that qualifies, so a long left part with a few wide gaps keeps its tab at the right part.
+  if (pieces.some((p) => p.text === "\t")) return line;
   for (let i = pieces.length - 2; i > 0; i--) {
     const p = pieces[i];
     if (p.text === " ") {
@@ -691,6 +724,27 @@ function resolveTabs(line: Line, right: number, width: number): Line {
     }
   }
   return line;
+}
+
+/**
+ * A line of columns: each wide gap is a tab, so the text after it goes to the column's stop. A stop sits where each
+ * column starts (a left stop) and, when the last column ends at the right margin, a right stop at that edge, so the
+ * last column is right-aligned as in the original. Spaces inside the columns and between words stay as they are.
+ */
+function columnLine(line: Line, gaps: ColumnGap[], endsAtMargin: boolean): Line {
+  const pieces: Piece[] = [];
+  const stops: ColumnStop[] = [];
+  let from = 0;
+  gaps.forEach((g, k) => {
+    pieces.push(...line.pieces.slice(from, g.from));
+    const before = line.pieces[g.from - 1];
+    pieces.push({ text: "\t", style: before.style, x: before.x + before.w, w: 0 });
+    from = g.to;
+    const last = k === gaps.length - 1;
+    stops.push(last && endsAtMargin ? { x: line.x1, align: "right" } : { x: line.pieces[g.to].x, align: "left" });
+  });
+  pieces.push(...line.pieces.slice(from));
+  return { ...line, pieces, stops };
 }
 
 /** The page's lines as paragraphs: bullets, wrapped lines joined, one paragraph per other line. */
@@ -773,10 +827,12 @@ function pageItems(page: PageText): Item[] {
     else lineItems.push({ y: rule.y, entry: lineEntry() });
   }
   const items: Item[] = paras.flatMap((para, i) => {
+    const origin = para.bullet ? textStarts.get(para)! : left;
     const node = nodeOf(para, {
       align: para.bullet ? undefined : alignOf(para.lines[0], left, right),
       spaceBefore: spaceBeforeOf(paras[i - 1], para),
       border: borders.has(para),
+      tabStops: tabStopsOf(para, origin),
     });
     if (!node) return [];
     const entry: FlatEntry = para.bullet
@@ -807,7 +863,7 @@ function bulletTextStarts(paras: Para[]): Map<Para, number> {
 
 function nodeOf(
   para: Para,
-  opts: { align: ParagraphAttrs["textAlign"]; spaceBefore: number | undefined; border: boolean },
+  opts: { align: ParagraphAttrs["textAlign"]; spaceBefore: number | undefined; border: boolean; tabStops: TabStop[] | undefined },
 ): DocParagraph | null {
   const content = inlineOf(para.pieces);
   if (!content.length) return null;
@@ -815,7 +871,20 @@ function nodeOf(
   if (opts.align) attrs.textAlign = opts.align;
   if (opts.spaceBefore) attrs.spaceBefore = opts.spaceBefore;
   if (opts.border) attrs.borderBottom = true;
+  if (opts.tabStops) attrs.tabStops = opts.tabStops;
   return { type: "paragraph", attrs, content };
+}
+
+/**
+ * The tab stops of a paragraph's columns, relative to where its text starts (the margin, or a bullet's text). A column
+ * line is a paragraph of its own (see continues), so its stops are the line's.
+ */
+function tabStopsOf(para: Para, origin: number): TabStop[] | undefined {
+  const stops = para.lines
+    .flatMap((l) => l.stops ?? [])
+    .map((s): TabStop => ({ pos: Math.round((s.x - origin) * 100) / 100, align: s.align }))
+    .filter((s) => s.pos > 0);
+  return stops.length ? stops : undefined;
 }
 
 /** The marks of a run: bold, italic, underline, the size and family as textStyle, and a link. Sizes round to half points. */
