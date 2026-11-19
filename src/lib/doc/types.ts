@@ -47,7 +47,7 @@ export type DocParagraph = { type: "paragraph"; attrs: ParagraphAttrs; content?:
 export type DocListItem = { type: "listItem"; content: (DocParagraph | DocList)[] };
 export type DocList =
   | { type: "bulletList"; content: DocListItem[] }
-  | { type: "orderedList"; attrs?: { start?: number }; content: DocListItem[] };
+  | { type: "orderedList"; attrs?: { start?: number; type?: string | null }; content: DocListItem[] };
 export type DocHorizontalRule = { type: "horizontalRule" };
 export type DocBlock = DocParagraph | DocList | DocHorizontalRule;
 export type DocJSON = { type: "doc"; content: DocBlock[] };
