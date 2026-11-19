@@ -5,7 +5,7 @@ import { ResumeImport } from "./ResumeImport";
 
 /**
  * First visit with an empty master resume: three ways to start, as cards. Pasting or uploading uses
- * the resume import (one of the day's analyses); "I don't have a resume yet" opens the guided builder.
+ * the resume import, which keeps the text and formatting as they are; "I don't have a resume yet" opens the guided builder.
  */
 export function Onboarding({ onImported, onBuild }: { onImported: (r: Resume) => void; onBuild: () => void }) {
   return (
@@ -26,7 +26,7 @@ export function Onboarding({ onImported, onBuild }: { onImported: (r: Resume) =>
         </section>
         <section className="card p-4 sm:p-5 space-y-3" aria-labelledby="ob-upload">
           <h3 id="ob-upload" className="font-semibold">Upload a PDF</h3>
-          <p className="text-sm text-muted">We rebuild it as a one-page Harvard-style document with your exact wording.</p>
+          <p className="text-sm text-muted">Imported as it looks: the fonts, bold, lines and margins stay as they are in the PDF.</p>
           <ResumeImport replaceWarning={false} onImported={onImported} mode="file" />
         </section>
         <section className="card p-4 sm:p-5 space-y-3 flex flex-col" aria-labelledby="ob-build">

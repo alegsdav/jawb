@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Fact, Resume } from "@/lib/types";
+import { buildDoc, findParagraph, flattenDoc, paragraph, type FlatEntry } from "@/lib/doc/model";
+import type { DocMark } from "@/lib/doc/types";
+import { emptyResume, resumeDoc, withDoc } from "@/lib/resume";
 import {
   coachedFactPlan, coachRequest, exampleSegments, initialChoices, insertCoachedBullet, parseCoachRequest, priorityItems, resolveBlanks,
   validateExamples, validateQuestions, type CoachExample,
@@ -7,23 +10,26 @@ import {
 import { factRow } from "@/lib/facts";
 import { coachExamplesPrompt, coachQuestionsPrompt } from "@/lib/prompts";
 
-const resume = (): Resume => ({
-  version: 2,
-  header: { name: "Ann", contact: "ann@school.edu" },
-  sections: [
-    {
-      id: "s1",
-      title: "Experience",
-      items: [
-        {
-          id: "e1", title: "Learning Center", subtitle: "Math Tutor", location: "Boston, MA", dates: "2024 – Present",
-          bullets: [{ id: "b1", text: "Tutored 30 students in calculus" }, { id: "b2", text: "Made study guides" }],
-        },
-        { id: "e2", title: "Robotics Club", subtitle: "Member", location: "", dates: "", bullets: [{ id: "b3", text: "" }] },
-      ],
-    },
-  ],
+// The resume as a document: a section, two entries with bullets (b3 empty) and one entry without bullets.
+const line = (id: string, text: string): FlatEntry => ({ node: paragraph(text, { attrs: { id } }), listType: null, depth: 0, bullet: false });
+const bullet = (id: string, text: string, marks?: DocMark[]): FlatEntry => ({
+  node: paragraph(text, { attrs: { id }, marks }), listType: "bulletList", depth: 1, bullet: true,
 });
+const resume = (): Resume =>
+  withDoc(
+    emptyResume(),
+    buildDoc([
+      { node: paragraph("EXPERIENCE", { attrs: { id: "s1", borderBottom: true } }), listType: null, depth: 0, bullet: false },
+      line("e1", "Learning Center\tBoston, MA"),
+      line("e1r", "Math Tutor\t2024 – Present"),
+      bullet("b1", "Tutored 30 students in calculus"),
+      bullet("b2", "Made study guides", [{ type: "bold" }]),
+      line("e2", "Robotics Club\t"),
+      line("e2r", "Member"),
+      bullet("b3", ""),
+      line("e3", "Tutor Club\tAustin"),
+    ]),
+  );
 
 const blank = (key: string, over: Record<string, unknown> = {}) => ({
   key, label: `${key} label`, hint: "Most students see a handful", example_value: "15", question: "Count a typical week", ...over,
@@ -165,25 +171,50 @@ describe("resolveBlanks", () => {
 });
 
 describe("putting the bullet on the resume, and its fact", () => {
-  it("add appends to the entry (or fills an empty last bullet); replace keeps the bullet's id", () => {
+  const bulletIds = (r: Resume, entryId: string) => r.sections.flatMap((s) => s.items).find((it) => it.id === entryId)?.bullets.map((b) => b.id);
+
+  it("add appends a bullet to the entry, in its list, with the last bullet's marks", () => {
     const r = resume();
     const added = insertCoachedBullet(r, { sectionId: "s1", entryId: "e1" }, "Tutored 15 students a week", "add", "new1");
     expect(added.bulletId).toBe("new1");
-    expect(added.resume.sections[0].items[0].bullets.map((b) => b.id)).toEqual(["b1", "b2", "new1"]);
-    const filled = insertCoachedBullet(r, { sectionId: "s1", entryId: "e2" }, "Built a line-following robot", "add", "new2");
-    expect(filled.resume.sections[0].items[1].bullets).toEqual([{ id: "new2", text: "Built a line-following robot" }]);
-    const replaced = insertCoachedBullet(r, { sectionId: "s1", entryId: "e1", bulletId: "b2" }, "Wrote study guides for [N] classmates", "replace", "unused");
-    expect(replaced.bulletId).toBe("b2");
-    expect(replaced.resume.sections[0].items[0].bullets[1]).toEqual({ id: "b2", text: "Wrote study guides for [N] classmates" });
+    expect(bulletIds(added.resume, "e1")).toEqual(["b1", "b2", "new1"]);
+    expect(findParagraph(resumeDoc(added.resume), "new1")).toMatchObject({ listType: "bulletList", depth: 1 });
+    expect(findParagraph(resumeDoc(added.resume), "new1")?.node.content).toEqual([
+      { type: "text", text: "Tutored 15 students a week", marks: [{ type: "bold" }] },
+    ]);
+    expect(flattenDoc(resumeDoc(added.resume)).map((p) => p.id).slice(3)).toEqual(["b1", "b2", "new1", "e2", "e2r", "b3", "e3"]);
     expect(r.sections[0].items[0].bullets).toHaveLength(2); // input untouched
   });
 
-  it("replace drops the bullet's old marks (they belonged to the old text) and keeps its paragraph formatting", () => {
+  it("add to an entry without bullets puts the first bullet after its entry line", () => {
+    const out = insertCoachedBullet(resume(), { sectionId: "s1", entryId: "e3" }, "Ran the sign-up table", "add", "new3");
+    expect(out.bulletId).toBe("new3");
+    expect(flattenDoc(resumeDoc(out.resume)).map((p) => p.id).slice(-2)).toEqual(["e3", "new3"]);
+    expect(findParagraph(resumeDoc(out.resume), "new3")?.listType).toBe("bulletList");
+  });
+
+  it("add fills an empty last bullet instead of leaving it dangling (returns that bullet's id)", () => {
+    const out = insertCoachedBullet(resume(), { sectionId: "s1", entryId: "e2" }, "Built a line-following robot", "add", "new2");
+    expect(out.bulletId).toBe("b3");
+    expect(bulletIds(out.resume, "e2")).toEqual(["b3"]);
+    expect(out.resume.sections[0].items[1].bullets).toEqual([{ id: "b3", text: "Built a line-following robot" }]);
+  });
+
+  it("replace rewrites the bullet's text in place; the id stays", () => {
     const r = resume();
-    const target = r.sections[0].items[0].bullets[1];
-    r.sections[0].items[0].bullets[1] = { ...target, marks: [{ from: 0, to: 3, bold: true }], para: { spaceBefore: 4 } };
-    const out = insertCoachedBullet(r, { sectionId: "s1", entryId: "e1", bulletId: "b2" }, "Wrote study guides", "replace", "unused");
-    expect(out.resume.sections[0].items[0].bullets[1]).toEqual({ id: "b2", text: "Wrote study guides", para: { spaceBefore: 4 } });
+    const out = insertCoachedBullet(r, { sectionId: "s1", entryId: "e1", bulletId: "b2" }, "Wrote study guides for [N] classmates", "replace", "unused");
+    expect(out.bulletId).toBe("b2");
+    expect(out.resume.sections[0].items[0].bullets[1]).toEqual({ id: "b2", text: "Wrote study guides for [N] classmates" });
+  });
+
+  it("replace keeps the bullet's paragraph formatting (its bold)", () => {
+    const out = insertCoachedBullet(resume(), { sectionId: "s1", entryId: "e1", bulletId: "b2" }, "Wrote study guides", "replace", "unused");
+    expect(findParagraph(resumeDoc(out.resume), "b2")?.node.content).toEqual([{ type: "text", text: "Wrote study guides", marks: [{ type: "bold" }] }]);
+  });
+
+  it("an unknown entry leaves the resume unchanged", () => {
+    const r = resume();
+    expect(insertCoachedBullet(r, { sectionId: "s1", entryId: "nope" }, "x", "add", "new").resume).toEqual(r);
   });
 
   it("inserting creates a fact linked to the new bullet: active without placeholders, a draft with them", () => {

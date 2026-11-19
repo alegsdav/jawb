@@ -30,7 +30,8 @@ import {
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
 import { ResumeDocument } from "@/components/ResumeDocument";
-import { EMPTY_FORMAT_STATE, FONT_SIZES, LINE_KIND_LABELS, type Align, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
+import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
+import { EditMenu, FormatMenu } from "@/components/FormatMenus";
 import { JobHeader } from "@/components/job/JobHeader";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
@@ -44,8 +45,8 @@ import { progressFields } from "@/lib/progress";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, FitBadge } from "@/components/StatusSelect";
 import {
-  countWords, DocToolbar, docEdit, EDIT_SHORTCUTS, EditorToolbar, FeedbackLegend, IconButton, MenuBar, MenuBarMenu, PageCount,
-  PlaceholderCount, StatusBar, Toggle, ToolbarSep, UndoRedo, useEditorShortcuts, useZoom, ZoomSelect,
+  countWords, DocToolbar, EDIT_SHORTCUTS, EditorToolbar, FeedbackLegend, IconButton, MenuBar, MenuBarMenu, PageCount,
+  PlaceholderCount, StatusBar, Toggle, ToolbarSep, useEditorShortcuts, useZoom, ZoomSelect,
 } from "@/components/DocToolbar";
 import { EditorCanvas } from "@/components/ZoomFrame";
 import { BriefcaseIcon, ChevronRightIcon } from "@/components/icons";
@@ -55,7 +56,6 @@ import { PullBanner, SaveAsMasterDialog, TailoredConflictBanner } from "@/compon
 import { FlashToast } from "@/components/FlashToast";
 import { confirmPlaceholders, downloadResumePdf, resumeTexts } from "@/components/pdfDownload";
 import { SaveErrorToast, SaveStatus, useAutosaveWithRetry, worstStatus } from "@/lib/useAutosave";
-import { useHistory } from "@/lib/useHistory";
 
 type Tab = "resume" | "analysis" | "job" | "cover";
 type Question = Analysis["questions"][number];
@@ -77,22 +77,11 @@ const REFRESH_GAP_MS = 1500;
 const ZOOM_CHOICES: [number, string][] = [[0, "Fit"], [0.5, "50%"], [0.75, "75%"], [0.9, "90%"], [1, "100%"], [1.25, "125%"], [1.5, "150%"]];
 
 /** A check mark in a fixed-width cell, so the labels of ticked and unticked menu items line up. */
-/** Help > Editing tips: the same habits as the resume page's tips, plus how the coaching panel follows the caret. */
-/** Help > Editing tips: the resume page's tips, plus how the coaching panel follows the selection. */
+/** Help > Editing tips: how the document edits, and how the coaching panel follows the caret. */
 const EDITING_TIPS =
-  "Click a bullet to see its feedback and suggested edits. Type anywhere, like a normal document. Select text and use the " +
-  "toolbar or Format menu for bold, italic, underline, size and alignment. Each line also has a style (Normal text, Name, " +
-  "Contact line, Section heading, Entry title, Entry subtitle, Bullet) that tells the app what the line is, so the AI knows " +
-  "which lines are your bullets. On an entry title or subtitle, Tab jumps to the right-aligned part (location or dates). " +
-  "Undo with Ctrl/⌘+Z.";
-
-/** Format > Align choices, with their shortcuts. */
-const ALIGN_CHOICES: { align: Align; label: string; shortcut: string }[] = [
-  { align: "left", label: "Align left", shortcut: "Ctrl+Shift+L" },
-  { align: "center", label: "Center", shortcut: "Ctrl+Shift+E" },
-  { align: "right", label: "Align right", shortcut: "Ctrl+Shift+R" },
-  { align: "justify", label: "Justify", shortcut: "Ctrl+Shift+J" },
-];
+  "Click a bullet to see its feedback and suggested edits. Type anywhere, like a normal document: Enter starts a new " +
+  "paragraph, Backspace joins. Select text and use the toolbar or Format menu for bold, italic, underline, size, " +
+  "alignment and lists. The AI reads your bullets from the document's lists and bold section headings. Undo with Ctrl/⌘+Z.";
 
 const tick = (on: boolean) => <span className="inline-block w-3 shrink-0 text-center">{on ? "✓" : ""}</span>;
 
@@ -111,9 +100,8 @@ export default function JobPage() {
   const supabase = useMemo(() => createClient(), []);
 
   const [job, setJobState] = useState<Job | null>(null);
-  const doc = useHistory<Resume>();
-  const resume = doc.value;
-  const { set: setDoc, reset: resetDoc } = doc; // stable callbacks (the `doc` object itself is new every render)
+  /** The tailored copy. Undo lives in the editor (its own history), so the page keeps plain state. */
+  const [resume, setResume] = useState<Resume | null>(null);
   const [master, setMaster] = useState<Resume | null>(null);
   /** Bullet texts when the page loaded: stand-in for `original` on analyses saved before it existed. */
   const [loadedTexts, setLoadedTexts] = useState<Map<string, string> | null>(null);
@@ -162,7 +150,7 @@ export default function JobPage() {
   /** This job's tailored copy's row id (facts coached here link to it). */
   const [tailoredId, setTailoredId] = useState<string | null>(null);
   const [factUndo, setFactUndo] = useState<Fact | null>(null);
-  /** Imperative document commands (bold, italic, reset, set a line's style) for the Format menu. */
+  /** Imperative document commands (formatting, undo and redo) for the toolbar and menus. */
   const commandsRef = useRef<DocCommands | null>(null);
   /** Formatting state of the caret's line (drives the Format menu's check marks and enabled states). */
   const [formatState, setFormatState] = useState<FormatState>(EMPTY_FORMAT_STATE);
@@ -214,12 +202,11 @@ export default function JobPage() {
   }, []);
   /** Show a new tailored copy (from a merge or another device) and keep docLatest in step. */
   const showDoc = useCallback(
-    (r: Resume, how: "set" | "reset") => {
+    (r: Resume) => {
       docLatest.current = r;
-      if (how === "reset") resetDoc(r);
-      else setDoc(r, true);
+      setResume(r);
     },
-    [setDoc, resetDoc],
+    [],
   );
   const setConflict = useCallback((c: Conflict | null) => {
     conflictRef.current = c;
@@ -288,7 +275,7 @@ export default function JobPage() {
           selfHeal = true;
         }
         setLoadedTexts(bulletTextMap(start));
-        showDoc(start, "reset");
+        showDoc(start);
         if (start !== stored) {
           // Saved like any other edit: only if nobody changed the row since we read it (else merged).
           persistResume().catch((e) =>
@@ -400,7 +387,7 @@ export default function JobPage() {
           if (out.merged) {
             // Edits typed while the save was in flight are merged on top (base = what was sent).
             const cur = docLatest.current ?? local;
-            showDoc(cur === local ? out.content : mergeTailored(local, cur, out.content).merged, "set");
+            showDoc(cur === local ? out.content : mergeTailored(local, cur, out.content).merged);
             showFlash("Merged changes from another device.", 5000);
           }
         }
@@ -437,7 +424,7 @@ export default function JobPage() {
         if (data) next = { content: tailoredFromRow(data.content), updatedAt: (data as { updated_at: string }).updated_at };
         resumeBase.current = next;
         setConflict(null);
-        showDoc(next.content, "reset");
+        showDoc(next.content);
       });
       showFlash("Loaded the version saved on your other device.");
     } finally {
@@ -454,7 +441,7 @@ export default function JobPage() {
     const { merged } = mergeTailored(base.content, local, c.server);
     resumeBase.current = { content: c.server, updatedAt: c.serverUpdatedAt };
     setConflict(null);
-    showDoc({ ...merged }, "set"); // a new value, so autosave writes it (on top of their version)
+    showDoc({ ...merged }); // a new value, so autosave writes it (on top of their version)
   }
 
   const saveState = conflict ? "error" : worstStatus(jobSave.status, resumeSave.status);
@@ -504,11 +491,11 @@ export default function JobPage() {
           const plan = planTailoredRefresh(rb, local, { content: server2, updatedAt: s.updated_at });
           if (plan.kind === "replace") {
             resumeBase.current = { content: server2, updatedAt: s.updated_at };
-            showDoc(plan.content, "reset");
+            showDoc(plan.content);
             visible = true;
           } else if (plan.kind === "merge") {
             resumeBase.current = { content: server2, updatedAt: s.updated_at };
-            showDoc(plan.content, "set"); // autosave writes the merge
+            showDoc(plan.content); // autosave writes the merge
             visible = true;
           } else if (plan.kind === "conflict") {
             setConflict({ server: server2, serverUpdatedAt: s.updated_at, conflicts: plan.conflicts });
@@ -624,7 +611,7 @@ export default function JobPage() {
     if (!resume || !pending.length) return;
     let next = resume;
     for (const p of pending) next = replaceBullet(next, p.id, p.rewrite);
-    doc.set(next, true);
+    setResume(next);
     showFlash(`Accepted ${plural(pending.length, "suggested edit")} (Undo to go back)`);
   }
 
@@ -666,7 +653,7 @@ export default function JobPage() {
     const next = planFill(text, feedback[q.bullet_id]?.suggestion ?? "", q.placeholder, value);
     if (next === null) return;
     const bid = q.bullet_id;
-    doc.set(replaceBullet(resume, bid, next), true);
+    setResume(replaceBullet(resume, bid, next));
     const show = () => {
       selectTab("resume");
       setReveal({ id: bid, n: Date.now() });
@@ -734,7 +721,7 @@ export default function JobPage() {
     const cur = docLatest.current;
     if (!cur || !cur.sections.some((sec) => sec.items.some((it) => it.id === target.entryId))) return null;
     const { resume: next, bulletId } = insertCoachedBullet(cur, target, text, mode, uid());
-    doc.set(next, true);
+    setResume(next);
     setReveal({ id: bulletId, n: Date.now() });
     return bulletId;
   }
@@ -771,7 +758,7 @@ export default function JobPage() {
   function pullFromMaster() {
     if (!resume || !master) return;
     const r = applyPull(resume, master);
-    doc.set(r.resume, true);
+    setResume(r.resume);
     const parts = [r.header ? "your name/contact line" : "", r.bullets ? plural(r.bullets, "bullet") : ""];
     const what = parts.filter(Boolean).join(" and ");
     const kept = r.skipped || r.headerKept ? " Kept what you edited in this tailored copy." : "";
@@ -780,26 +767,26 @@ export default function JobPage() {
 
   function addOne(a: PullAddition) {
     if (!resume || !master) return;
-    doc.set(addFromMaster(resume, master, a), true);
+    setResume(addFromMaster(resume, master, a));
     showFlash(`Added the new ${a.kind === "item" ? "entry" : a.kind} from your master resume (Undo to go back)`);
   }
 
   function addAll() {
     if (!resume || !master) return;
     const n = pull.additions.length;
-    doc.set(addAllFromMaster(resume, master), true);
+    setResume(addAllFromMaster(resume, master));
     showFlash(`Added ${n} new item${n === 1 ? "" : "s"} from your master resume (Undo to go back)`);
   }
 
   function leaveOut() {
     if (!resume || !master) return;
-    doc.set(dismissAdditions(resume, master, pull.additions), true);
+    setResume(dismissAdditions(resume, master, pull.additions));
     showFlash("Left the new master content out of this tailored copy");
   }
 
   function onRemoval(r: PullRemoval, choice: "remove" | "keep") {
     if (!resume) return;
-    doc.set(resolveRemoval(resume, r, choice), true);
+    setResume(resolveRemoval(resume, r, choice));
     showFlash(choice === "remove" ? "Removed here too (Undo to go back)" : "Kept in this tailored copy");
   }
 
@@ -810,7 +797,7 @@ export default function JobPage() {
     const fresh = m ? normalizeResume(m.content) : emptyResume();
     if (isEmptyResume(fresh)) return setError("Your master resume is empty. Import it on the Master resume page first.");
     setMaster(fresh);
-    doc.set(cloneForJob(fresh), true);
+    setResume(cloneForJob(fresh));
     showFlash("Replaced with your master resume (Undo to go back)");
   }
 
@@ -838,7 +825,7 @@ export default function JobPage() {
       if (!res.ok) return fail(res.error, "Couldn't update your master resume. Try again.");
       setMaster(res.content);
       const cur = docLatest.current ?? copyThen;
-      showDoc({ ...cur, baseline: baselineAfterMasterSave(copyThen, res.content) }, "set");
+      showDoc({ ...cur, baseline: baselineAfterMasterSave(copyThen, res.content) });
       setSaveMaster(null);
       const removed = [...remove].filter((rid) => pendingSave.plan.removals.some((r) => r.id === rid)).length;
       showFlash(
@@ -955,7 +942,7 @@ export default function JobPage() {
             missingKeywords={analysis?.keywords.missing ?? []}
             onAccept={(bid, rewrite) => {
               if (!resume) return;
-              doc.set(replaceBullet(resume, bid, rewrite), true);
+              setResume(replaceBullet(resume, bid, rewrite));
               showFlash("Accepted the suggested edit (Undo to go back)");
             }}
             onReject={rejectSuggestion}
@@ -1153,18 +1140,7 @@ export default function JobPage() {
             Start over from master resume…
           </MenuItem>
         </MenuBarMenu>
-        <MenuBarMenu label="Edit">
-          <MenuItem onSelect={doc.undo} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
-          <MenuItem onSelect={doc.redo} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
-          <MenuSeparator />
-          <MenuItem onSelect={() => void docEdit("cut")} disabled={!formatState.active} shortcut="Ctrl+X">Cut</MenuItem>
-          <MenuItem onSelect={() => void docEdit("copy")} disabled={!formatState.active} shortcut="Ctrl+C">Copy</MenuItem>
-          <MenuItem onSelect={() => void docEdit("paste")} disabled={!formatState.active} shortcut="Ctrl+V">Paste</MenuItem>
-          <MenuItem onSelect={() => void docEdit("selectAll")} disabled={!formatState.active} shortcut="Ctrl+A">Select all</MenuItem>
-          <MenuSeparator />
-          <MenuItem onSelect={reviewNext} disabled={pending.length === 0}>Review next suggestion</MenuItem>
-          <MenuItem onSelect={acceptAll} disabled={pending.length === 0}>Accept all suggestions</MenuItem>
-        </MenuBarMenu>
+        <EditMenu commandsRef={commandsRef} fmt={formatState} />
         <MenuBarMenu label="View">
           {!quiet && (
             <MenuItem onSelect={() => setShowFeedback((v) => !v)}>
@@ -1178,50 +1154,7 @@ export default function JobPage() {
             </MenuItem>
           ))}
         </MenuBarMenu>
-        <MenuBarMenu label="Format">
-        <MenuItem onSelect={() => commandsRef.current?.toggleMark("bold")} disabled={!formatState.active} shortcut="Ctrl+B">
-          <span className="flex items-center gap-1.5">{tick(formatState.bold)}Bold{formatState.bold && <span className="sr-only">(on)</span>}</span>
-        </MenuItem>
-        <MenuItem onSelect={() => commandsRef.current?.toggleMark("italic")} disabled={!formatState.active} shortcut="Ctrl+I">
-          <span className="flex items-center gap-1.5">{tick(formatState.italic)}Italic{formatState.italic && <span className="sr-only">(on)</span>}</span>
-        </MenuItem>
-        <MenuItem onSelect={() => commandsRef.current?.toggleMark("underline")} disabled={!formatState.active} shortcut="Ctrl+U">
-          <span className="flex items-center gap-1.5">{tick(formatState.underline)}Underline{formatState.underline && <span className="sr-only">(on)</span>}</span>
-        </MenuItem>
-        <MenuSeparator />
-        <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
-        {FONT_SIZES.map((pt) => (
-          <MenuItem key={pt} onSelect={() => commandsRef.current?.setSize(pt)} disabled={!formatState.active}>
-            <span className="flex items-center gap-1.5">{tick(formatState.size === pt)}{`${pt} pt`}{formatState.size === pt && <span className="sr-only">(current)</span>}</span>
-          </MenuItem>
-        ))}
-        <MenuSeparator />
-        {ALIGN_CHOICES.map(({ align, label, shortcut }) => (
-          <MenuItem key={align} onSelect={() => commandsRef.current?.setAlign(align)} disabled={!formatState.active} shortcut={shortcut}>
-            <span className="flex items-center gap-1.5">{tick(formatState.align === align)}{label}{formatState.align === align && <span className="sr-only">(current)</span>}</span>
-          </MenuItem>
-        ))}
-        <MenuSeparator />
-        <MenuItem onSelect={() => commandsRef.current?.toggleRule()} disabled={!formatState.active}>
-          <span className="flex items-center gap-1.5">{tick(formatState.rule)}Line under{formatState.rule && <span className="sr-only">(on)</span>}</span>
-        </MenuItem>
-        <MenuItem onSelect={() => commandsRef.current?.toggleCaps()} disabled={!formatState.active}>
-          <span className="flex items-center gap-1.5">{tick(formatState.caps)}All caps{formatState.caps && <span className="sr-only">(on)</span>}</span>
-        </MenuItem>
-        <MenuItem onSelect={() => commandsRef.current?.toggleSpaceBefore()} disabled={!formatState.active}>
-          <span className="flex items-center gap-1.5">{tick(formatState.spaceBefore)}Space before line{formatState.spaceBefore && <span className="sr-only">(on)</span>}</span>
-        </MenuItem>
-        <MenuSeparator />
-        {LINE_KIND_LABELS.map(({ kind, label, hint }) => (
-          <MenuItem key={kind} onSelect={() => commandsRef.current?.setLineKind(kind)} disabled={!formatState.active} hint={hint}>
-            <span className="flex items-center gap-1.5">{tick(formatState.lineKind === kind)}{label}{formatState.lineKind === kind && <span className="sr-only">(current)</span>}</span>
-          </MenuItem>
-        ))}
-        <MenuSeparator />
-        <MenuItem onSelect={() => commandsRef.current?.clearFormatting()} disabled={!formatState.active} shortcut={"Ctrl+\\"}>
-          Clear formatting
-        </MenuItem>
-        </MenuBarMenu>
+        <FormatMenu commandsRef={commandsRef} fmt={formatState} />
         <MenuBarMenu label="Help">
           <MenuItem onSelect={() => {}} hint={EDITING_TIPS}>
             Editing tips
@@ -1260,7 +1193,6 @@ export default function JobPage() {
       {resumeBar && (
         <div className={`shrink-0 ${tab === "analysis" ? "hidden lg:block" : ""}`}>
           <EditorToolbar>
-            <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
             <IconButton label="Print (Ctrl+P)" onClick={() => window.print()}>
               <PrintIcon />
             </IconButton>
@@ -1341,7 +1273,7 @@ export default function JobPage() {
                 <EditorCanvas zoom={zoom} className="min-w-0 flex-1 lg:overflow-auto">
                   <ResumeDocument
                     value={resume}
-                    onChange={doc.set}
+                    onChange={setResume}
                     feedback={quiet ? undefined : feedback}
                     showHighlights={showHighlights}
                     baseline={compareTo}

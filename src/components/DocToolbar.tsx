@@ -74,8 +74,9 @@ export async function docEdit(cmd: "cut" | "copy" | "paste" | "selectAll"): Prom
 /** Helper text for a menu hint: the editing and print shortcuts of the document. */
 export const EDIT_SHORTCUTS =
   "Ctrl/⌘+B / I / U: bold, italic, underline · Ctrl/⌘+Shift+L / E / R / J: align left, center, right, justify · " +
-  "Ctrl/⌘+\\: clear formatting · Enter: new line · Backspace at the start of a line: join it with the line above · " +
-  "Tab: right-aligned part of an entry line · Ctrl/⌘+Z / Ctrl/⌘+Shift+Z: undo / redo · Ctrl/⌘+P: print";
+  "Ctrl/⌘+Shift+7 / 8: numbered / bulleted list · Ctrl/⌘+\\: clear formatting · Enter: new paragraph · " +
+  "Tab / Shift+Tab: indent or outdent a list item (elsewhere Tab inserts a right-aligned tab) · " +
+  "Ctrl/⌘+Z / Ctrl/⌘+Shift+Z: undo / redo · Ctrl/⌘+P: print";
 
 /** Row of menu triggers (File, Edit, View...) for the top bar. */
 export function MenuBar({ children }: { children: React.ReactNode }) {
@@ -99,7 +100,7 @@ export function MenuBarMenu({ label, children }: { label: React.ReactNode; child
 /** Formatting-style toolbar row under the top bar. Fixed height, never changes width when content changes. */
 export function EditorToolbar({ children }: { children: React.ReactNode }) {
   return (
-    <div data-doc-keep-selection className="flex h-10 items-center gap-0.5 overflow-x-auto whitespace-nowrap border-b border-border bg-surface px-2 [scrollbar-width:none]">
+    <div data-doc-keep-selection className="flex min-h-10 flex-wrap items-center gap-1 border-b border-border bg-surface px-2 py-1">
       {children}
     </div>
   );

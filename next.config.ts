@@ -19,6 +19,8 @@ const SECURITY_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  // pdf.js reads resume PDFs on the server; it must load from node_modules, not be bundled.
+  serverExternalPackages: ["pdfjs-dist"],
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },

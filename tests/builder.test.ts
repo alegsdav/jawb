@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildDraftResume, builderFacts, builderStepErrors, emptyBuilder, newExperience, parseBuilderInput, readBuilder, type BuilderState,
 } from "@/lib/builder";
+import { flattenDoc } from "@/lib/doc/model";
+import { resumeDoc } from "@/lib/resume";
+import { HARVARD_PAGE } from "@/lib/template";
+import type { Resume } from "@/lib/types";
 
 const h = vi.hoisted(() => ({
   reply: null as unknown,
@@ -57,8 +61,17 @@ const answers = (): BuilderState => ({
   skills: { languages: "Python, SQL", tools: "Excel, Git", other: "" },
 });
 
+/** The paragraph whose text is `text` (the builder's lines are unique). */
+const paraNamed = (r: Resume, text: string) => {
+  const p = flattenDoc(resumeDoc(r)).find((x) => x.text === text);
+  if (!p) throw new Error(`no paragraph "${text}"`);
+  return p;
+};
+/** The font mark every Harvard line carries. */
+const TIMES = (size: string) => [{ type: "textStyle", attrs: { fontFamily: "Times New Roman", fontSize: size } }];
+
 describe("builder output", () => {
-  it("builds a Harvard-format resume from the answers; the AI only supplies bullets, number-checked per experience", () => {
+  it("builds a Harvard-format document from the answers; the AI only supplies bullets, number-checked per experience", () => {
     const r = buildDraftResume(answers(), {
       bullets: {
         x1: ["Tutored about 20 students a week in calculus", "Raised exam scores 30% with study guides"],
@@ -67,34 +80,49 @@ describe("builder output", () => {
         stray: ["Never shown"],
       },
     });
-    expect(r.version).toBe(3);
-    expect(r.header).toEqual({
-      name: "Jordan Lee",
-      contact: "Boston, MA • jo@college.edu • 555-010-2000 • github.com/jlee",
-      marks: {
-        name: [{ from: 0, to: 10, bold: true, size: 16 }],
-        contact: [{ from: 0, to: "Boston, MA • jo@college.edu • 555-010-2000 • github.com/jlee".length, size: 10 }],
-      },
-      para: { name: { align: "center" }, contact: { align: "center" } },
-    });
-    // The Harvard look is the template, made explicit: headings bold with a rule, all caps, 6pt above.
-    expect(r.sections[1].marks).toEqual([{ from: 0, to: "Experience".length, bold: true }]);
-    expect(r.sections[1].para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
-    expect(r.sections[1].items[0].para).toEqual({ entry: { spaceBefore: 3 } });
-    expect(r.sections.map((s) => s.title)).toEqual(["Education", "Experience", "Projects", "Leadership & Activities", "Skills"]);
+    expect(r.version).toBe(4);
+    expect(r.page).toEqual(HARVARD_PAGE);
+    expect(r.header).toEqual({ name: "Jordan Lee", contact: "Boston, MA • jo@college.edu • 555-010-2000 • github.com/jlee" });
+    expect(r.sections.map((s) => s.title)).toEqual(["EDUCATION", "EXPERIENCE", "PROJECTS", "LEADERSHIP & ACTIVITIES", "SKILLS"]);
     expect(r.sections[0].items[0]).toMatchObject({ title: "Northeastern University", subtitle: "B.S. in Data Science", dates: "May 2027" });
     expect(r.sections[0].items[0].bullets.map((b) => b.text)).toEqual(["GPA: 3.7"]);
     const tutor = r.sections[1].items[0];
     expect(tutor).toMatchObject({ id: "x1", title: "Learning Center", subtitle: "Math Tutor", location: "Boston, MA", dates: "Sep 2024 – Present" });
     expect(tutor.bullets.map((b) => b.text)).toEqual(["Tutored about 20 students a week in calculus", "Raised exam scores [X%] with study guides"]);
+    expect(r.sections[2].items[0]).toMatchObject({ id: "x2", title: "Bus Tracker", dates: "Spring 2025" });
     expect(r.sections[2].items[0].bullets.map((b) => b.text)).toEqual(["Built a Flask web app showing shuttle arrival times for [N] riders"]);
-    expect(r.sections[2].items[0].dates).toBe("Spring 2025");
     expect(r.sections[3].items[0].bullets.map((b) => b.text)).toEqual(["[What you did and what came of it]"]);
-    expect(r.sections[4].items.map((it) => [it.title, it.subtitle])).toEqual([["Languages", "Python, SQL"], ["Tools", "Excel, Git"]]);
-    // Every id is present and unique (normalizeResume).
-    const ids = r.sections.flatMap((s) => [s.id, ...s.items.flatMap((it) => [it.id, ...it.bullets.map((b) => b.id)])]);
+    expect(r.sections[4].items.map((it) => it.title)).toEqual(["Languages: Python, SQL", "Tools: Excel, Git"]);
+    // Every paragraph id is present and unique.
+    const ids = flattenDoc(resumeDoc(r)).map((p) => p.id);
     expect(ids.every(Boolean)).toBe(true);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("uses the Harvard look on every line: Times New Roman, sizes, centered name, rules, tabs, italic roles, bullets", () => {
+    const r = buildDraftResume(answers(), { bullets: { x1: ["Tutored about 20 students a week in calculus"] } });
+    expect(paraNamed(r, "Jordan Lee")).toMatchObject({ node: { attrs: { textAlign: "center" } } });
+    expect(paraNamed(r, "Jordan Lee").node.content).toEqual([{ type: "text", text: "Jordan Lee", marks: [{ type: "bold" }, ...TIMES("16pt")] }]);
+    expect(paraNamed(r, "Boston, MA • jo@college.edu • 555-010-2000 • github.com/jlee").node).toMatchObject({ attrs: { textAlign: "center" } });
+    const heading = paraNamed(r, "EXPERIENCE");
+    expect(heading.node.attrs).toMatchObject({ borderBottom: true, spaceBefore: 10 });
+    expect(heading.node.content).toEqual([{ type: "text", text: "EXPERIENCE", marks: [{ type: "bold" }, ...TIMES("11pt")] }]);
+    const entry = paraNamed(r, "Learning Center\tBoston, MA");
+    expect(entry.node.content?.map((n) => n.type)).toEqual(["text", "tab", "text"]);
+    expect(entry.node.content?.[0]).toMatchObject({ marks: [{ type: "bold" }, ...TIMES("11pt")] });
+    const role = paraNamed(r, "Math Tutor\tSep 2024 – Present");
+    expect(role.node.content?.[0]).toMatchObject({ text: "Math Tutor", marks: [{ type: "italic" }, ...TIMES("11pt")] });
+    expect(paraNamed(r, "Tutored about 20 students a week in calculus")).toMatchObject({ listType: "bulletList", depth: 1 });
+    expect(paraNamed(r, "Languages: Python, SQL").node.content?.[0]).toMatchObject({ text: "Languages: ", marks: [{ type: "bold" }, ...TIMES("11pt")] });
+  });
+
+  it("entry ids are the experience ids, and every entry after the first in its section is spaced", () => {
+    const a = answers();
+    a.experiences = [a.experiences[0], { ...a.experiences[0], id: "x4", org: "Second Co", role: "Analyst", start: "", end: "", location: "" }];
+    const r = buildDraftResume(a, "nonsense");
+    expect(r.sections[1].items.map((it) => [it.id, it.title])).toEqual([["x1", "Learning Center"], ["x4", "Second Co"]]);
+    expect(paraNamed(r, "Second Co\t").node.attrs).toMatchObject({ spaceBefore: 4 });
+    expect(paraNamed(r, "Learning Center\tBoston, MA").node.attrs?.spaceBefore).toBeUndefined();
   });
 
   it("copes with a junk reply and leaves out empty sections", () => {
@@ -103,9 +131,9 @@ describe("builder output", () => {
     a.skills = { languages: "", tools: "", other: "" };
     a.about.gpa = "";
     const r = buildDraftResume(a, "nonsense");
-    expect(r.sections.map((s) => s.title)).toEqual(["Education", "Experience"]);
+    expect(r.sections.map((s) => s.title)).toEqual(["EDUCATION", "EXPERIENCE"]);
     expect(r.sections[0].items[0].bullets).toEqual([]);
-    expect(r.sections[1].items[0].bullets).toHaveLength(1);
+    expect(r.sections[1].items[0].bullets.map((b) => b.text)).toEqual(["[What you did and what came of it]"]);
   });
 
   it("raw answers become builder facts linked to their entries on the master", () => {

@@ -2,10 +2,10 @@ import { effectiveStyle, cleanStyle } from "./textStyle";
 import { TEMPLATE } from "./template";
 import { cleanMarks, cleanPara, wholeMarks, type Format } from "./richText";
 import type { Bullet, Item, Resume, Section, TextStyle } from "./types";
-import { emptyDoc, flattenDoc, normalizeDoc } from "./doc/model";
+import { emptyDoc, flattenDoc, newId, normalizeDoc } from "./doc/model";
 import { outlineFromDoc } from "./doc/outline";
 import { legacyToDoc } from "./doc/legacy";
-import type { DocJSON, PageSetup } from "./doc/types";
+import type { DocJSON, FlatParagraph, PageSetup } from "./doc/types";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -228,7 +228,6 @@ export function countChangedBullets(r: Resume, master: Map<string, string>): num
   return n;
 }
 
-const normKey = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
 const wordSet = (t: string) => new Set(t.toLowerCase().match(/[a-z0-9]+/g) ?? []);
 
 function jaccard(a: Set<string>, b: Set<string>): number {
@@ -238,7 +237,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return both / (a.size + b.size - both);
 }
 
-/** Bullet wording counts as "the same bullet, edited" at or above this word overlap. */
+/** Paragraph wording counts as "the same paragraph, edited" at or above this word overlap. */
 const SIMILAR = 0.5;
 
 /**
@@ -270,123 +269,47 @@ function greedyMatch<A, B>(
   }
 }
 
-/** Index pairs (next -> prev) of bullets that are the same bullet: identical text first, then closest wording. */
-function matchBullets(next: Bullet[], prev: Bullet[]): Map<number, number> {
-  const m = new Map<number, number>();
-  greedyMatch(next, prev, (a, b) => (a.text.trim() && normKey(a.text) === normKey(b.text) ? 1 : 0), 1, m);
-  const nw = next.map((b) => wordSet(b.text));
-  const pw = prev.map((b) => wordSet(b.text));
-  greedyMatch(next.map((_, i) => i), prev.map((_, j) => j), (i, j) => jaccard(nw[i], pw[j]), SIMILAR, m);
-  return m;
-}
-
-/** Items match by title+subtitle, then by title, then (for renamed entries) by how many bullets they share. */
-function matchItems(next: Item[], prev: Item[]): Map<number, number> {
-  const m = new Map<number, number>();
-  const full = (it: Item) => (it.title.trim() || it.subtitle.trim() ? `${normKey(it.title)}\u0000${normKey(it.subtitle)}` : "");
-  greedyMatch(next, prev, (a, b) => (full(a) && full(a) === full(b) ? 1 : 0), 1, m);
-  greedyMatch(next, prev, (a, b) => (normKey(a.title) && normKey(a.title) === normKey(b.title) ? 1 : 0), 1, m);
-  greedyMatch(next, prev, (a, b) => matchBullets(a.bullets, b.bullets).size, 1, m);
-  return m;
-}
-
-/** Sections match by title, then (for renamed headings) by how many items they share. */
-function matchSections(next: Section[], prev: Section[]): Map<number, number> {
-  const m = new Map<number, number>();
-  greedyMatch(next, prev, (a, b) => (normKey(a.title) && normKey(a.title) === normKey(b.title) ? 1 : 0), 1, m);
-  greedyMatch(next, prev, (a, b) => matchItems(a.items, b.items).size, 1, m);
-  return m;
-}
-
 /**
- * Formatting is content-like: a matched node keeps the previous version's formatting for each field where
- * the new version has none, but only while that field's text is unchanged (marks are positions in the text).
+ * Pairs each paragraph of `next` with the paragraph of `prev` it is: identical text first, then the closest wording.
+ * Only paragraphs that are both list items or both not are compared. Each `prev` paragraph is used at most once.
  */
-function carryBullet(b: Bullet, pb: Bullet | undefined): Bullet {
-  if (!pb || pb.text !== b.text) return b;
-  const out: Bullet = { ...b };
-  setOpt(out, "marks", b.marks ?? pb.marks);
-  setOpt(out, "para", b.para ?? pb.para);
-  return out;
-}
-
-function carryItem(it: Item, pit: Item | undefined): Item {
-  if (!pit) return it;
-  const out: Item = { ...it };
-  const marks: NonNullable<Item["marks"]> = { ...it.marks };
-  for (const k of ["title", "subtitle", "location", "dates"] as const) {
-    if (!marks[k] && pit.marks?.[k] && it[k] === pit[k]) marks[k] = pit.marks[k];
-  }
-  setOpt(out, "marks", compact(marks));
-  const para: NonNullable<Item["para"]> = { ...it.para };
-  para.entry ??= pit.para?.entry;
-  para.role ??= pit.para?.role;
-  setOpt(out, "para", compact(para));
-  return out;
-}
-
-function carrySection(sec: Section, ps: Section | undefined): Section {
-  if (!ps || ps.title !== sec.title) return sec;
-  const out: Section = { ...sec };
-  setOpt(out, "marks", sec.marks ?? ps.marks);
-  setOpt(out, "para", sec.para ?? ps.para);
-  return out;
-}
-
-function carryHeader(next: Resume["header"], prev: Resume["header"]): Resume["header"] {
-  const out: Resume["header"] = { ...next };
-  const marks: NonNullable<Resume["header"]["marks"]> = { ...next.marks };
-  if (!marks.name && prev.marks?.name && next.name === prev.name) marks.name = prev.marks.name;
-  if (!marks.contact && prev.marks?.contact && next.contact === prev.contact) marks.contact = prev.marks.contact;
-  setOpt(out, "marks", compact(marks));
-  const para: NonNullable<Resume["header"]["para"]> = { ...next.para };
-  para.name ??= prev.para?.name;
-  para.contact ??= prev.para?.contact;
-  setOpt(out, "para", compact(para));
-  return out;
+function matchParagraphs(next: FlatParagraph[], prev: FlatParagraph[]): Map<number, number> {
+  const m = new Map<number, number>();
+  const nIdx = next.map((_, i) => i);
+  const pIdx = prev.map((_, j) => j);
+  const sameKind = (i: number, j: number) => (next[i].listType !== null) === (prev[j].listType !== null);
+  greedyMatch(nIdx, pIdx, (i, j) => (sameKind(i, j) && next[i].text === prev[j].text ? 1 : 0), 1, m);
+  const nw = next.map((p) => wordSet(p.text));
+  const pw = prev.map((p) => wordSet(p.text));
+  greedyMatch(nIdx, pIdx, (i, j) => (sameKind(i, j) ? jaccard(nw[i], pw[j]) : 0), SIMILAR, m);
+  return m;
 }
 
 /**
- * After a re-import, carry ids over from the previous version wherever content matches, so
- * "Changes vs master" in existing jobs keeps meaning something. Sections match by title,
- * items by title (+subtitle), bullets by identical text first and then by closest wording
- * (each old id is used at most once). Unmatched things keep their new ids. The previous version's
- * legacy `facts` JSON is kept as stored (facts live in their own table, migration 0005).
+ * After a re-import, give each paragraph of `next` the id of the paragraph of `prev` it matches (matchParagraphs), so
+ * facts, AI feedback and tailored copies stay linked to the paragraphs they were about. Unmatched paragraphs keep their
+ * own ids, or get fresh ones when those are taken, so no id is ever used twice. `next`'s page is kept; the previous
+ * version's legacy `facts` JSON is kept as stored (facts live in their own table, migration 0005).
  */
 export function reconcileIds(prev: Resume, next: Resume): Resume {
-  const carried = { section: new Set<string>(), item: new Set<string>(), bullet: new Set<string>() };
-  const fresh: { kind: keyof typeof carried; node: { id: string } }[] = [];
-  const take = <T extends { id: string }>(kind: keyof typeof carried, node: T, from: { id: string } | undefined): T => {
-    const out = { ...node, id: from ? from.id : node.id };
-    if (from) carried[kind].add(from.id);
-    else fresh.push({ kind, node: out });
-    return out;
-  };
-
-  const sm = matchSections(next.sections, prev.sections);
-  const sections = next.sections.map((s, si) => {
-    const ps = sm.has(si) ? prev.sections[sm.get(si)!] : undefined;
-    const im = ps ? matchItems(s.items, ps.items) : new Map<number, number>();
-    const items = s.items.map((it, ii) => {
-      const pit = ps && im.has(ii) ? ps.items[im.get(ii)!] : undefined;
-      const bm = pit ? matchBullets(it.bullets, pit.bullets) : new Map<number, number>();
-      const bullets = it.bullets.map((b, bi) => {
-        const pb = pit && bm.has(bi) ? pit.bullets[bm.get(bi)!] : undefined;
-        return take("bullet", carryBullet(b, pb), pb);
-      });
-      return take("item", carryItem({ ...it, bullets }, pit), pit);
-    });
-    return take("section", carrySection({ ...s, items }, ps), ps);
+  const prevParas = flattenDoc(resumeDoc(prev));
+  const doc = structuredClone(resumeDoc(next));
+  const nextParas = flattenDoc(doc);
+  const matched = matchParagraphs(nextParas, prevParas);
+  const taken = new Set([...matched.values()].map((j) => prevParas[j].id));
+  nextParas.forEach((p, i) => {
+    const j = matched.get(i);
+    let id = j === undefined ? p.id : prevParas[j].id;
+    if (j === undefined && (!id || taken.has(id))) {
+      do id = newId();
+      while (taken.has(id));
+    }
+    taken.add(id);
+    p.node.attrs = { ...p.node.attrs, id };
   });
-  // A new node whose id happens to equal a carried-over id would make two nodes share an id.
-  for (const { kind, node } of fresh) if (carried[kind].has(node.id)) node.id = uid();
-
-  const out: Resume = { ...next, version: next.version ?? prev.version ?? RESUME_VERSION, sections };
-  // The header's formatting survives too (see carryHeader).
-  out.header = carryHeader(next.header, prev.header);
-  delete out.facts;
-  if (prev.facts) out.facts = prev.facts;
-  return out;
+  const out: Resume = { ...next };
+  setOpt(out, "facts", prev.facts);
+  return withDoc(out, doc);
 }
 
 /** The bullet with new text: its marks belonged to the old text, so they go; the paragraph stays. */

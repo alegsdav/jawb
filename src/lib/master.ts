@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Bullet, Item, Mark, Para, Resume, Section } from "./types";
-import { compact, normalizeResume, setOpt } from "./resume";
-import { cleanMarks, cleanPara, marksEqual, paraEqual } from "./richText";
+import type { Resume } from "./types";
+import type { DocJSON, FlatParagraph } from "./doc/types";
+import { buildDoc, docEquals, flattenDoc } from "./doc/model";
+import { normalizeResume, resumeDoc, setOpt, withDoc } from "./resume";
 import { dbErrorMessage } from "./db";
 
 /**
@@ -58,7 +59,7 @@ export async function updateMaster(
 
 /** One spot that both sides changed differently. `local` is what the merged result holds for it. */
 export type MergeConflict = {
-  /** Human label, e.g. `Bullet in "Acme Corp"` or `Name`. */
+  /** Human label, e.g. `Line "Built a dashboard"`. */
   where: string;
   local: string;
   server: string;
@@ -83,240 +84,126 @@ export function sameJson(a: unknown, b: unknown): boolean {
   );
 }
 
+const paragraphDoc = (p: FlatParagraph): DocJSON => ({ type: "doc", content: [p.node] });
+
+/** Two paragraphs are the same when their text, formatting and list placement all match. */
+export function sameParagraph(a: FlatParagraph, b: FlatParagraph): boolean {
+  return (
+    a.listType === b.listType && a.depth === b.depth && a.bullet === b.bullet && docEquals(paragraphDoc(a), paragraphDoc(b))
+  );
+}
+
+const byId = (ps: FlatParagraph[]) => new Map(ps.map((p) => [p.id, p] as const));
 const short = (t: string, n = 40) => {
   const s = t.replace(/\s+/g, " ").trim();
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 };
 
-/** Ids (in order) of `side` that are also in `other`. */
-const commonOrder = (side: { id: string }[], other: Set<string>) => side.filter((x) => other.has(x.id)).map((x) => x.id);
+/**
+ * What one paragraph id becomes, given its state in base, local and server (undefined = dropped).
+ * - Changed on one side only (or identically on both): that side.
+ * - Added on one side: kept.
+ * - Deleted on one side and unchanged on the other: deleted.
+ * - Deleted on one side and changed on the other, or changed differently on both: local is kept and the
+ *   conflict is recorded. Same text on both sides with different formatting is not a conflict: local.
+ */
+function pickParagraph(
+  b: FlatParagraph | undefined,
+  l: FlatParagraph | undefined,
+  s: FlatParagraph | undefined,
+  conflicts: MergeConflict[],
+): FlatParagraph | undefined {
+  if (l && s) {
+    if (sameParagraph(l, s)) return l;
+    if (b && sameParagraph(l, b)) return s;
+    if (b && sameParagraph(s, b)) return l;
+    if (l.text !== s.text) conflicts.push({ where: `Line "${short(l.text)}"`, local: l.text, server: s.text });
+    return l;
+  }
+  const only = l ?? s;
+  if (!only) return undefined;
+  if (!b) return only;
+  if (sameParagraph(only, b)) return undefined;
+  conflicts.push({ where: `Line "${short(only.text)}"`, local: l?.text ?? "", server: s?.text ?? "" });
+  return only;
+}
 
 /**
- * Merge two edited copies of a list of nodes keyed by id.
- * - In both: merged field by field (`mergeNode`).
- * - Added on one side (not in base): kept.
- * - Deleted on one side: gone, unless the other side edited that node (then the edited node is kept).
- * - Deleted on both: gone.
- * Order: the local order, unless only the server reordered; nodes only the other side has are
- * inserted after their nearest preceding neighbour there.
+ * `primary` (its ids in order, those in `keep` only), with the ids only `other` has inserted after their nearest
+ * preceding neighbour that is already placed (first in front when there is none).
  */
-function mergeList<T extends { id: string }>(
-  base: T[],
-  local: T[],
-  server: T[],
-  mergeNode: (b: T | undefined, l: T, s: T) => T,
-): T[] {
-  const B = new Map(base.map((x) => [x.id, x]));
-  const L = new Map(local.map((x) => [x.id, x]));
-  const S = new Map(server.map((x) => [x.id, x]));
-  const keep = new Map<string, T>();
-  for (const id of new Set([...L.keys(), ...S.keys()])) {
-    const b = B.get(id);
-    const l = L.get(id);
-    const s = S.get(id);
-    if (l && s) keep.set(id, mergeNode(b, l, s));
-    else if (l) {
-      if (!b || !sameJson(b, l)) keep.set(id, l); // local addition, or local edit beats the server's deletion
-    } else if (s) {
-      if (!b || !sameJson(b, s)) keep.set(id, s);
-    }
-  }
-
-  const baseIds = new Set(B.keys());
-  const reordered = (side: T[], sideIds: Set<string>) =>
-    !sameJson(commonOrder(base, sideIds), commonOrder(side, baseIds));
-  const localMoved = reordered(local, new Set(L.keys()));
-  const serverMoved = reordered(server, new Set(S.keys()));
-  const [primary, other] = serverMoved && !localMoved ? [server, local] : [local, server];
-
-  const order = primary.filter((x) => keep.has(x.id)).map((x) => x.id);
+export function placeInto(primary: string[], other: string[], keep: Set<string>): string[] {
+  const order = primary.filter((id) => keep.has(id));
   const placed = new Set(order);
-  other.forEach((x, i) => {
-    if (!keep.has(x.id) || placed.has(x.id)) return;
+  other.forEach((id, i) => {
+    if (!keep.has(id) || placed.has(id)) return;
     let at = 0;
     for (let j = i - 1; j >= 0; j--) {
-      const k = order.indexOf(other[j].id);
+      const k = order.indexOf(other[j]);
       if (k >= 0) {
         at = k + 1;
         break;
       }
     }
-    order.splice(at, 0, x.id);
-    placed.add(x.id);
+    order.splice(at, 0, id);
+    placed.add(id);
   });
-  return order.map((id) => keep.get(id)!);
+  return order;
 }
 
 /**
- * Three-way merge of the master resume. `base` is what this page last loaded or saved, `local` is
- * what's on screen, `server` is the row as it is now. Bullets, entry fields, header fields and
- * section titles are matched by id: whichever side changed something relative to base wins;
- * additions from either side are kept; a deletion wins only if the other side didn't edit that
- * node. Facts live in their own table (migration 0005); the old `facts` JSON is carried over as stored,
- * never merged. Where both sides changed the same thing differently, it's listed in
- * `conflicts` and `merged` holds the local value (so `merged` is "keep mine" for conflicts and
- * "take theirs" for everything only they changed).
+ * The order of the kept paragraphs. Only one side can have moved paragraphs relative to base: that side's order is
+ * primary, otherwise local's. The other side's additions are placed by placeInto.
+ */
+function mergeOrder(base: FlatParagraph[], local: FlatParagraph[], server: FlatParagraph[], keep: Set<string>): string[] {
+  const ids = (ps: FlatParagraph[]) => ps.map((p) => p.id);
+  const baseIds = new Set(ids(base));
+  const moved = (side: FlatParagraph[]) => {
+    const sideIds = new Set(ids(side));
+    return !sameJson(ids(base).filter((id) => sideIds.has(id)), ids(side).filter((id) => baseIds.has(id)));
+  };
+  const [primary, other] = moved(server) && !moved(local) ? [server, local] : [local, server];
+  return placeInto(ids(primary), ids(other), keep);
+}
+
+/**
+ * Three-way merge of two edited documents, paragraph by paragraph. `base` is what both sides started from,
+ * `local` what this side has, `server` what the other side has now. Each paragraph is compared as a whole (text,
+ * formatting and list placement). Inputs are not changed.
+ */
+export function mergeDocs(base: DocJSON, local: DocJSON, server: DocJSON): { doc: DocJSON; conflicts: MergeConflict[] } {
+  if (docEquals(local, server) || docEquals(server, base)) return { doc: local, conflicts: [] };
+  if (docEquals(local, base)) return { doc: server, conflicts: [] };
+  const B = flattenDoc(base);
+  const L = flattenDoc(local);
+  const S = flattenDoc(server);
+  const [bm, lm, sm] = [B, L, S].map(byId);
+  const conflicts: MergeConflict[] = [];
+  const keep = new Map<string, FlatParagraph>();
+  for (const id of new Set([...bm.keys(), ...lm.keys(), ...sm.keys()])) {
+    const kept = pickParagraph(bm.get(id), lm.get(id), sm.get(id), conflicts);
+    if (kept) keep.set(id, kept);
+  }
+  const order = mergeOrder(B, L, S, new Set(keep.keys()));
+  return { doc: buildDoc(order.map((id) => keep.get(id)!)), conflicts };
+}
+
+/**
+ * Three-way merge of the master resume. `base` is what this page last loaded or saved, `local` is what's on screen,
+ * `server` is the row as it is now. The document is merged paragraph by paragraph (mergeDocs); the page setup is
+ * local if it changed relative to base, else the server's. Where both sides changed the same paragraph differently,
+ * it's listed in `conflicts` and `merged` holds the local version. Facts live in their own table (migration 0005);
+ * the old `facts` JSON is carried over as stored, never merged.
  */
 export function mergeResumes(base: Resume, local: Resume, server: Resume): MergeResult {
   if (sameJson(local, server) || sameJson(server, base)) return { merged: local, conflicts: [] };
   if (sameJson(local, base)) return { merged: server, conflicts: [] };
 
-  const conflicts: MergeConflict[] = [];
-
-  const mergeBullet = (where: string) => (b: Bullet | undefined, l: Bullet, s: Bullet): Bullet => {
-    const rich = mergeRich(where, pairOf(b?.text, b?.marks), compactRich(l.text, l.marks), compactRich(s.text, s.marks), conflicts);
-    const out = withRich(l, rich);
-    setOpt(out, "para", mergePara(b?.para, l.para, s.para));
-    return out;
-  };
-
-  const mergeItem = (b: Item | undefined, l: Item, s: Item): Item => {
-    const name = short(l.title || s.title || l.subtitle || s.subtitle || "an entry");
-    const field = (k: ItemField, label: string) =>
-      mergeRich(`${label} of "${name}"`, pairOf(b?.[k], b?.marks?.[k]), compactRich(l[k], l.marks?.[k]), compactRich(s[k], s.marks?.[k]), conflicts);
-    const fields = {
-      title: field("title", "Title"),
-      subtitle: field("subtitle", "Second line"),
-      location: field("location", "Location"),
-      dates: field("dates", "Dates"),
-    };
-    const out: Item = {
-      ...l,
-      title: fields.title.text,
-      subtitle: fields.subtitle.text,
-      location: fields.location.text,
-      dates: fields.dates.text,
-      bullets: mergeList(b?.bullets ?? [], l.bullets, s.bullets, mergeBullet(`Bullet in "${name}"`)),
-    };
-    setOpt(out, "marks", compact({
-      title: fields.title.marks,
-      subtitle: fields.subtitle.marks,
-      location: fields.location.marks,
-      dates: fields.dates.marks,
-    }));
-    setOpt(out, "para", compact({
-      entry: mergePara(b?.para?.entry, l.para?.entry, s.para?.entry),
-      role: mergePara(b?.para?.role, l.para?.role, s.para?.role),
-    }));
-    return out;
-  };
-
-  const mergeSection = (b: Section | undefined, l: Section, s: Section): Section => {
-    const title = mergeRich(
-      `Section title "${short(l.title || s.title)}"`,
-      pairOf(b?.title, b?.marks),
-      compactRich(l.title, l.marks),
-      compactRich(s.title, s.marks),
-      conflicts,
-    );
-    const out: Section = { ...l, items: mergeList(b?.items ?? [], l.items, s.items, mergeItem) };
-    out.title = title.text;
-    setOpt(out, "marks", title.marks);
-    setOpt(out, "para", mergePara(b?.para, l.para, s.para));
-    return out;
-  };
-
-  const sections = mergeList(base.sections, local.sections, server.sections, mergeSection);
-  const name = mergeRich("Name", pairOf(base.header.name, base.header.marks?.name), compactRich(local.header.name, local.header.marks?.name), compactRich(server.header.name, server.header.marks?.name), conflicts);
-  const contact = mergeRich(
-    "Contact line",
-    pairOf(base.header.contact, base.header.marks?.contact),
-    compactRich(local.header.contact, local.header.marks?.contact),
-    compactRich(server.header.contact, server.header.marks?.contact),
-    conflicts,
-  );
-  const merged: Resume = {
-    ...local,
-    version: Math.max(local.version ?? 0, server.version ?? 0) || local.version,
-    header: compactHeader(
-      name,
-      contact,
-      mergePara(base.header.para?.name, local.header.para?.name, server.header.para?.name),
-      mergePara(base.header.para?.contact, local.header.para?.contact, server.header.para?.contact),
-    ),
-    sections: dedupeIds(sections, conflicts),
-  };
-  // Legacy `content.facts`: nobody writes it any more; keep whatever the row has.
-  const legacy = server.facts ?? local.facts;
-  if (legacy) merged.facts = legacy;
-  else delete merged.facts;
+  const { doc, conflicts } = mergeDocs(resumeDoc(base), resumeDoc(local), resumeDoc(server));
+  const merged = withDoc(local, doc);
+  setOpt(merged, "page", sameJson(local.page, base.page) ? server.page : local.page);
+  setOpt(merged, "facts", server.facts ?? local.facts);
   return { merged, conflicts };
-}
-
-type ItemField = "title" | "subtitle" | "location" | "dates";
-
-/** A text field with its marks, as one value: the two always travel together. */
-type Rich = { text: string; marks?: Mark[] };
-
-/** A base-side value as a pair (undefined when the base has no such node). */
-const pairOf = (text: string | undefined, marks: Mark[] | undefined): Rich | undefined =>
-  text === undefined ? undefined : compactRich(text, marks);
-
-/** A text field with its marks, clipped to its text. */
-function compactRich(text: string, marks: Mark[] | undefined): Rich {
-  const cleaned = cleanMarks(marks, text.length);
-  return cleaned ? { text, marks: cleaned } : { text };
-}
-
-const sameRich = (x: Rich, y: Rich) => x.text === y.text && marksEqual(x.marks, y.marks);
-
-/**
- * Three-way merge of a text field together with its marks. A side that changed the pair relative to
- * base wins as a whole, so the winner's text and marks always match. Both changed it differently: a
- * conflict (reported with the texts), local kept. Texts equal but marks differ on both sides: local,
- * no conflict. Base missing: the same rules without the base step.
- */
-function mergeRich(where: string, b: Rich | undefined, l: Rich, s: Rich, conflicts: MergeConflict[]): Rich {
-  if (sameRich(l, s)) return l;
-  if (b && sameRich(l, b)) return s;
-  if (b && sameRich(s, b)) return l;
-  if (l.text === s.text) return l;
-  conflicts.push({ where, local: l.text, server: s.text });
-  return l;
-}
-
-/** Paragraph formatting: whichever side changed relative to base wins; both changed differently: local. */
-function mergePara(b: Para | undefined, l: Para | undefined, s: Para | undefined): Para | undefined {
-  const pick = paraEqual(l, b) ? s : l;
-  return pick === undefined ? undefined : cleanPara(pick);
-}
-
-/** The merged header line for a text field: its text, and its marks when it has any. */
-function compactHeader(name: Rich, contact: Rich, namePara: Para | undefined, contactPara: Para | undefined): Resume["header"] {
-  const header: Resume["header"] = { name: name.text, contact: contact.text };
-  setOpt(header, "marks", compact({ name: name.marks, contact: contact.marks }));
-  setOpt(header, "para", compact({ name: namePara, contact: contactPara }));
-  return header;
-}
-
-/** `node` with its text and marks set to `rich` (no marks key when there are none). */
-function withRich<T extends { text: string; marks?: Mark[] }>(node: T, rich: Rich): T {
-  const out: T = { ...node, text: rich.text };
-  setOpt(out, "marks", rich.marks);
-  return out;
-}
-
-/**
- * A line moved to another entry on one side and edited on the other can end up twice. Keep the
- * first copy and report it, so it's never silently duplicated or dropped.
- */
-function dedupeIds(sections: Section[], conflicts: MergeConflict[]): Section[] {
-  const seen = { s: new Set<string>(), i: new Set<string>(), b: new Set<string>() };
-  let dup = false;
-  const out = sections
-    .filter((s) => (seen.s.has(s.id) ? ((dup = true), false) : (seen.s.add(s.id), true)))
-    .map((s) => ({
-      ...s,
-      items: s.items
-        .filter((it) => (seen.i.has(it.id) ? ((dup = true), false) : (seen.i.add(it.id), true)))
-        .map((it) => ({
-          ...it,
-          bullets: it.bullets.filter((b) => (seen.b.has(b.id) ? ((dup = true), false) : (seen.b.add(b.id), true))),
-        })),
-    }));
-  if (!dup) return sections;
-  conflicts.push({ where: "A line moved on one device and edited on the other", local: "", server: "" });
-  return out;
 }
 
 // ---------- master page autosave ----------

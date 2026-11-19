@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { TEMPLATE, templateForImport } from "@/lib/template";
-import { normalizeResume, RESUME_VERSION, resumeToPlainText, resumeToPromptText } from "@/lib/resume";
+import { HARVARD_PAGE, harvardBullet, harvardContact, harvardEntry, harvardHeading, harvardLabelLine, harvardName, harvardRole, TEMPLATE } from "@/lib/template";
+import { normalizeResume, RESUME_VERSION, resumeDoc, resumeToPlainText, resumeToPromptText } from "@/lib/resume";
 import { buildDraftResume, emptyBuilder } from "@/lib/builder";
+import { buildDoc, flattenDoc } from "@/lib/doc/model";
+import type { DocMark, DocParagraph, DocText } from "@/lib/doc/types";
+import type { Resume } from "@/lib/types";
 
-describe("TEMPLATE", () => {
+describe("TEMPLATE (legacy, for version 2-3 data)", () => {
   it("is the Harvard look: name 16pt bold centered, contact 10pt centered, headings bold with a rule, caps, 6pt above", () => {
     expect(TEMPLATE.name).toEqual({ format: { bold: true, size: 16 }, para: { align: "center" } });
     expect(TEMPLATE.contact).toEqual({ format: { size: 10 }, para: { align: "center" } });
@@ -11,6 +14,88 @@ describe("TEMPLATE", () => {
     expect(TEMPLATE.entry).toEqual({ para: { spaceBefore: 3 } });
   });
 });
+
+// ---- helpers over documents ----
+
+/** The paragraph whose text is `text`. */
+const find = (r: Resume, text: string): DocParagraph => {
+  const p = flattenDoc(resumeDoc(r)).find((x) => x.text === text);
+  if (!p) throw new Error(`no paragraph "${text}"`);
+  return p.node;
+};
+const runs = (node: DocParagraph): DocText[] => (node.content ?? []).filter((n): n is DocText => n.type === "text");
+const hasMark = (run: DocText, type: DocMark["type"]) => (run.marks ?? []).some((m) => m.type === type);
+/** The text of the bold runs. */
+const boldText = (node: DocParagraph) => runs(node).filter((n) => hasMark(n, "bold")).map((n) => n.text).join("");
+const fontSize = (node: DocParagraph) => {
+  const mark = runs(node)[0]?.marks?.find((m) => m.type === "textStyle");
+  return mark?.type === "textStyle" ? mark.attrs.fontSize : undefined;
+};
+
+// ---- the Harvard paragraph builders ----
+
+describe("Harvard paragraphs", () => {
+  it("the name is 16pt bold and centered; the contact line 10.5pt and centered; all in Times New Roman", () => {
+    const name = harvardName("Ada Lovelace").node;
+    expect(name.attrs).toMatchObject({ textAlign: "center" });
+    expect(name.content).toEqual([
+      { type: "text", text: "Ada Lovelace", marks: [{ type: "bold" }, { type: "textStyle", attrs: { fontFamily: "Times New Roman", fontSize: "16pt" } }] },
+    ]);
+    expect(fontSize(harvardContact("ada@example.com").node)).toBe("10.5pt");
+    expect(harvardContact("ada@example.com").node.attrs).toMatchObject({ textAlign: "center" });
+  });
+
+  it("a heading is bold capitals with a rule under it and 10pt above", () => {
+    const h = harvardHeading("Experience").node;
+    expect(h.attrs).toMatchObject({ borderBottom: true, spaceBefore: 10 });
+    expect(runs(h)[0].text).toBe("EXPERIENCE");
+    expect(boldText(h)).toBe("EXPERIENCE");
+    expect(fontSize(h)).toBe("11pt");
+  });
+
+  it("an entry is the organization in bold, a tab, then the location; a role is italic, a tab, then the dates", () => {
+    const e = harvardEntry("Acme", "Boston, MA", { id: "x1" }).node;
+    expect(e.attrs?.id).toBe("x1");
+    expect(e.content?.map((n) => n.type)).toEqual(["text", "tab", "text"]);
+    expect(boldText(e)).toBe("Acme");
+    const role = harvardRole("Engineer", "2025").node;
+    expect(runs(role)[0]).toMatchObject({ text: "Engineer", marks: expect.arrayContaining([{ type: "italic" }]) });
+    expect(boldText(role)).toBe("");
+  });
+
+  it("an entry can be spaced from the entry above it", () => {
+    expect(harvardEntry("Acme", "", { spaceBefore: 4 }).node.attrs?.spaceBefore).toBe(4);
+    expect(harvardEntry("Acme", "").node.attrs?.spaceBefore).toBeUndefined();
+  });
+
+  it("a bullet is a depth 1 bullet list item; a label line has a bold label", () => {
+    expect(harvardBullet("Did a thing")).toMatchObject({ listType: "bulletList", depth: 1, bullet: true });
+    const label = harvardLabelLine("Languages", "Python", { spaceBefore: 4 });
+    expect(runs(label.node).map((n) => [n.text, hasMark(n, "bold")])).toEqual([["Languages: ", true], ["Python", false]]);
+    expect(label.node.attrs?.spaceBefore).toBe(4);
+  });
+
+  it("the page is 0.5 inch top and bottom, 0.75 inch on the sides", () => {
+    expect(HARVARD_PAGE).toEqual({ marginTop: 0.5, marginBottom: 0.5, marginLeft: 0.75, marginRight: 0.75 });
+  });
+
+  it("the builders make a document the outline reads back (name, heading, entry with role and bullet)", () => {
+    const doc = buildDoc([
+      harvardName("Ada"),
+      harvardContact("ada@example.com"),
+      harvardHeading("Experience"),
+      harvardEntry("Acme", "Boston", { id: "x1" }),
+      harvardRole("Engineer", "2025"),
+      harvardBullet("Built a dashboard"),
+    ]);
+    const r = normalizeResume({ version: 4, doc, header: { name: "", contact: "" }, sections: [] });
+    expect(r.header).toEqual({ name: "Ada", contact: "ada@example.com" });
+    expect(r.sections[0]).toMatchObject({ title: "EXPERIENCE", items: [{ id: "x1", title: "Acme", location: "Boston", subtitle: "Engineer", dates: "2025" }] });
+    expect(r.sections[0].items[0].bullets.map((b) => b.text)).toEqual(["Built a dashboard"]);
+  });
+});
+
+// ---- migrating version 2 (implied Harvard look) to a document ----
 
 /** A version 2 resume as the Harvard layout stored it: the look is implied by field. */
 const v2 = (over: Record<string, unknown> = {}) =>
@@ -41,8 +126,8 @@ const v2 = (over: Record<string, unknown> = {}) =>
     ...over,
   }) as unknown;
 
-describe("migrating version 2 (implied Harvard look) to explicit formatting", () => {
-  it("writes version 3 and drops every styles/style key", () => {
+describe("migrating version 2 (implied Harvard look) to a document", () => {
+  it("writes version 4 and no styles keys", () => {
     const r = normalizeResume(v2({ header: { name: "A", contact: "B", styles: { name: { italic: true } } } }));
     expect(r.version).toBe(RESUME_VERSION);
     expect(JSON.stringify(r)).not.toMatch(/"styles?"/);
@@ -50,45 +135,46 @@ describe("migrating version 2 (implied Harvard look) to explicit formatting", ()
 
   it("makes the name 16pt bold, centered, and the contact line 10pt, centered", () => {
     const r = normalizeResume(v2());
-    expect(r.header.marks).toEqual({
-      name: [{ from: 0, to: "Ada Lovelace".length, bold: true, size: 16 }],
-      contact: [{ from: 0, to: "ada@example.com".length, size: 10 }],
-    });
-    expect(r.header.para).toEqual({ name: { align: "center" }, contact: { align: "center" } });
+    expect(find(r, "Ada Lovelace")).toMatchObject({ attrs: { textAlign: "center" } });
+    expect(boldText(find(r, "Ada Lovelace"))).toBe("Ada Lovelace");
+    expect(fontSize(find(r, "Ada Lovelace"))).toBe("16pt");
+    expect(find(r, "ada@example.com")).toMatchObject({ attrs: { textAlign: "center" } });
+    expect(fontSize(find(r, "ada@example.com"))).toBe("10pt");
+    expect(boldText(find(r, "ada@example.com"))).toBe("");
   });
 
   it("makes section headings bold, with the rule, caps and spacing of the template", () => {
-    const [exp] = normalizeResume(v2()).sections;
-    expect(exp.marks).toEqual([{ from: 0, to: "Experience".length, bold: true }]);
-    expect(exp.para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
+    const h = find(normalizeResume(v2()), "EXPERIENCE");
+    expect(h.attrs).toMatchObject({ borderBottom: true, spaceBefore: 6 });
+    expect(boldText(h)).toBe("EXPERIENCE");
   });
 
-  it("makes an entry's title bold, its role italic, and its location and dates plain", () => {
-    const it = normalizeResume(v2()).sections[0].items[0];
-    expect(it.marks).toEqual({
-      title: [{ from: 0, to: "Acme".length, bold: true }],
-      subtitle: [{ from: 0, to: "Engineer".length, italic: true }],
-    });
-    expect(it.para).toEqual({ entry: { spaceBefore: 3 } });
+  it("makes an entry's organization bold, its role italic, and its location and dates plain", () => {
+    const r = normalizeResume(v2());
+    expect(boldText(find(r, "Acme\tBoston"))).toBe("Acme");
+    const role = runs(find(r, "Engineer\t2025"));
+    expect(role[0]).toMatchObject({ text: "Engineer" });
+    expect(hasMark(role[0], "italic")).toBe(true);
+    expect(hasMark(role[0], "bold")).toBe(false);
   });
 
-  it("makes an inline item's label bold when it has details, and its details plain, with no paragraph spacing", () => {
-    const it = normalizeResume(v2()).sections[1].items[0];
-    expect(it.marks).toEqual({ title: [{ from: 0, to: "Languages".length, bold: true }] });
-    expect(it.subtitle).toBe("Python");
-    expect(it.para).toBeUndefined();
+  it("makes an inline item's label bold, its details plain, with no paragraph spacing", () => {
+    const p = find(normalizeResume(v2()), "Languages: Python");
+    expect(boldText(p)).toMatch(/^Languages/);
+    expect(boldText(p)).not.toContain("Python");
+    expect(p.attrs?.spaceBefore).toBeUndefined();
   });
 
   it("gives an inline item with no details no formatting at all", () => {
     const r = normalizeResume(
       v2({ sections: [{ id: "s", title: "T", items: [{ id: "i", title: "Rowing", subtitle: "", location: "", dates: "", bullets: [] }] }] }),
     );
-    const it = r.sections[0].items[0];
-    expect(it.marks).toBeUndefined();
-    expect(it.para).toBeUndefined();
+    const p = find(r, "Rowing");
+    expect(runs(p).some((n) => (n.marks ?? []).some((m) => m.type === "bold" || m.type === "italic"))).toBe(false);
+    expect(p.attrs?.spaceBefore).toBeUndefined();
   });
 
-  it("an override that turns bold off leaves no bold mark on that field", () => {
+  it("an override that turns bold off leaves no bold on that heading", () => {
     const r = normalizeResume(
       v2({
         sections: [
@@ -101,17 +187,18 @@ describe("migrating version 2 (implied Harvard look) to explicit formatting", ()
         ],
       }),
     );
-    expect(r.sections[0].marks).toBeUndefined();
-    expect(r.sections[0].para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
-    expect(r.sections[0].items[0].marks).toBeUndefined();
+    const h = find(r, "EXPERIENCE");
+    expect(boldText(h)).toBe("");
+    expect(h.attrs).toMatchObject({ borderBottom: true, spaceBefore: 6 });
+    expect(boldText(find(r, "Acme: Engineer"))).toBe("");
   });
 
-  it("applies header overrides on top of the template (italic name, plain contact)", () => {
+  it("applies header overrides on top of the template (italic name, bold contact)", () => {
     const r = normalizeResume(v2({ header: { name: "Ada", contact: "ada@x.io", styles: { name: { bold: false, italic: true }, contact: { bold: true } } } }));
-    expect(r.header.marks).toEqual({
-      name: [{ from: 0, to: 3, italic: true, size: 16 }],
-      contact: [{ from: 0, to: "ada@x.io".length, bold: true, size: 10 }],
-    });
+    const name = runs(find(r, "Ada"))[0];
+    expect(hasMark(name, "italic")).toBe(true);
+    expect(hasMark(name, "bold")).toBe(false);
+    expect(boldText(find(r, "ada@x.io"))).toBe("ada@x.io");
   });
 
   it("applies an italic override on an entry's title on top of the bold default", () => {
@@ -120,12 +207,16 @@ describe("migrating version 2 (implied Harvard look) to explicit formatting", ()
         sections: [{ id: "s", title: "T", items: [{ id: "i", title: "Acme", subtitle: "", location: "", dates: "2025", bullets: [], styles: { title: { italic: true } } }] }],
       }),
     );
-    expect(r.sections[0].items[0].marks).toEqual({ title: [{ from: 0, to: 4, bold: true, italic: true }] });
+    const acme = runs(find(r, "Acme"))[0];
+    expect(hasMark(acme, "bold")).toBe(true);
+    expect(hasMark(acme, "italic")).toBe(true);
   });
 
-  it("keeps bullets as plain text with no formatting", () => {
+  it("keeps bullets as list items with plain text", () => {
     const r = normalizeResume(v2());
-    expect(r.sections[0].items[0].bullets).toEqual([{ id: "b1", text: "Built a dashboard" }]);
+    const p = flattenDoc(resumeDoc(r)).find((x) => x.text === "Built a dashboard");
+    expect(p?.listType).toBe("bulletList");
+    expect(boldText(p!.node)).toBe("");
   });
 
   it("swaps v1 title and subtitle before choosing the look (the organization is the bold line)", () => {
@@ -133,12 +224,9 @@ describe("migrating version 2 (implied Harvard look) to explicit formatting", ()
       header: { name: "A", contact: "" },
       sections: [{ title: "Experience", items: [{ title: "Software Intern", subtitle: "Acme", dates: "2025", bullets: [] }] }],
     });
-    const it = r.sections[0].items[0];
-    expect(it.title).toBe("Acme");
-    expect(it.marks).toEqual({
-      title: [{ from: 0, to: 4, bold: true }],
-      subtitle: [{ from: 0, to: "Software Intern".length, italic: true }],
-    });
+    expect(boldText(find(r, "Acme"))).toBe("Acme");
+    expect(runs(find(r, "Software Intern\t2025"))[0]).toMatchObject({ text: "Software Intern" });
+    expect(hasMark(runs(find(r, "Software Intern\t2025"))[0], "italic")).toBe(true);
   });
 });
 
@@ -178,9 +266,10 @@ describe("version 3 data", () => {
       ],
     });
     // [0,3) bold, [3,5) bold, [4,5) italic: the bold ranges merge, the overlap at 4 is bold italic.
-    expect(r.sections[0].items[0].bullets[0].marks).toEqual([
-      { from: 0, to: 4, bold: true },
-      { from: 4, to: 5, bold: true, italic: true },
+    const hello = runs(find(r, "Hello")).map((n) => [n.text, hasMark(n, "bold"), hasMark(n, "italic")]);
+    expect(hello).toEqual([
+      ["Hell", true, false],
+      ["o", true, true],
     ]);
   });
 
@@ -190,29 +279,28 @@ describe("version 3 data", () => {
       header: { name: "A", contact: "", para: { name: { align: "left", rule: "yes" } } },
       sections: [{ id: "s", title: "T", para: { rule: true, caps: true, spaceBefore: 6, align: "justify" }, items: [] }],
     });
-    expect(r.header.para).toBeUndefined();
-    expect(r.header).not.toHaveProperty("para");
-    expect(r.sections[0].para).toEqual({ rule: true, caps: true, spaceBefore: 6, align: "justify" });
+    expect(find(r, "A").attrs).not.toHaveProperty("borderBottom");
+    expect(find(r, "A").attrs?.textAlign).toBeUndefined();
+    expect(find(r, "T").attrs).toMatchObject({ borderBottom: true, spaceBefore: 6, textAlign: "justify" });
   });
 
-  it("drops styles keys from a version 3 document and omits empty objects", () => {
+  it("drops styles keys from a version 3 document and keeps the text in order", () => {
     const r = normalizeResume({
       version: 3,
       header: { name: "A", contact: "B", styles: { name: { bold: true } }, marks: {}, para: {} },
       sections: [{ id: "s", title: "T", style: { bold: true }, marks: [], items: [{ id: "i", title: "x", styles: { title: { bold: true } }, marks: {}, bullets: [] }] }],
     });
-    expect(r.header).toEqual({ name: "A", contact: "B" });
-    expect(r.sections[0]).toEqual({ id: "s", title: "T", items: [{ id: "i", title: "x", subtitle: "", location: "", dates: "", bullets: [] }] });
+    expect(JSON.stringify(r)).not.toMatch(/"styles?"/);
+    expect(flattenDoc(resumeDoc(r)).map((p) => p.text)).toEqual(["A", "B", "T", "x"]);
   });
 
   it("keeps marks that are already clean", () => {
-    const marks = [{ from: 0, to: 3, bold: true as const }];
     const r = normalizeResume({
       version: 3,
-      header: { name: "Ada", contact: "" },
-      sections: [{ id: "s", title: "T", items: [{ id: "i", title: "Ada", subtitle: "", location: "", dates: "", bullets: [], marks: { title: marks } }] }],
+      header: { name: "Ann", contact: "" },
+      sections: [{ id: "s", title: "T", items: [{ id: "i", title: "Ada", subtitle: "", location: "", dates: "", bullets: [], marks: { title: [{ from: 0, to: 3, bold: true }] } }] }],
     });
-    expect(r.sections[0].items[0].marks).toEqual({ title: marks });
+    expect(boldText(find(r, "Ada"))).toBe("Ada");
   });
 });
 
@@ -228,25 +316,20 @@ describe("the formatting never reaches the AI or the plain-text copy", () => {
 });
 
 describe("the builder and the AI import get the template", () => {
-  it("builder output has the template's name formatting, made explicit", () => {
+  it("builder output has the template's name and heading formatting", () => {
     const a = emptyBuilder("jo@college.edu");
     a.about.name = "Jo Lee";
+    a.about.school = "State U";
     const r = buildDraftResume(a, "nonsense");
     expect(r.version).toBe(RESUME_VERSION);
-    expect(r.header.marks?.name).toEqual([{ from: 0, to: "Jo Lee".length, bold: true, size: 16 }]);
-    expect(r.header.para?.name).toEqual({ align: "center" });
+    expect(find(r, "Jo Lee").attrs).toMatchObject({ textAlign: "center" });
+    expect(fontSize(find(r, "Jo Lee"))).toBe("16pt");
+    expect(find(r, "EDUCATION").attrs).toMatchObject({ borderBottom: true, spaceBefore: 10 });
   });
 
-  it("a version 2 import (what parse-resume passes) gets the template", () => {
+  it("a version 2 import gets the template", () => {
     const r = normalizeResume({ ...(v2() as object), version: 2 });
-    expect(r.header.para?.name).toEqual({ align: "center" });
-    expect(r.sections[0].para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
-  });
-});
-
-describe("templateForImport", () => {
-  it("applies the template to pasted text and text uploads only, never to a PDF", () => {
-    expect(templateForImport("text")).toBe(true);
-    expect(templateForImport("pdf")).toBe(false);
+    expect(find(r, "Ada Lovelace").attrs).toMatchObject({ textAlign: "center" });
+    expect(find(r, "EXPERIENCE").attrs).toMatchObject({ borderBottom: true, spaceBefore: 6 });
   });
 });

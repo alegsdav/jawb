@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { mergeResumes, sameJson, saveMasterDocument, updateMaster } from "@/lib/master";
+import { mergeDocs, mergeResumes, sameJson, saveMasterDocument, updateMaster } from "@/lib/master";
 import { addFacts } from "@/lib/facts";
-import type { Item, Resume } from "@/lib/types";
+import { buildDoc, flattenDoc, insertParagraphsAfter, paragraph, paragraphText, removeParagraphs, setParagraphText } from "@/lib/doc/model";
+import type { FlatEntry } from "@/lib/doc/model";
+import type { DocParagraph } from "@/lib/doc/types";
+import { resumeDoc, withDoc } from "@/lib/resume";
+import type { Resume } from "@/lib/types";
 
 // ---------- fake Supabase client: one `resumes` row, conditional updates like PostgREST ----------
 
@@ -46,259 +50,254 @@ function fakeDb(initial: { content: Resume; updated_at: string } | null, opts: {
   return { client, row, calls, hooks, otherSaves };
 }
 
-// ---------- resume builders ----------
+// ---------- document fixtures ----------
 
-const item = (id: string, title: string, bullets: [string, string][], extra: Partial<Item> = {}): Item => ({
-  id, title, subtitle: "", location: "", dates: "", bullets: bullets.map(([bid, text]) => ({ id: bid, text })), ...extra,
+/** A plain paragraph (a line, or a heading when its text is all caps). */
+const L = (id: string, text: string): FlatEntry => ({ node: paragraph(text, { attrs: { id } }), listType: null, depth: 0, bullet: false });
+/** A bullet: the first line of a list item. */
+const B = (id: string, text: string): FlatEntry => ({
+  node: paragraph(text, { attrs: { id } }),
+  listType: "bulletList",
+  depth: 1,
+  bullet: true,
 });
 
-/** Two sections: Experience (Acme: b1, b2, b3; Beta: b4) and Skills (one inline item). */
-const baseDoc = (): Resume => ({
-  version: 3,
-  header: { name: "Ada Lovelace", contact: "ada@example.com" },
-  sections: [
-    {
-      id: "s1",
-      title: "Experience",
-      items: [
-        item("i1", "Acme", [["b1", "Built a dashboard"], ["b2", "Wrote tests"], ["b3", "Fixed bugs"]], { subtitle: "Intern", dates: "2025" }),
-        item("i2", "Beta", [["b4", "Ran a study"]]),
-      ],
-    },
-    { id: "s2", title: "Skills", items: [item("i3", "Languages", [], { subtitle: "Python, SQL" })] },
-  ],
-  facts: ["Speaks Spanish", "Eagle Scout"],
-});
+/** Name, contact, Experience (Acme: b1-b3, Beta: b4), Education (State U: g1). */
+const baseEntries = (): FlatEntry[] => [
+  L("name", "Ada Lovelace"),
+  L("contact", "ada@example.com"),
+  L("h-exp", "EXPERIENCE"),
+  L("acme", "Acme\tNew York"),
+  L("acme-sub", "Intern\t2025"),
+  B("b1", "Built a dashboard"),
+  B("b2", "Wrote tests"),
+  B("b3", "Fixed bugs"),
+  L("beta", "Beta\tBoston"),
+  B("b4", "Ran a study"),
+  L("h-edu", "EDUCATION"),
+  L("uni", "State U"),
+  B("g1", "GPA 3.9"),
+];
 
-const clone = (r: Resume): Resume => JSON.parse(JSON.stringify(r));
-/** Copy of `r` with `fn` applied to a deep clone. */
-const edit = (r: Resume, fn: (d: Resume) => void): Resume => {
-  const d = clone(r);
-  fn(d);
-  return d;
-};
-const bullets = (r: Resume, itemId: string) =>
-  r.sections.flatMap((s) => s.items).find((it) => it.id === itemId)?.bullets.map((b) => b.text);
-const findItem = (r: Resume, itemId: string) => r.sections.flatMap((s) => s.items).find((it) => it.id === itemId);
-const setBullet = (d: Resume, bid: string, text: string) => {
-  for (const s of d.sections) for (const it of s.items) for (const b of it.bullets) if (b.id === bid) b.text = text;
+const resumeOf = (entries: FlatEntry[]): Resume => withDoc({ header: { name: "", contact: "" }, sections: [] }, buildDoc(entries));
+const baseResume = (): Resume => resumeOf(baseEntries());
+
+/** The Acme bullets, in the fixture's order. */
+const BULLETS = ["b1", "b2", "b3"];
+
+const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+const lines = (r: Resume) => flattenDoc(resumeDoc(r)).map((p) => p.text);
+const ids = (r: Resume) => flattenDoc(resumeDoc(r)).map((p) => p.id);
+const textOf = (r: Resume, id: string) => flattenDoc(resumeDoc(r)).find((p) => p.id === id)?.text;
+
+/** Paragraph `id` with new text (its formatting kept). */
+const withText = (r: Resume, id: string, text: string): Resume => withDoc(r, setParagraphText(resumeDoc(r), id, text));
+/** Paragraph `id` replaced by `fn(node)` (same list placement). */
+const mapPara = (r: Resume, id: string, fn: (node: DocParagraph) => DocParagraph): Resume =>
+  withDoc(r, buildDoc(flattenDoc(resumeDoc(r)).map((p) => (p.id === id ? { ...p, node: fn(p.node) } : p))));
+const withoutIds = (r: Resume, drop: string[]): Resume => withDoc(r, removeParagraphs(resumeDoc(r), drop));
+const insertAfter = (r: Resume, afterId: string, entries: FlatEntry[]): Resume =>
+  withDoc(r, insertParagraphsAfter(resumeDoc(r), afterId, entries));
+/** The entries with the paragraphs `ids` put in the reverse of their current order (their slots stay). */
+const reverseIn = (entries: FlatEntry[], wanted: string[]): FlatEntry[] => {
+  const byId = new Map(entries.map((e) => [e.node.attrs.id, e] as const));
+  const slots = entries.flatMap((e, i) => (wanted.includes(e.node.attrs.id) ? [i] : []));
+  const out = [...entries];
+  const rev = [...wanted].reverse();
+  slots.forEach((slot, k) => (out[slot] = byId.get(rev[k])!));
+  return out;
 };
 
 // ---------- mergeResumes ----------
 
 describe("mergeResumes", () => {
-  const base = baseDoc();
+  const base = baseResume();
 
   it("returns the other side unchanged when only one side changed", () => {
-    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
+    const local = withText(base, "b1", "Built a React dashboard");
     expect(mergeResumes(base, local, clone(base))).toEqual({ merged: local, conflicts: [] });
     expect(mergeResumes(base, clone(base), local)).toEqual({ merged: local, conflicts: [] });
     expect(mergeResumes(base, local, clone(local)).conflicts).toEqual([]);
   });
 
-  it("merges edits to different bullets from both sides", () => {
-    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
-    const server = edit(base, (d) => setBullet(d, "b3", "Fixed 40 bugs"));
+  it("concurrent edits to different paragraphs both survive (bullets, an entry line, a heading)", () => {
+    const local = withText(base, "b1", "Built a React dashboard");
+    const server = withText(withText(base, "acme-sub", "Intern\t2024 – 2025"), "h-edu", "EDUCATION & HONOURS");
     const { merged, conflicts } = mergeResumes(base, local, server);
     expect(conflicts).toEqual([]);
-    expect(bullets(merged, "i1")).toEqual(["Built a React dashboard", "Wrote tests", "Fixed 40 bugs"]);
+    expect(textOf(merged, "b1")).toBe("Built a React dashboard");
+    expect(textOf(merged, "acme-sub")).toBe("Intern\t2024 – 2025");
+    expect(textOf(merged, "h-edu")).toBe("EDUCATION & HONOURS");
   });
 
-  it("reports a conflict when both sides changed the same bullet differently (merged keeps mine)", () => {
-    const local = edit(base, (d) => setBullet(d, "b2", "Wrote unit tests"));
-    const server = edit(base, (d) => setBullet(d, "b2", "Wrote integration tests"));
+  it("the same paragraph changed differently: local wins and the conflict is reported", () => {
+    const local = withText(base, "b2", "Wrote unit tests");
+    const server = withText(base, "b2", "Wrote integration tests");
     const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([{ where: 'Bullet in "Acme"', local: "Wrote unit tests", server: "Wrote integration tests" }]);
-    expect(bullets(merged, "i1")?.[1]).toBe("Wrote unit tests");
+    expect(textOf(merged, "b2")).toBe("Wrote unit tests");
+    expect(conflicts).toEqual([{ where: 'Line "Wrote unit tests"', local: "Wrote unit tests", server: "Wrote integration tests" }]);
   });
 
-  it("is not a conflict when both sides made the same change", () => {
-    const local = edit(base, (d) => setBullet(d, "b2", "Same"));
-    const server = edit(base, (d) => {
-      setBullet(d, "b2", "Same");
-      d.header.name = "Ada L.";
-    });
-    const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([]);
-    expect(merged.header.name).toBe("Ada L.");
-    expect(bullets(merged, "i1")?.[1]).toBe("Same");
+  it("the same change on both sides is not a conflict", () => {
+    const local = withText(base, "b2", "Same");
+    const server = withText(base, "b2", "Same");
+    expect(mergeResumes(base, local, server).conflicts).toEqual([]);
   });
 
-  it("merges header fields independently and flags a header conflict", () => {
-    const local = edit(base, (d) => (d.header.name = "Ada King"));
-    const server = edit(base, (d) => (d.header.contact = "ada@new.com"));
-    expect(mergeResumes(base, local, server).merged.header).toEqual({ name: "Ada King", contact: "ada@new.com" });
-    const server2 = edit(base, (d) => (d.header.name = "Countess Ada"));
-    expect(mergeResumes(base, local, server2).conflicts).toEqual([{ where: "Name", local: "Ada King", server: "Countess Ada" }]);
+  it("the name line and the contact line merge independently; the same name line changed differently is a conflict", () => {
+    const local = withText(base, "name", "Ada King");
+    const server = withText(base, "contact", "ada@new.com");
+    expect(lines(mergeResumes(base, local, server).merged).slice(0, 2)).toEqual(["Ada King", "ada@new.com"]);
+    const server2 = withText(base, "name", "Countess Ada");
+    expect(mergeResumes(base, local, server2).conflicts).toEqual([{ where: 'Line "Ada King"', local: "Ada King", server: "Countess Ada" }]);
   });
 
-  it("merges entry fields (title, subtitle, location, dates) field by field", () => {
-    const local = edit(base, (d) => (d.sections[0].items[0].dates = "2024 – 2025"));
-    const server = edit(base, (d) => {
-      d.sections[0].items[0].location = "Boston, MA";
-      d.sections[0].items[0].subtitle = "Data Intern";
-    });
+  it("a heading renamed on one side and a bullet edited on the other both survive", () => {
+    const local = withText(base, "h-exp", "WORK EXPERIENCE");
+    const server = withText(base, "b1", "Built a React dashboard");
     const { merged, conflicts } = mergeResumes(base, local, server);
     expect(conflicts).toEqual([]);
-    expect(findItem(merged, "i1")).toMatchObject({ title: "Acme", subtitle: "Data Intern", location: "Boston, MA", dates: "2024 – 2025" });
-
-    const server2 = edit(base, (d) => (d.sections[0].items[0].dates = "Summer 2025"));
-    expect(mergeResumes(base, local, server2).conflicts).toEqual([{ where: 'Dates of "Acme"', local: "2024 – 2025", server: "Summer 2025" }]);
+    expect(textOf(merged, "h-exp")).toBe("WORK EXPERIENCE");
+    expect(textOf(merged, "b1")).toBe("Built a React dashboard");
   });
 
-  it("merges section titles and flags a title conflict", () => {
-    const local = edit(base, (d) => (d.sections[1].title = "Technical Skills"));
-    const server = edit(base, (d) => setBullet(d, "b4", "Ran a 3-month study"));
-    const m = mergeResumes(base, local, server);
-    expect(m.conflicts).toEqual([]);
-    expect(m.merged.sections.map((s) => s.title)).toEqual(["Experience", "Technical Skills"]);
-    const server2 = edit(base, (d) => (d.sections[1].title = "Skills & Tools"));
-    expect(mergeResumes(base, local, server2).conflicts).toEqual([
-      { where: 'Section title "Technical Skills"', local: "Technical Skills", server: "Skills & Tools" },
+  it("bullets added on both sides land after their neighbours", () => {
+    const local = insertAfter(base, "b1", [B("L1", "Mine, after b1")]);
+    const server = insertAfter(base, "b3", [B("S1", "Theirs, after b3")]);
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(lines(merged).slice(5, 10)).toEqual(["Built a dashboard", "Mine, after b1", "Wrote tests", "Fixed bugs", "Theirs, after b3"]);
+  });
+
+  it("a bullet the server added at the start of a list lands before the first bullet, and local edits survive", () => {
+    const server = insertAfter(base, "acme-sub", [B("S0", "First")]);
+    const local = withText(base, "b3", "Fixed many bugs");
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(lines(merged).slice(4, 9)).toEqual(["Intern\t2025", "First", "Built a dashboard", "Wrote tests", "Fixed many bugs"]);
+  });
+
+  it("entries and sections added on either side are kept, in place", () => {
+    const local = insertAfter(base, "b4", [L("gam", "Gamma\tDenver"), B("bL", "New job")]);
+    const server = insertAfter(base, "g1", [L("h-awd", "AWARDS"), L("dean", "Dean's List")]);
+    expect(ids(mergeResumes(base, local, server).merged)).toEqual([
+      "name", "contact", "h-exp", "acme", "acme-sub", "b1", "b2", "b3", "beta", "b4", "gam", "bL", "h-edu", "uni", "g1", "h-awd", "dean",
     ]);
   });
 
-  it("keeps bullets added on both sides, in a sensible position", () => {
-    const local = edit(base, (d) => d.sections[0].items[0].bullets.splice(1, 0, { id: "L1", text: "Mine, after b1" }));
-    const server = edit(base, (d) => d.sections[0].items[0].bullets.push({ id: "S1", text: "Theirs, at the end" }));
+  it("a paragraph deleted on one side and not edited on the other stays deleted", () => {
+    const local = withoutIds(base, ["b2"]);
+    const server = withText(base, "b1", "Built a React dashboard");
     const { merged, conflicts } = mergeResumes(base, local, server);
     expect(conflicts).toEqual([]);
-    expect(bullets(merged, "i1")).toEqual(["Built a dashboard", "Mine, after b1", "Wrote tests", "Fixed bugs", "Theirs, at the end"]);
+    expect(ids(merged)).not.toContain("b2");
+    expect(textOf(merged, "b1")).toBe("Built a React dashboard");
+    expect(ids(mergeResumes(base, server, local).merged)).not.toContain("b2");
   });
 
-  it("keeps a bullet the server added at the start", () => {
-    const server = edit(base, (d) => d.sections[0].items[0].bullets.unshift({ id: "S0", text: "First" }));
-    const local = edit(base, (d) => setBullet(d, "b3", "Fixed many bugs"));
-    expect(bullets(mergeResumes(base, local, server).merged, "i1")).toEqual(["First", "Built a dashboard", "Wrote tests", "Fixed many bugs"]);
-  });
-
-  it("keeps whole entries and sections added on either side", () => {
-    const local = edit(base, (d) => d.sections[0].items.push(item("iL", "Gamma", [["bL", "New job"]])));
-    const server = edit(base, (d) => d.sections.push({ id: "sS", title: "Awards", items: [item("iS", "Dean's List", [])] }));
+  it("a paragraph edited on one side and deleted on the other is kept (conflict)", () => {
+    const local = withText(base, "b2", "Wrote 200 tests");
+    const server = withoutIds(base, ["b2"]);
     const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([]);
-    expect(merged.sections.map((s) => s.title)).toEqual(["Experience", "Skills", "Awards"]);
-    expect(merged.sections[0].items.map((i) => i.title)).toEqual(["Acme", "Beta", "Gamma"]);
+    expect(textOf(merged, "b2")).toBe("Wrote 200 tests");
+    expect(conflicts).toEqual([{ where: 'Line "Wrote 200 tests"', local: "Wrote 200 tests", server: "" }]);
   });
 
-  it("applies a deletion when the other side didn't touch that bullet", () => {
-    const local = edit(base, (d) => d.sections[0].items[0].bullets.splice(1, 1)); // delete b2
-    const server = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
-    expect(bullets(mergeResumes(base, local, server).merged, "i1")).toEqual(["Built a React dashboard", "Fixed bugs"]);
-    // ...and the same from the server's side.
-    expect(bullets(mergeResumes(base, server, local).merged, "i1")).toEqual(["Built a React dashboard", "Fixed bugs"]);
-  });
-
-  it("keeps an edited bullet that the other side deleted", () => {
-    const local = edit(base, (d) => setBullet(d, "b2", "Wrote 200 tests"));
-    const server = edit(base, (d) => d.sections[0].items[0].bullets.splice(1, 1));
+  it("an entry deleted here, while the other side edited one of its bullets, keeps that edit (conflict)", () => {
+    const local = withoutIds(base, ["beta", "b4"]);
+    const server = withText(base, "b4", "Ran a big study");
     const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([]);
-    expect(bullets(merged, "i1")).toEqual(["Built a dashboard", "Wrote 200 tests", "Fixed bugs"]);
-    expect(bullets(mergeResumes(base, server, local).merged, "i1")).toEqual(["Built a dashboard", "Wrote 200 tests", "Fixed bugs"]);
-  });
-
-  it("deletes an entry or section the other side didn't edit, keeps one it did", () => {
-    const local = edit(base, (d) => d.sections[0].items.splice(1, 1)); // delete Beta
-    const server = edit(base, (d) => setBullet(d, "b1", "x"));
-    expect(mergeResumes(base, local, server).merged.sections[0].items.map((i) => i.id)).toEqual(["i1"]);
-    const serverEditsBeta = edit(base, (d) => setBullet(d, "b4", "Ran a big study"));
-    expect(mergeResumes(base, local, serverEditsBeta).merged.sections[0].items.map((i) => i.id)).toEqual(["i1", "i2"]);
-    const noSkills = edit(base, (d) => d.sections.splice(1, 1));
-    expect(mergeResumes(base, noSkills, server).merged.sections.map((s) => s.id)).toEqual(["s1"]);
+    expect(ids(merged)).not.toContain("beta");
+    expect(textOf(merged, "b4")).toBe("Ran a big study");
+    expect(conflicts).toHaveLength(1);
   });
 
   it("drops something both sides deleted", () => {
-    const local = edit(base, (d) => {
-      d.sections[0].items[0].bullets.splice(0, 1);
-      d.header.name = "A";
-    });
-    const server = edit(base, (d) => {
-      d.sections[0].items[0].bullets.splice(0, 1);
-      d.header.contact = "c";
-    });
-    expect(bullets(mergeResumes(base, local, server).merged, "i1")).toEqual(["Wrote tests", "Fixed bugs"]);
+    const local = withoutIds(base, ["b2"]);
+    const server = withoutIds(base, ["b2", "b3"]);
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(ids(merged)).not.toContain("b2");
+    expect(ids(merged)).not.toContain("b3");
+    expect(conflicts).toEqual([]);
   });
 
-  it("takes the server's reorder when only the server reordered", () => {
-    const server = edit(base, (d) => d.sections[0].items[0].bullets.reverse());
-    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
-    expect(bullets(mergeResumes(base, local, server).merged, "i1")).toEqual(["Fixed bugs", "Wrote tests", "Built a React dashboard"]);
+  it("takes the server's order when only the server reordered, keeping local edits", () => {
+    const server = resumeOf(reverseIn(baseEntries(), ["b1", "b2", "b3"]));
+    const local = withText(base, "b1", "Built a React dashboard");
+    const { merged, conflicts } = mergeResumes(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(ids(merged).filter((id) => BULLETS.includes(id))).toEqual(["b3", "b2", "b1"]);
+    expect(textOf(merged, "b1")).toBe("Built a React dashboard");
   });
 
   it("keeps the local order when both reordered", () => {
-    const server = edit(base, (d) => d.sections[0].items[0].bullets.reverse());
-    const local = edit(base, (d) => {
-      const b = d.sections[0].items[0].bullets;
-      [b[0], b[1]] = [b[1], b[0]];
-    });
-    expect(bullets(mergeResumes(base, local, server).merged, "i1")).toEqual(["Wrote tests", "Built a dashboard", "Fixed bugs"]);
+    const server = resumeOf(reverseIn(baseEntries(), ["b1", "b2", "b3"]));
+    const local = resumeOf(reverseIn(baseEntries(), ["b1", "b2"]));
+    expect(ids(mergeResumes(base, local, server).merged).filter((id) => BULLETS.includes(id))).toEqual(["b2", "b1", "b3"]);
   });
 
-  it("flags a bullet moved to another entry on one side and edited on the other, without duplicating it", () => {
-    // Local moves b3 from Acme to Beta; the server edits b3 in place.
-    const local = edit(base, (d) => {
-      const [b3] = d.sections[0].items[0].bullets.splice(2, 1);
-      d.sections[0].items[1].bullets.push(b3);
-    });
-    const server = edit(base, (d) => setBullet(d, "b3", "Fixed 40 bugs"));
-    const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts.map((c) => c.where)).toContain("A line moved on one device and edited on the other");
-    const ids = merged.sections.flatMap((s) => s.items.flatMap((i) => i.bullets.map((b) => b.id)));
-    expect(ids.filter((x) => x === "b3")).toHaveLength(1);
-  });
-
-  it("facts live in their own table: the legacy facts JSON is carried as the row has it, never merged", () => {
-    const local = edit(base, (d) => {
-      d.facts = ["Speaks Spanish", "Ran a 5k"];
-      setBullet(d, "b1", "Built a React dashboard");
-    });
-    const server = edit(base, (d) => (d.facts = ["Speaks Spanish"]));
+  it("a paragraph moved on one side and edited on the other appears once, with the edit, where it was moved", () => {
+    const moved = [...baseEntries().filter((e) => e.node.attrs.id !== "b3")];
+    moved.splice(moved.findIndex((e) => e.node.attrs.id === "b4") + 1, 0, B("b3", "Fixed bugs"));
+    const server = resumeOf(moved);
+    const local = withText(base, "b3", "Fixed 40 bugs");
     const { merged, conflicts } = mergeResumes(base, local, server);
     expect(conflicts).toEqual([]);
-    expect(merged.facts).toEqual(["Speaks Spanish"]);
-    expect(bullets(merged, "i1")?.[0]).toBe("Built a React dashboard");
-    const noFacts = edit(base, (d) => delete d.facts);
-    expect(mergeResumes(noFacts, edit(noFacts, (d) => setBullet(d, "b2", "x")), edit(noFacts, (d) => setBullet(d, "b3", "y"))).merged).not.toHaveProperty("facts");
+    expect(ids(merged).filter((id) => id === "b3")).toHaveLength(1);
+    expect(textOf(merged, "b3")).toBe("Fixed 40 bugs");
+    expect(ids(merged).indexOf("b3")).toBeGreaterThan(ids(merged).indexOf("b4"));
   });
 
-  it("handles a server copy replaced by 'Save as master' (same ids, new wording) without losing local edits elsewhere", () => {
-    // A job page saved its tailored copy as the master: b1 reworded, a bullet added, facts kept.
-    const server = edit(base, (d) => {
-      setBullet(d, "b1", "Built a Tableau dashboard used by 30 analysts");
-      d.sections[0].items[0].bullets.push({ id: "t1", text: "Automated a weekly report" });
-    });
-    const local = edit(base, (d) => setBullet(d, "b4", "Ran a 3-month user study"));
-    const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([]);
-    expect(bullets(merged, "i1")).toEqual([
-      "Built a Tableau dashboard used by 30 analysts", "Wrote tests", "Fixed bugs", "Automated a weekly report",
-    ]);
-    expect(bullets(merged, "i2")).toEqual(["Ran a 3-month user study"]);
+  it("the legacy facts JSON is carried as the row has it, never merged", () => {
+    const withFacts = { ...base, facts: ["Speaks Spanish", "Eagle Scout"] };
+    const local = { ...withText(withFacts, "b2", "Wrote unit tests"), facts: ["Speaks Spanish", "Ran a 5k"] };
+    const server = { ...withText(withFacts, "b3", "Fixed 40 bugs"), facts: ["Speaks Spanish"] };
+    expect(mergeResumes(withFacts, local, server).merged.facts).toEqual(["Speaks Spanish"]);
+    expect(mergeResumes(base, withText(base, "b2", "x"), withText(base, "b3", "y")).merged).not.toHaveProperty("facts");
+  });
+
+  it("page setup is local if it changed relative to base, else the server's", () => {
+    const withPage = (r: Resume, marginTop: number) => ({ ...r, page: { marginTop, marginBottom: 0.5, marginLeft: 0.6, marginRight: 0.6 } });
+    const b = withPage(base, 0.5);
+    expect(mergeResumes(b, withPage(b, 0.8), withText(b, "b1", "x")).merged.page?.marginTop).toBe(0.8);
+    expect(mergeResumes(b, withText(b, "b1", "x"), withPage(b, 0.9)).merged.page?.marginTop).toBe(0.9);
   });
 
   it("does not mutate its inputs", () => {
-    const local = edit(base, (d) => setBullet(d, "b1", "L"));
-    const server = edit(base, (d) => setBullet(d, "b2", "S"));
-    const [b0, l0, s0] = [clone(base), clone(local), clone(server)];
+    const local = withText(base, "b1", "L");
+    const server = withText(base, "b2", "S");
+    const before = JSON.stringify([base, local, server]);
     mergeResumes(base, local, server);
-    expect([base, local, server]).toEqual([b0, l0, s0]);
+    expect(JSON.stringify([base, local, server])).toBe(before);
+  });
+});
+
+describe("mergeDocs", () => {
+  it("merges the document alone: the same result as mergeResumes' document", () => {
+    const base = resumeDoc(baseResume());
+    const local = resumeDoc(withText(baseResume(), "b1", "L"));
+    const server = resumeDoc(withText(baseResume(), "b2", "S"));
+    const { doc, conflicts } = mergeDocs(base, local, server);
+    expect(conflicts).toEqual([]);
+    expect(flattenDoc(doc).map((p) => paragraphText(p.node))).toEqual(
+      ["Ada Lovelace", "ada@example.com", "EXPERIENCE", "Acme\tNew York", "Intern\t2025", "L", "S", "Fixed bugs", "Beta\tBoston", "Ran a study", "EDUCATION", "State U", "GPA 3.9"],
+    );
   });
 });
 
 describe("sameJson", () => {
   it("ignores key order and undefined keys", () => {
     expect(sameJson({ a: 1, b: [1, { c: 2 }] }, { b: [1, { c: 2 }], a: 1 })).toBe(true);
-    expect(sameJson({ a: 1, x: undefined }, { a: 1 })).toBe(true);
+    expect(sameJson({ a: 1, b: undefined }, { a: 1 })).toBe(true);
+    expect(sameJson({ a: 1 }, { a: 2 })).toBe(false);
     expect(sameJson([1, 2], [2, 1])).toBe(false);
-    expect(sameJson({ a: null }, { a: 0 })).toBe(false);
   });
 });
 
 // ---------- updateMaster (job page: facts, "Save as master") ----------
 
 describe("updateMaster", () => {
-  const doc = (facts: string[]) => ({ ...baseDoc(), facts });
+  const doc = (facts: string[]): Resume => ({ ...baseResume(), facts });
 
   it("re-reads and retries when someone else saved in between, keeping both changes", async () => {
     const db = fakeDb({ content: doc(["Speaks Spanish"]), updated_at: "t0" });
@@ -340,61 +339,59 @@ describe("updateMaster", () => {
 // ---------- saveMasterDocument (master page autosave) ----------
 
 describe("saveMasterDocument", () => {
+  const base = baseResume();
+
   it("writes directly when nobody else saved", async () => {
-    const base = baseDoc();
     const db = fakeDb({ content: base, updated_at: "t0" });
-    const local = edit(base, (d) => setBullet(d, "b1", "New"));
+    const local = withText(base, "b1", "New");
     const out = await saveMasterDocument(db.client, "m1", local, { content: base, updatedAt: "t0" });
     expect(out).toEqual({ kind: "saved", content: local, updatedAt: "t-saved-1", merged: false });
     if (out.kind === "saved") expect(out.content).toBe(local);
     expect(db.calls.map((c) => c.op)).toEqual(["update"]);
   });
 
-  it("two devices editing different bullets: merges, saves, and reports merged", async () => {
-    const base = baseDoc();
+  it("two devices editing different paragraphs: merges, saves, and reports merged", async () => {
     const db = fakeDb({ content: base, updated_at: "t0" });
-    db.otherSaves(edit(base, (d) => setBullet(d, "b3", "Fixed 40 bugs (phone)")));
-    const local = edit(base, (d) => setBullet(d, "b1", "Built a dashboard (laptop)"));
+    db.otherSaves(withText(base, "b3", "Fixed 40 bugs (phone)"));
+    const local = withText(base, "b1", "Built a dashboard (laptop)");
     const out = await saveMasterDocument(db.client, "m1", local, { content: base, updatedAt: "t0" });
     expect(out.kind).toBe("saved");
     if (out.kind !== "saved") return;
     expect(out.merged).toBe(true);
-    expect(bullets(db.row!.content, "i1")).toEqual(["Built a dashboard (laptop)", "Wrote tests", "Fixed 40 bugs (phone)"]);
+    expect(lines(db.row!.content).slice(5, 8)).toEqual(["Built a dashboard (laptop)", "Wrote tests", "Fixed 40 bugs (phone)"]);
     expect(out.content).toEqual(db.row!.content);
     expect(out.updatedAt).toBe(db.row!.updated_at);
     expect(db.calls.map((c) => c.op)).toEqual(["update", "select", "update"]);
   });
 
   it("'Save as master' from a job page isn't wiped by a stale master page", async () => {
-    const base = baseDoc();
     const db = fakeDb({ content: base, updated_at: "t0" });
-    db.otherSaves(edit(base, (d) => setBullet(d, "b1", "Tailored wording saved as master")));
-    const local = edit(base, (d) => (d.header.contact = "new@example.com"));
+    db.otherSaves(withText(base, "b1", "Tailored wording saved as master"));
+    const local = withText(base, "contact", "new@example.com");
     await saveMasterDocument(db.client, "m1", local, { content: base, updatedAt: "t0" });
-    expect(bullets(db.row!.content, "i1")?.[0]).toBe("Tailored wording saved as master");
-    expect(db.row!.content.header.contact).toBe("new@example.com");
+    expect(textOf(db.row!.content, "b1")).toBe("Tailored wording saved as master");
+    expect(textOf(db.row!.content, "contact")).toBe("new@example.com");
   });
 
   it("a fact deleted on another device doesn't come back", async () => {
-    const base = baseDoc();
-    const db = fakeDb({ content: base, updated_at: "t0" });
-    db.otherSaves(edit(base, (d) => (d.facts = ["Speaks Spanish"])));
-    const local = edit(base, (d) => setBullet(d, "b2", "Wrote unit tests"));
-    await saveMasterDocument(db.client, "m1", local, { content: base, updatedAt: "t0" });
+    const withFacts = { ...base, facts: ["Speaks Spanish", "Eagle Scout"] };
+    const db = fakeDb({ content: withFacts, updated_at: "t0" });
+    db.otherSaves({ ...withFacts, facts: ["Speaks Spanish"] });
+    const local = withText(withFacts, "b2", "Wrote unit tests");
+    await saveMasterDocument(db.client, "m1", local, { content: withFacts, updatedAt: "t0" });
     expect(db.row!.content.facts).toEqual(["Speaks Spanish"]);
   });
 
-  it("same bullet changed on both: returns the conflict and writes nothing", async () => {
-    const base = baseDoc();
+  it("same paragraph changed on both: returns the conflict and writes nothing", async () => {
     const db = fakeDb({ content: base, updated_at: "t0" });
-    const theirs = edit(base, (d) => setBullet(d, "b2", "Theirs"));
+    const theirs = withText(base, "b2", "Theirs");
     db.otherSaves(theirs);
     const before = db.row!.updated_at;
-    const local = edit(base, (d) => setBullet(d, "b2", "Mine"));
+    const local = withText(base, "b2", "Mine");
     const out = await saveMasterDocument(db.client, "m1", local, { content: base, updatedAt: "t0" });
     expect(out.kind).toBe("conflict");
     if (out.kind !== "conflict") return;
-    expect(out.conflicts).toEqual([{ where: 'Bullet in "Acme"', local: "Mine", server: "Theirs" }]);
+    expect(out.conflicts).toEqual([{ where: 'Line "Mine"', local: "Mine", server: "Theirs" }]);
     expect(out.server).toEqual(theirs);
     expect(out.serverUpdatedAt).toBe(before);
     expect(db.row!.content).toEqual(theirs);
@@ -402,27 +399,22 @@ describe("saveMasterDocument", () => {
   });
 
   it("'Keep mine' = merge with mine winning, rebased on their copy: then saves over theirs", async () => {
-    const base = baseDoc();
     const db = fakeDb({ content: base, updated_at: "t0" });
-    const theirs = edit(base, (d) => {
-      setBullet(d, "b2", "Theirs");
-      setBullet(d, "b4", "Their other change");
-    });
+    const theirs = withText(withText(base, "b2", "Theirs"), "b4", "Their other change");
     db.otherSaves(theirs);
-    const local = edit(base, (d) => setBullet(d, "b2", "Mine"));
+    const local = withText(base, "b2", "Mine");
     const first = await saveMasterDocument(db.client, "m1", local, { content: base, updatedAt: "t0" });
     if (first.kind !== "conflict") throw new Error("expected a conflict");
     const resolved = mergeResumes(base, local, first.server).merged;
     const out = await saveMasterDocument(db.client, "m1", resolved, { content: first.server, updatedAt: first.serverUpdatedAt });
     expect(out.kind).toBe("saved");
-    expect(bullets(db.row!.content, "i1")?.[1]).toBe("Mine");
-    expect(bullets(db.row!.content, "i2")).toEqual(["Their other change"]);
+    expect(textOf(db.row!.content, "b2")).toBe("Mine");
+    expect(textOf(db.row!.content, "b4")).toBe("Their other change");
   });
 
   it("skips the write when the server already has everything", async () => {
-    const base = baseDoc();
     const db = fakeDb({ content: base, updated_at: "t0" });
-    const same = edit(base, (d) => setBullet(d, "b1", "Both"));
+    const same = withText(base, "b1", "Both");
     db.otherSaves(same);
     const out = await saveMasterDocument(db.client, "m1", clone(same), { content: base, updatedAt: "t0" });
     expect(out).toMatchObject({ kind: "saved", updatedAt: db.row!.updated_at, merged: false });
@@ -430,23 +422,22 @@ describe("saveMasterDocument", () => {
   });
 
   it("re-merges if another save lands between the merge and its write", async () => {
-    const base = baseDoc();
     const db = fakeDb({ content: base, updated_at: "t0" });
-    const s1 = edit(base, (d) => setBullet(d, "b3", "Phone 1"));
+    const s1 = withText(base, "b3", "Phone 1");
     db.otherSaves(s1);
     // Right before our merged write, the phone saves again.
     db.hooks.push(() => {}); // first update (stale) fails on its own
-    db.hooks.push(() => db.otherSaves(edit(s1, (d) => setBullet(d, "b4", "Phone 2"))));
-    const local = edit(base, (d) => setBullet(d, "b1", "Laptop"));
+    db.hooks.push(() => db.otherSaves(withText(s1, "b4", "Phone 2")));
+    const local = withText(base, "b1", "Laptop");
     const out = await saveMasterDocument(db.client, "m1", local, { content: base, updatedAt: "t0" });
     expect(out.kind).toBe("saved");
-    expect(bullets(db.row!.content, "i1")).toEqual(["Laptop", "Wrote tests", "Phone 1"]);
-    expect(bullets(db.row!.content, "i2")).toEqual(["Phone 2"]);
+    expect(textOf(db.row!.content, "b1")).toBe("Laptop");
+    expect(textOf(db.row!.content, "b3")).toBe("Phone 1");
+    expect(textOf(db.row!.content, "b4")).toBe("Phone 2");
     expect(db.calls.map((c) => c.op)).toEqual(["update", "select", "update", "select", "update"]);
   });
 
   it("throws a plain sentence on database errors (so autosave retries)", async () => {
-    const base = baseDoc();
     const db = fakeDb({ content: base, updated_at: "t0" }, { failWith: { code: "PGRST000", message: "upstream connect error" } });
     await expect(saveMasterDocument(db.client, "m1", base, { content: base, updatedAt: "t0" })).rejects.toThrow(
       "Couldn't save. Check your connection; we'll keep retrying.",
@@ -454,7 +445,6 @@ describe("saveMasterDocument", () => {
   });
 
   it("throws when the row was deleted", async () => {
-    const base = baseDoc();
     const db = fakeDb(null);
     await expect(saveMasterDocument(db.client, "m1", base, { content: base, updatedAt: "t0" })).rejects.toThrow("deleted elsewhere");
   });
@@ -462,113 +452,49 @@ describe("saveMasterDocument", () => {
 
 // ---------- formatting travels with its text ----------
 
-describe("mergeResumes: text and its marks", () => {
-  const base = baseDoc();
-  const boldFirst = (d: Resume, bid: string, n: number) => {
-    for (const s of d.sections) for (const it of s.items) for (const b of it.bullets) if (b.id === bid) b.marks = [{ from: 0, to: n, bold: true }];
-  };
-  const bulletOf = (r: Resume, bid: string) => r.sections.flatMap((s) => s.items).flatMap((it) => it.bullets).find((b) => b.id === bid)!;
-  /** Marks never run past the text they belong to. */
-  const marksFit = (r: Resume) =>
-    r.sections.every((s) => s.items.every((it) => it.bullets.every((b) => (b.marks ?? []).every((m) => m.to <= b.text.length))));
+describe("mergeResumes: formatting", () => {
+  const base = baseResume();
+  const bold = (text: string, id: string) => paragraph(text, { attrs: { id }, marks: [{ type: "bold" }] });
 
-  it("a marks-only edit on one side is taken, without a conflict", () => {
-    const server = edit(base, (d) => boldFirst(d, "b2", 5)); // "Wrote" bold
-    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
+  it("a formatting-only change on one side merges with a text edit on the other", () => {
+    const server = mapPara(base, "b2", (n) => bold(paragraphText(n), "b2"));
+    const local = withText(base, "b1", "Built a React dashboard");
     const { merged, conflicts } = mergeResumes(base, local, server);
     expect(conflicts).toEqual([]);
-    expect(bulletOf(merged, "b1").text).toBe("Built a React dashboard");
-    expect(bulletOf(merged, "b2").marks).toEqual([{ from: 0, to: 5, bold: true }]);
+    expect(textOf(merged, "b1")).toBe("Built a React dashboard");
+    expect(flattenDoc(resumeDoc(merged)).find((p) => p.id === "b2")!.node.content?.[0]).toMatchObject({ marks: [{ type: "bold" }] });
   });
 
-  it("bold on one side and new wording on the other is one bullet changed twice: a conflict, local's pair kept", () => {
-    const server = edit(base, (d) => setBullet(d, "b3", "Fixed 40 bugs"));
-    const local = edit(base, (d) => boldFirst(d, "b3", 5)); // "Fixed" bold on the old text
+  it("paragraph spacing on one side and new wording on another paragraph both survive", () => {
+    const server = mapPara(base, "b2", (n) => ({ ...n, attrs: { ...n.attrs, spaceAfter: 6 } }));
+    const local = withText(base, "b1", "Built a dashboard (laptop)");
+    const merged = mergeResumes(base, local, server).merged;
+    const p = flattenDoc(resumeDoc(merged)).find((x) => x.id === "b2")!;
+    expect(textOf(merged, "b1")).toBe("Built a dashboard (laptop)");
+    expect(p.node.attrs.spaceAfter).toBe(6);
+  });
+
+  it("the same paragraph re-spaced on one side and re-worded on the other is a conflict (local kept)", () => {
+    const server = mapPara(base, "b2", (n) => ({ ...n, attrs: { ...n.attrs, spaceAfter: 6 } }));
+    const local = withText(base, "b2", "Wrote unit tests");
     const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([{ where: 'Bullet in "Acme"', local: "Fixed bugs", server: "Fixed 40 bugs" }]);
-    expect(bulletOf(merged, "b3")).toEqual({ id: "b3", text: "Fixed bugs", marks: [{ from: 0, to: 5, bold: true }] });
-    expect(marksFit(merged)).toBe(true);
+    expect(conflicts).toHaveLength(1);
+    expect(textOf(merged, "b2")).toBe("Wrote unit tests");
   });
 
-  it("local edits the text, server bolds a word of the OLD text: a conflict; local's text keeps its own marks", () => {
-    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
-    const server = edit(base, (d) => boldFirst(d, "b1", 5)); // "Built" bold on the old text
+  it("bold on one side and new wording on the other is one paragraph changed twice: a conflict, local kept", () => {
+    const server = withText(base, "b3", "Fixed 40 bugs");
+    const local = mapPara(base, "b3", (n) => bold(paragraphText(n), "b3"));
     const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([{ where: 'Bullet in "Acme"', local: "Built a React dashboard", server: "Built a dashboard" }]);
-    expect(bulletOf(merged, "b1")).toEqual({ id: "b1", text: "Built a React dashboard" });
-    expect(marksFit(merged)).toBe(true);
+    expect(conflicts).toEqual([{ where: 'Line "Fixed bugs"', local: "Fixed bugs", server: "Fixed 40 bugs" }]);
+    expect(textOf(merged, "b3")).toBe("Fixed bugs");
   });
 
-  it("texts equal, marks differ on both sides: no conflict, local wins", () => {
-    const local = edit(base, (d) => boldFirst(d, "b2", 5));
-    const server = edit(base, (d) => {
-      for (const s of d.sections) for (const it of s.items) for (const b of it.bullets) if (b.id === "b2") b.marks = [{ from: 0, to: 3, italic: true }];
-    });
-    const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([]);
-    expect(bulletOf(merged, "b2").marks).toEqual([{ from: 0, to: 5, bold: true }]);
-  });
-
-  it("the same text and marks on both sides: no conflict", () => {
-    const local = edit(base, (d) => boldFirst(d, "b2", 5));
-    const server = edit(base, (d) => boldFirst(d, "b2", 5));
-    expect(mergeResumes(base, local, server).conflicts).toEqual([]);
-  });
-
-  it("entry field marks merge like text: a server bold on the title is taken when only it changed", () => {
-    const server = edit(base, (d) => (d.sections[0].items[0].marks = { title: [{ from: 0, to: 4, bold: true }] }));
-    const local = edit(base, (d) => (d.sections[0].items[0].dates = "2024 – 2025"));
+  it("the same text with different formatting on both sides: no conflict, local wins", () => {
+    const local = mapPara(base, "b2", (n) => bold(paragraphText(n), "b2"));
+    const server = mapPara(base, "b2", (n) => ({ ...n, attrs: { ...n.attrs, spaceAfter: 12 } }));
     const { merged, conflicts } = mergeResumes(base, local, server);
     expect(conflicts).toEqual([]);
-    expect(findItem(merged, "i1")).toMatchObject({ title: "Acme", dates: "2024 – 2025", marks: { title: [{ from: 0, to: 4, bold: true }] } });
-  });
-
-  it("header marks follow the header text: a marks-only change on one side is taken", () => {
-    const server = edit(base, (d) => (d.header.marks = { name: [{ from: 0, to: 3, bold: true, size: 16 }] }));
-    const local = edit(base, (d) => (d.header.contact = "ada@new.com"));
-    const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([]);
-    expect(merged.header).toEqual({
-      name: "Ada Lovelace",
-      contact: "ada@new.com",
-      marks: { name: [{ from: 0, to: 3, bold: true, size: 16 }] },
-    });
-  });
-
-  it("section title marks travel with the title", () => {
-    const server = edit(base, (d) => {
-      d.sections[1].marks = [{ from: 0, to: 6, bold: true }];
-    });
-    const local = edit(base, (d) => setBullet(d, "b4", "Ran a 3-month study"));
-    const { merged } = mergeResumes(base, local, server);
-    expect(merged.sections[1]).toMatchObject({ title: "Skills", marks: [{ from: 0, to: 6, bold: true }] });
-  });
-});
-
-describe("mergeResumes: paragraph formatting", () => {
-  const base = baseDoc();
-
-  it("the side that changed the paragraph formatting wins, without a conflict", () => {
-    const local = edit(base, (d) => (d.sections[0].items[0].bullets[0].para = { spaceBefore: 4 }));
-    const server = edit(base, (d) => (d.sections[0].items[0].bullets[2].para = { align: "right" }));
-    const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([]);
-    expect(merged.sections[0].items[0].bullets[0].para).toEqual({ spaceBefore: 4 });
-    expect(merged.sections[0].items[0].bullets[2].para).toEqual({ align: "right" });
-  });
-
-  it("both sides changed the same line's paragraph formatting differently: local, no conflict", () => {
-    const local = edit(base, (d) => (d.header.para = { name: { align: "center" } }));
-    const server = edit(base, (d) => (d.header.para = { name: { align: "right" } }));
-    const { merged, conflicts } = mergeResumes(base, local, server);
-    expect(conflicts).toEqual([]);
-    expect(merged.header.para).toEqual({ name: { align: "center" } });
-  });
-
-  it("takes the server's section heading formatting when only the server changed it", () => {
-    const server = edit(base, (d) => (d.sections[0].para = { rule: true, caps: true, spaceBefore: 6 }));
-    const local = edit(base, (d) => setBullet(d, "b1", "Built a React dashboard"));
-    const { merged } = mergeResumes(base, local, server);
-    expect(merged.sections[0].para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
+    expect(flattenDoc(resumeDoc(merged)).find((p) => p.id === "b2")!.node.content?.[0]).toMatchObject({ marks: [{ type: "bold" }] });
   });
 });

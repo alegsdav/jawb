@@ -62,7 +62,9 @@ export function ResumeImport({
         } ${busy ? "pointer-events-none opacity-60" : ""}`}
       >
         <span className="text-sm font-medium">{busy ? "Reading your resume…" : "Drop your resume PDF here or tap to choose"}</span>
-        <span className="text-xs text-muted">PDF or .txt, up to 4 MB. From Google Docs: File → Download → PDF.</span>
+        <span className="text-xs text-muted">
+          PDF or .txt, up to 4 MB. The fonts, bold, lines and spacing stay exactly as they are. From Google Docs: File → Download → PDF.
+        </span>
         <input
           type="file"
           accept="application/pdf,.pdf,text/plain,.txt"
@@ -93,7 +95,7 @@ export function ResumeImport({
       <div className="flex flex-wrap items-center gap-2">
         {mode !== "file" && (
           <button className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => run()}>
-            {busy ? "Parsing…" : "Import text"}
+            {busy ? "Importing…" : "Import text"}
           </button>
         )}
         {onCancel && <button className="btn btn-sm" onClick={onCancel}>Cancel</button>}

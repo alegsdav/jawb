@@ -1,13 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Analysis, Bullet, Item, Job, Mark, Resume, Section } from "./types";
-import { MASTER_RETRIES, mergeResumes, sameJson, type MergeConflict, type MergeResult } from "./master";
-import { bulletTextMap, compact, normalizeResume, setOpt } from "./resume";
+import type { Analysis, Job, Resume } from "./types";
+import type { DocParagraph, FlatParagraph } from "./doc/types";
+import { buildDoc, flattenDoc, removeParagraphs, setParagraphText } from "./doc/model";
+import { isHeading } from "./doc/outline";
+import {
+  MASTER_RETRIES, mergeDocs, mergeResumes, placeInto, sameJson, sameParagraph, type MergeConflict, type MergeResult,
+} from "./master";
+import { normalizeResume, resumeDoc, setOpt, withDoc } from "./resume";
 import { normalizeAnalysis } from "./analysis";
 import { dbErrorMessage, isMissingColumn, OPTIONAL_JOB_COLUMNS } from "./db";
-import {
-  diffFields, HEADER_CONTACT, HEADER_NAME, JOB_FIELDS, makeBaseline, missingOptionalColumns, omitKeys, planPull, readBaseline,
-  stripBaseline,
-} from "./tailor";
+import { diffFields, JOB_FIELDS, makeBaseline, missingOptionalColumns, omitKeys, readBaseline, stripBaseline } from "./tailor";
 
 /**
  * Keeping one job in sync across devices (laptop tab + phone, often open at the same time).
@@ -255,227 +257,171 @@ export function planTailoredRefresh(
 
 // ---------- "Save this tailored copy as my master resume" ----------
 
-const SECTION_KEY = "section:";
-const ITEM_KEY = "item:";
-const hasStructure = (base: Record<string, string>) => Object.keys(base).some((k) => k.startsWith(SECTION_KEY) || k.startsWith(ITEM_KEY));
-const shortLabel = (t: string, n = 90) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
-const itemLabel = (it: Item) => [it.title, it.subtitle].map((x) => x.trim()).filter(Boolean).join(" — ") || "Untitled entry";
-
-/** The copy's marks for a text field when the base has the copy's text (marks belong to their text); else none. */
-const sameTextMarks = (copyText: string, copyMarks: Mark[] | undefined, baseText: string): Mark[] | undefined =>
-  copyText === baseText ? copyMarks : undefined;
-
 /**
- * The master as it was when the copy was made (or last pulled), rebuilt from the copy's structure
- * and its baseline: the copy's sections/entries/bullets that the baseline knows, with the baseline's
- * wording. Entry details the baseline doesn't record (second line, location, dates) use the master's
- * current value, so an edit made in the copy counts as an edit.
+ * A run of master paragraphs the copy deleted (its baseline had them) that the master still has. Never removed unless
+ * ticked. `id` is the run's first paragraph and `ids` every paragraph in it.
  */
-export function baseFromBaseline(copy: Resume, master: Resume): Resume {
-  const base = copy.baseline ?? {};
-  const structured = hasStructure(base);
-  const mSections = new Map(master.sections.map((s) => [s.id, s]));
-  const mItems = new Map(master.sections.flatMap((s) => s.items.map((it) => [it.id, it] as const)));
-  const sections: Section[] = [];
-  for (const s of copy.sections) {
-    const ms = mSections.get(s.id);
-    const items: Item[] = [];
-    for (const it of s.items) {
-      const mi = mItems.get(it.id);
-      const inBase = structured ? ITEM_KEY + it.id in base : !!mi || it.bullets.some((b) => b.id in base);
-      if (!inBase) continue;
-      const title = base[ITEM_KEY + it.id] ?? mi?.title ?? it.title;
-      const subtitle = mi?.subtitle ?? it.subtitle;
-      const location = mi?.location ?? it.location;
-      const dates = mi?.dates ?? it.dates;
-      const item: Item = {
-        id: it.id,
-        title,
-        subtitle,
-        location,
-        dates,
-        bullets: it.bullets
-          .filter((b) => b.id in base)
-          .map((b) => {
-            const text = base[b.id];
-            const out: Bullet = { id: b.id, text };
-            // Formatting belongs to the text it was made for: the copy's marks only where the copy still has that text.
-            setOpt(out, "marks", sameTextMarks(b.text, b.marks, text));
-            setOpt(out, "para", b.para);
-            return out;
-          }),
-      };
-      setOpt(item, "marks", compact({
-        title: sameTextMarks(it.title, it.marks?.title, title),
-        subtitle: sameTextMarks(it.subtitle, it.marks?.subtitle, subtitle),
-        location: sameTextMarks(it.location, it.marks?.location, location),
-        dates: sameTextMarks(it.dates, it.marks?.dates, dates),
-      }));
-      setOpt(item, "para", compact({ entry: it.para?.entry, role: it.para?.role }));
-      items.push(item);
-    }
-    const inBase = structured ? SECTION_KEY + s.id in base : !!ms || items.length > 0;
-    if (!inBase) continue;
-    const title = base[SECTION_KEY + s.id] ?? ms?.title ?? s.title;
-    const section: Section = { id: s.id, title, items };
-    setOpt(section, "marks", sameTextMarks(s.title, s.marks, title));
-    setOpt(section, "para", s.para);
-    sections.push(section);
-  }
-  const header: Resume["header"] = {
-    name: base[HEADER_NAME] ?? master.header.name,
-    contact: base[HEADER_CONTACT] ?? master.header.contact,
-  };
-  setOpt(header, "marks", compact({
-    name: sameTextMarks(copy.header.name, copy.header.marks?.name, header.name),
-    contact: sameTextMarks(copy.header.contact, copy.header.marks?.contact, header.contact),
-  }));
-  setOpt(header, "para", copy.header.para);
-  return {
-    ...(master.version !== undefined ? { version: master.version } : {}),
-    header,
-    sections,
-  };
-}
-
-/** Master content this copy deleted (the baseline had it) that the master still has. Never removed unless ticked. */
-export type MasterRemoval = { kind: "section" | "item" | "bullet"; id: string; label: string; where: string };
+export type MasterRemoval = {
+  kind: "section" | "item" | "bullet";
+  id: string;
+  ids: string[];
+  label: string;
+  /** The section heading above it ("" for a section). */
+  where: string;
+};
 
 export type SaveAsMasterPlan = {
   /** The master with this copy's edits and additions applied, nothing removed. */
   merged: Resume;
-  /** Bullets and lines this copy reworded (relative to its baseline). */
+  /** Lines this copy changed (text or formatting) relative to its baseline. */
   edited: number;
-  /** Bullets, entries and sections added in this copy. */
+  /** Non-blank lines added in this copy. */
   added: number;
-  /** Master content the copy doesn't have that is kept (added to the master later, or left out of this copy). */
+  /** Non-blank master lines that the copy doesn't have and the baseline didn't either (added to the master later). */
   kept: number;
   /** Deleted in this copy, still on the master: offered as "Also remove from master" (unticked). */
   removals: MasterRemoval[];
-  /** Lines both the copy and the master changed since the baseline; the copy's wording is used. */
+  /** Lines both the copy and the master changed; the copy's version is used. */
   conflicts: MergeConflict[];
 };
 
-/**
- * What "Save this tailored copy as my master resume" does: apply this copy's edits relative to its
- * baseline (reworded bullets and lines, plus bullets/entries/sections added here, placed next to their
- * neighbours) to the CURRENT master, keeping everything the master has that the copy lacks. Where both
- * changed the same line, the copy's wording wins (that's what the user asked for). The master's legacy
- * `facts` JSON is left as stored (facts live in their own table).
- */
-export function planSaveAsMaster(copy: Resume, master: Resume): SaveAsMasterPlan {
-  const base = copy.baseline ?? {};
-  const local = stripBaseline(copy);
-  delete local.facts;
-  const baseDoc = baseFromBaseline(copy, master);
-  const { merged, conflicts } = mergeResumes(baseDoc, local, { ...master });
-  const out: Resume = { ...stripBaseline(merged) };
-  if (master.facts) out.facts = master.facts;
-  else delete out.facts;
+const shortLabel = (t: string, n = 90) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
+const isBlank = (p: FlatParagraph) => p.text.trim() === "";
 
-  // Counts for the confirmation.
-  const baseTexts = bulletTextMap(baseDoc);
-  const masterTexts = bulletTextMap(master);
-  const baseItems = new Set(baseDoc.sections.flatMap((s) => s.items.map((it) => it.id)));
-  const masterItems = new Set(master.sections.flatMap((s) => s.items.map((it) => it.id)));
-  let edited = 0;
-  let added = 0;
-  for (const s of copy.sections) {
-    for (const it of s.items) {
-      if (!baseItems.has(it.id) && !masterItems.has(it.id)) {
-        added++; // a new entry counts once, with its bullets
-        continue;
-      }
-      for (const b of it.bullets) {
-        if (baseTexts.has(b.id)) edited += baseTexts.get(b.id) !== b.text ? 1 : 0;
-        else if (!masterTexts.has(b.id)) added++;
-      }
-    }
-  }
-  if (baseDoc.header.name !== copy.header.name) edited++;
-  if (baseDoc.header.contact !== copy.header.contact) edited++;
+const byParagraphId = (ps: FlatParagraph[]) => new Map(ps.map((p) => [p.id, p] as const));
 
-  const copySections = new Set(copy.sections.map((s) => s.id));
-  const copyItems = new Set(copy.sections.flatMap((s) => s.items.map((it) => it.id)));
-  const copyBullets = new Set(bulletTextMap(copy).keys());
-  const structured = hasStructure(base);
-  const removals: MasterRemoval[] = [];
-  let kept = 0;
-  for (const s of out.sections) {
-    if (!copySections.has(s.id)) {
-      if (structured && SECTION_KEY + s.id in base) removals.push({ kind: "section", id: s.id, label: s.title.trim() || "Untitled section", where: "" });
-      else kept++;
-      continue;
-    }
-    for (const it of s.items) {
-      if (!copyItems.has(it.id)) {
-        if (structured && ITEM_KEY + it.id in base) removals.push({ kind: "item", id: it.id, label: itemLabel(it), where: s.title });
-        else kept++;
-        continue;
-      }
-      for (const b of it.bullets) {
-        if (copyBullets.has(b.id)) continue;
-        if (b.id in base) removals.push({ kind: "bullet", id: b.id, label: shortLabel(b.text), where: itemLabel(it) });
-        else kept++;
-      }
-    }
-  }
-  return { merged: out, edited, added, kept, removals, conflicts };
+/** `p`'s node with the text `text`; its formatting is kept when the text is unchanged. */
+function withText(p: FlatParagraph, text: string): DocParagraph {
+  if (p.text === text) return p.node;
+  return setParagraphText({ type: "doc", content: [p.node] }, p.id, text).content[0] as DocParagraph;
 }
 
-/** `r` without the sections, entries and bullets whose ids are in `ids`. */
+/**
+ * The master's paragraphs as the copy saw them: the ids in the copy's baseline, with the baseline's wording and the
+ * master's formatting and list placement (the copy's where the master no longer has the paragraph). Copy order;
+ * paragraphs the copy deleted, which the master still has, go after their nearest preceding neighbour.
+ */
+function baseEntries(copy: Resume, master: Resume): FlatParagraph[] {
+  const baseline = copy.baseline ?? {};
+  const copyParas = flattenDoc(resumeDoc(copy));
+  const masterParas = flattenDoc(resumeDoc(master));
+  const masterById = byParagraphId(masterParas);
+  const copyIds = new Set(copyParas.map((p) => p.id));
+  const fromCopy = copyParas.filter((p) => p.id in baseline);
+  const deleted = masterParas.filter((p) => p.id in baseline && !copyIds.has(p.id));
+  const pool = byParagraphId([...fromCopy, ...deleted]);
+  const keep = new Set(pool.keys());
+  return placeInto(
+    fromCopy.map((p) => p.id),
+    deleted.map((p) => p.id),
+    keep,
+  ).map((id) => {
+    const src = masterById.get(id) ?? pool.get(id)!;
+    const text = baseline[id];
+    return { ...src, node: withText(src, text), text };
+  });
+}
+
+/** The master as the copy saw it when the copy was made (or last pulled): see baseEntries. */
+export function baseFromBaseline(copy: Resume, master: Resume): Resume {
+  return withDoc({ ...master }, buildDoc(baseEntries(copy, master)));
+}
+
+/**
+ * Runs of consecutive master paragraphs in `ids`, one removal each. Their kind comes from the master's outline: a
+ * heading is a section, a plain line starts an entry, a list line is a bullet. `where` is the heading above the run.
+ */
+function masterRemovals(masterParas: FlatParagraph[], ids: Set<string>): MasterRemoval[] {
+  const out: MasterRemoval[] = [];
+  let section = "";
+  let run: MasterRemoval | undefined;
+  let prevRemoved = false;
+  for (const p of masterParas) {
+    if (isHeading(p)) section = p.text.trim();
+    const removed = ids.has(p.id);
+    if (removed && prevRemoved && run) {
+      run.ids.push(p.id);
+    } else if (removed) {
+      const kind = isHeading(p) ? "section" : p.listType === null ? "item" : "bullet";
+      const fallback = `Untitled ${kind}`;
+      run = {
+        kind,
+        id: p.id,
+        ids: [p.id],
+        label: shortLabel(p.text.trim()) || fallback,
+        where: kind === "section" ? "" : section,
+      };
+      out.push(run);
+    }
+    prevRemoved = removed;
+  }
+  return out;
+}
+
+/**
+ * What "Save this tailored copy as my master resume" does: apply this copy's edits relative to its baseline (changed
+ * lines and lines added here, placed next to their neighbours) to the CURRENT master, keeping everything the master
+ * has that the copy lacks. Where both changed the same line, the copy's wording wins (that's what the user asked
+ * for). Lines the copy deleted are not removed here; they are offered as `removals`.
+ */
+export function planSaveAsMaster(copy: Resume, master: Resume): SaveAsMasterPlan {
+  const baseline = copy.baseline ?? {};
+  const copyDoc = resumeDoc(copy);
+  const copyParas = flattenDoc(copyDoc);
+  const copyIds = new Set(copyParas.map((p) => p.id));
+  const masterParas = flattenDoc(resumeDoc(master));
+
+  // The base without the copy's deletions: the master's lines the copy deleted then count as master-only, so they are kept.
+  const baseDoc = removeParagraphs(resumeDoc(baseFromBaseline(copy, master)), Object.keys(baseline).filter((id) => !copyIds.has(id)));
+  const { doc, conflicts } = mergeDocs(baseDoc, copyDoc, resumeDoc(master));
+  const merged = withDoc({ ...master }, doc);
+  setOpt(merged, "page", copy.page ?? master.page);
+
+  const baseParas = byParagraphId(flattenDoc(baseDoc));
+  let edited = 0;
+  let added = 0;
+  for (const p of copyParas) {
+    if (p.id in baseline) {
+      const b = baseParas.get(p.id);
+      if (b && !sameParagraph(p, b)) edited++;
+    } else if (!isBlank(p)) added++;
+  }
+  let kept = 0;
+  for (const p of masterParas) if (!copyIds.has(p.id) && !(p.id in baseline) && !isBlank(p)) kept++;
+  const deleted = new Set(masterParas.filter((p) => p.id in baseline && !copyIds.has(p.id)).map((p) => p.id));
+  return { merged, edited, added, kept, removals: masterRemovals(masterParas, deleted), conflicts };
+}
+
+/** `r` without the paragraphs whose ids are in `ids` (lists left empty disappear). */
 export function removeIds(r: Resume, ids: Set<string>): Resume {
   if (!ids.size) return r;
-  return {
-    ...r,
-    sections: r.sections
-      .filter((s) => !ids.has(s.id))
-      .map((s) => ({
-        ...s,
-        items: s.items.filter((it) => !ids.has(it.id)).map((it) => ({ ...it, bullets: it.bullets.filter((b) => !ids.has(b.id)) })),
-      })),
-  };
+  return withDoc(r, removeParagraphs(resumeDoc(r), ids));
 }
 
 /** The new master for "Save as master": planSaveAsMaster's merge, minus the removals the user ticked. Pure (safe to re-run in updateMaster). */
 export function applySaveAsMaster(copy: Resume, master: Resume, remove: Set<string>): Resume {
   const plan = planSaveAsMaster(copy, master);
-  const allowed = new Set(plan.removals.map((r) => r.id).filter((id) => remove.has(id)));
-  const next = removeIds(plan.merged, allowed);
+  const drop = new Set(plan.removals.filter((r) => remove.has(r.id)).flatMap((r) => r.ids));
+  const next = removeIds(plan.merged, drop);
   return sameJson(next, master) ? master : next;
 }
 
-/** Every baseline key for a section/entry/bullet and everything inside it. */
-function subtreeKeys(r: Resume, kind: "section" | "item" | "bullet", id: string): string[] {
-  if (kind === "bullet") return [id];
-  for (const s of r.sections) {
-    if (kind === "section" && s.id === id) {
-      return [SECTION_KEY + s.id, ...s.items.flatMap((it) => [ITEM_KEY + it.id, ...it.bullets.map((b) => b.id)])];
-    }
-    for (const it of s.items) if (kind === "item" && it.id === id) return [ITEM_KEY + it.id, ...it.bullets.map((b) => b.id)];
-  }
-  return [];
-}
-
 /**
- * The copy's baseline after it was saved into the master. It now matches the new master, except:
- * master content the copy never had (added to the master later) stays out, so it's still offered as
- * "new in your master resume"; things the master removed keep their old entry, so they're still listed;
- * and lines the master reworded that this copy never touched keep their old wording, so "Pull" still
- * offers the master's new wording instead of the copy silently counting as edited.
+ * The copy's baseline after it was saved into the master: the master's current wording, except that master lines
+ * added after the copy was made stay out (so they're still offered as new), lines the master removed keep their old
+ * wording (so they're still listed), and lines the master reworded that this copy never touched keep their old
+ * wording (so Pull still offers the master's new wording).
  */
 export function baselineAfterMasterSave(copy: Resume, master: Resume): Record<string, string> {
   const old = copy.baseline ?? {};
   const next = makeBaseline(master);
-  const plan = planPull(copy, master);
-  for (const a of plan.additions) for (const k of subtreeKeys(master, a.kind, a.id)) delete next[k];
-  for (const r of plan.removals) for (const k of subtreeKeys(copy, r.kind, r.id)) if (k in old) next[k] = old[k];
-  const m = bulletTextMap(master);
-  for (const [id, text] of bulletTextMap(copy)) {
-    if (old[id] !== undefined && text === old[id] && m.get(id) !== undefined && m.get(id) !== old[id]) next[id] = old[id];
-  }
-  for (const [key, field] of [[HEADER_NAME, "name"], [HEADER_CONTACT, "contact"]] as const) {
-    if (old[key] !== undefined && copy.header[field] === old[key] && master.header[field] !== old[key]) next[key] = old[key];
+  const copyParas = byParagraphId(flattenDoc(resumeDoc(copy)));
+  const masterParas = byParagraphId(flattenDoc(resumeDoc(master)));
+  for (const id of Object.keys(next)) if (!(id in old) && !copyParas.has(id)) delete next[id];
+  for (const [id] of copyParas) if (old[id] !== undefined && !masterParas.has(id)) next[id] = old[id];
+  for (const [id, p] of copyParas) {
+    const m = masterParas.get(id);
+    if (old[id] !== undefined && p.text === old[id] && m && m.text !== old[id]) next[id] = old[id];
   }
   return next;
 }

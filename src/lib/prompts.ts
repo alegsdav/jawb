@@ -109,34 +109,6 @@ ${text.slice(0, 6000)}
 """`;
 }
 
-export function parseResumePrompt(text: string | null) {
-  return `Convert ${text === null ? "the attached resume PDF" : "this resume text"} into JSON. Preserve the wording exactly; do not improve or invent anything.
-Shape:
-{
-  "header": { "name": "", "contact": "single line: location • email • phone • links" },
-  "sections": [
-    { "title": "section heading exactly as written (e.g. Education, Experience, Projects, Skills)",
-      "items": [ {
-        "title": "line 1, left: organization, school or project name",
-        "location": "line 1, right: city/state or Remote (\"\" if none)",
-        "subtitle": "line 2, left: job title/position, degree, or tech stack",
-        "dates": "date range or graduation date (\"\" if none)",
-        "bullets": ["..."] } ] }
-  ]
-}
-Only include sections that appear in the resume. Never add sections, entries or content.
-For skills lines like "Languages: Python, SQL", use title "Languages", subtitle "Python, SQL", no bullets, no dates.
-For publications or memberships, put each one as its own item with the full text in "title" and no bullets.
-Lines like "GPA: 3.85 | Dean's List" under a school go in that school's bullets.
-Keep the original section order. Drop page numbers, headers/footers and icons.
-Return ONLY JSON.${text === null ? "" : `
-
-RESUME TEXT:
-"""
-${text.slice(0, 15000)}
-"""`}`;
-}
-
 /**
  * Split one of the student's answers into atomic facts. The model may only restate what the student
  * wrote; the server also drops any fact with a number the answer doesn't contain (guardNumbers).

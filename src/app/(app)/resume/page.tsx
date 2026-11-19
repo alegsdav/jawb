@@ -9,13 +9,14 @@ import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
 import { mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import type { Fact, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
-import { EMPTY_FORMAT_STATE, FONT_SIZES, LINE_KIND_LABELS, type Align, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
+import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
+import { EditMenu, FormatMenu } from "@/components/FormatMenus";
 import { CoachPanel } from "@/components/CoachPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
 import { useResumeActions } from "@/components/ResumeActions";
 import {
-  countWords, DocToolbar, EDIT_SHORTCUTS, docEdit, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, ToolbarSep, UndoRedo,
+  countWords, DocToolbar, EDIT_SHORTCUTS, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, ToolbarSep,
   useEditorShortcuts, useZoom, ZoomSelect,
 } from "@/components/DocToolbar";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
@@ -29,25 +30,15 @@ import { UndoToast } from "@/components/UndoToast";
 import { useFacts } from "@/lib/useFacts";
 import { importedBulletFacts, plural } from "@/lib/facts";
 import { SaveErrorToast, SaveStatus, useAutosaveWithRetry } from "@/lib/useAutosave";
-import { useHistory } from "@/lib/useHistory";
 
 /** Re-import keeps bullet ids stable (so jobs' "changes vs master" and linked facts stay right). */
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
 
 /** The editing tips, shown as the Help menu's hint (the document itself stays uncluttered). */
 const EDIT_TIPS =
-  "Type anywhere, like a normal document. Select text and use the toolbar or Format menu for bold, italic, underline, size " +
-  "and alignment. Each line also has a style (Normal text, Name, Contact line, Section heading, Entry title, Entry subtitle, " +
-  "Bullet) that tells the app what the line is, so the AI knows which lines are your bullets. On an entry title or subtitle, " +
-  "Tab jumps to the right-aligned part (location or dates). Undo with Ctrl/⌘+Z.";
-
-/** Format > Align choices, with their shortcuts. */
-const ALIGN_CHOICES: { align: Align; label: string; shortcut: string }[] = [
-  { align: "left", label: "Align left", shortcut: "Ctrl+Shift+L" },
-  { align: "center", label: "Center", shortcut: "Ctrl+Shift+E" },
-  { align: "right", label: "Align right", shortcut: "Ctrl+Shift+R" },
-  { align: "justify", label: "Justify", shortcut: "Ctrl+Shift+J" },
-];
+  "Type anywhere, like a normal document: Enter starts a new paragraph, Backspace joins. Select text and use the toolbar " +
+  "or Format menu for bold, italic, underline, size, alignment and lists. The AI reads your bullets from the document's " +
+  "lists and bold section headings. Undo with Ctrl/⌘+Z.";
 
 /** Zoom choices for View > Zoom (0 = Fit). */
 const ZOOM_CHOICES: { label: string; value: number }[] = [
@@ -153,9 +144,8 @@ export default function MasterResumePage() {
     setConflictState(c);
   };
   const [resolving, setResolving] = useState(false);
-  const doc = useHistory<Resume>();
-  const resume = doc.value;
-  const setDoc = doc.set;
+  /** The master resume. Undo lives in the editor (its own history), so the page keeps plain state. */
+  const [resume, setResume] = useState<Resume | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [importOpen, setImportOpen] = useState(false);
@@ -203,7 +193,7 @@ export default function MasterResumePage() {
         const content = normalizeResume(row.content);
         base.current = { content, updatedAt: row.updated_at };
         setId(row.id);
-        doc.reset(content);
+        setResume(content);
       },
       (e: { code?: string; message?: string }) => {
         console.error("Loading the master resume failed:", e);
@@ -243,7 +233,7 @@ export default function MasterResumePage() {
         base.current = { content: out.content, updatedAt: out.updatedAt };
         if (out.merged) {
           // Edits typed while this save was in flight are merged on top (base = what we sent).
-          setDoc((cur) => (cur === r ? out.content : mergeResumes(r, cur, out.content).merged), true);
+          setResume((cur) => (!cur ? cur : cur === r ? out.content : mergeResumes(r, cur, out.content).merged));
           setNotice("Merged changes made on another device.");
         }
       }
@@ -251,7 +241,7 @@ export default function MasterResumePage() {
       // the bullet is emptied or deleted). Throws on failure, so autosave retries this step too.
       await mirrorRef.current(id, base.current.content);
     },
-    [id, supabase, setDoc],
+    [id, supabase],
   );
   const { status, retry } = useAutosaveWithRetry(resume, save);
 
@@ -274,7 +264,7 @@ export default function MasterResumePage() {
     const { data } = await supabase.from("resumes").select("content, updated_at").eq("id", id).maybeSingle();
     if (data) next = { content: normalizeResume(data.content), updatedAt: (data as { updated_at: string }).updated_at };
     base.current = next;
-    doc.reset(next.content);
+    setResume(next.content);
     setConflict(null);
     setResolving(false);
     setNotice("Loaded the version saved on your other tab or device.");
@@ -290,7 +280,7 @@ export default function MasterResumePage() {
     const { merged } = mergeResumes(base.current.content, resume, c.server);
     base.current = { content: c.server, updatedAt: c.serverUpdatedAt };
     setConflict(null);
-    setDoc({ ...merged }, true); // a new value, so autosave runs
+    setResume({ ...merged }); // a new value, so autosave runs
   }
 
   if (error && !resume) return <p className="text-bad">{error}</p>;
@@ -300,7 +290,7 @@ export default function MasterResumePage() {
   const factCount = facts.facts.length;
   const onImported = (r: Resume) => {
     const next = mergeImport(resume, r);
-    doc.set(next, true);
+    setResume(next);
     setImportOpen(false);
     if (empty) setJustImported(true);
     // Every bullet you imported is a fact the AI can use, linked to its bullet (it follows your edits).
@@ -311,12 +301,12 @@ export default function MasterResumePage() {
     const cur = latestDoc.current;
     if (!cur || !cur.sections.some((sec) => sec.items.some((it) => it.id === target.entryId))) return null;
     const { resume: next, bulletId } = insertCoachedBullet(cur, target, text, mode, uid());
-    doc.set(next, true);
+    setResume(next);
     return bulletId;
   };
   /** The builder's draft becomes the master; its "what did you do" answers are already facts. */
   const onBuilt = (r: Resume, saved: Fact[], entryIds: string[]) => {
-    doc.set(normalizeResume(r), true);
+    setResume(normalizeResume(r));
     facts.absorb(saved);
     setBuilding(false);
     setBuilt(entryIds);
@@ -394,15 +384,7 @@ export default function MasterResumePage() {
               <MenuSeparator />
               <MenuItem onSelect={() => setImportOpen((o) => !o)}>Re-import resume</MenuItem>
             </MenuBarMenu>
-            <MenuBarMenu label="Edit">
-              <MenuItem onSelect={doc.undo} disabled={!doc.canUndo} shortcut="Ctrl+Z">Undo</MenuItem>
-              <MenuItem onSelect={doc.redo} disabled={!doc.canRedo} shortcut="Ctrl+Shift+Z">Redo</MenuItem>
-              <MenuSeparator />
-              <MenuItem onSelect={() => void docEdit("cut")} disabled={!formatState.active} shortcut="Ctrl+X">Cut</MenuItem>
-              <MenuItem onSelect={() => void docEdit("copy")} disabled={!formatState.active} shortcut="Ctrl+C">Copy</MenuItem>
-              <MenuItem onSelect={() => void docEdit("paste")} disabled={!formatState.active} shortcut="Ctrl+V">Paste</MenuItem>
-              <MenuItem onSelect={() => void docEdit("selectAll")} disabled={!formatState.active} shortcut="Ctrl+A">Select all</MenuItem>
-            </MenuBarMenu>
+            <EditMenu commandsRef={commandsRef} fmt={formatState} />
             <MenuBarMenu label="View">
               {ZOOM_CHOICES.map((z) => (
                 <MenuItem key={z.value} onSelect={() => setZoom(z.value)}>
@@ -414,95 +396,7 @@ export default function MasterResumePage() {
                 </MenuItem>
               ))}
             </MenuBarMenu>
-            <MenuBarMenu label="Format">
-              <MenuItem onSelect={() => commandsRef.current?.toggleMark("bold")} disabled={!formatState.active} shortcut="Ctrl+B">
-              <span className="inline-flex items-center gap-2">
-                <span aria-hidden="true" className="inline-block w-3">{formatState.bold ? "✓" : ""}</span>
-                Bold
-                {formatState.bold && <span className="sr-only">(on)</span>}
-              </span>
-              </MenuItem>
-              <MenuItem onSelect={() => commandsRef.current?.toggleMark("italic")} disabled={!formatState.active} shortcut="Ctrl+I">
-              <span className="inline-flex items-center gap-2">
-                <span aria-hidden="true" className="inline-block w-3">{formatState.italic ? "✓" : ""}</span>
-                Italic
-                {formatState.italic && <span className="sr-only">(on)</span>}
-              </span>
-              </MenuItem>
-              <MenuItem onSelect={() => commandsRef.current?.toggleMark("underline")} disabled={!formatState.active} shortcut="Ctrl+U">
-              <span className="inline-flex items-center gap-2">
-                <span aria-hidden="true" className="inline-block w-3">{formatState.underline ? "✓" : ""}</span>
-                Underline
-                {formatState.underline && <span className="sr-only">(on)</span>}
-              </span>
-              </MenuItem>
-              <MenuSeparator />
-              <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
-              {FONT_SIZES.map((pt) => {
-                const current = formatState.size === pt;
-                return (
-                  <MenuItem key={pt} onSelect={() => commandsRef.current?.setSize(pt)} disabled={!formatState.active}>
-                    <span className="inline-flex items-center gap-2">
-                      <span aria-hidden="true" className="inline-block w-3">{current ? "✓" : ""}</span>
-                      {`${pt} pt`}
-                      {current && <span className="sr-only">(current)</span>}
-                    </span>
-                  </MenuItem>
-                );
-              })}
-              <MenuSeparator />
-              {ALIGN_CHOICES.map(({ align, label, shortcut }) => {
-                const current = formatState.align === align;
-                return (
-                  <MenuItem key={align} onSelect={() => commandsRef.current?.setAlign(align)} disabled={!formatState.active} shortcut={shortcut}>
-                    <span className="inline-flex items-center gap-2">
-                      <span aria-hidden="true" className="inline-block w-3">{current ? "✓" : ""}</span>
-                      {label}
-                      {current && <span className="sr-only">(current)</span>}
-                    </span>
-                  </MenuItem>
-                );
-              })}
-              <MenuSeparator />
-              <MenuItem onSelect={() => commandsRef.current?.toggleRule()} disabled={!formatState.active}>
-              <span className="inline-flex items-center gap-2">
-                <span aria-hidden="true" className="inline-block w-3">{formatState.rule ? "✓" : ""}</span>
-                Line under
-                {formatState.rule && <span className="sr-only">(on)</span>}
-              </span>
-              </MenuItem>
-              <MenuItem onSelect={() => commandsRef.current?.toggleCaps()} disabled={!formatState.active}>
-              <span className="inline-flex items-center gap-2">
-                <span aria-hidden="true" className="inline-block w-3">{formatState.caps ? "✓" : ""}</span>
-                All caps
-                {formatState.caps && <span className="sr-only">(on)</span>}
-              </span>
-              </MenuItem>
-              <MenuItem onSelect={() => commandsRef.current?.toggleSpaceBefore()} disabled={!formatState.active}>
-              <span className="inline-flex items-center gap-2">
-                <span aria-hidden="true" className="inline-block w-3">{formatState.spaceBefore ? "✓" : ""}</span>
-                Space before line
-                {formatState.spaceBefore && <span className="sr-only">(on)</span>}
-              </span>
-              </MenuItem>
-              <MenuSeparator />
-              {LINE_KIND_LABELS.map(({ kind, label, hint }) => {
-                const current = formatState.lineKind === kind;
-                return (
-                  <MenuItem key={kind} onSelect={() => commandsRef.current?.setLineKind(kind)} disabled={!formatState.active} hint={hint}>
-                    <span className="inline-flex items-center gap-2">
-                      <span aria-hidden="true" className="inline-block w-3">{current ? "✓" : ""}</span>
-                      {label}
-                      {current && <span className="sr-only">(current)</span>}
-                    </span>
-                  </MenuItem>
-                );
-              })}
-              <MenuSeparator />
-              <MenuItem onSelect={() => commandsRef.current?.clearFormatting()} disabled={!formatState.active} shortcut={"Ctrl+\\"}>
-                Clear formatting
-              </MenuItem>
-            </MenuBarMenu>
+            <FormatMenu commandsRef={commandsRef} fmt={formatState} />
             <MenuBarMenu label="Help">
               <MenuItem onSelect={() => {}} hint={EDIT_TIPS}>Editing tips</MenuItem>
               <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS}>Keyboard shortcuts</MenuItem>
@@ -526,7 +420,6 @@ export default function MasterResumePage() {
 
       {!empty && (
         <EditorToolbar>
-          <UndoRedo undo={doc.undo} redo={doc.redo} canUndo={doc.canUndo} canRedo={doc.canRedo} />
           <IconButton label="Print (Ctrl/⌘+P)" onClick={() => window.print()}>
             <PrintIcon />
           </IconButton>
@@ -561,7 +454,7 @@ export default function MasterResumePage() {
               <EditorCanvas zoom={zoom} className="min-w-0 flex-1 pb-6 lg:min-h-0 lg:overflow-auto">
                 <ResumeDocument
                   value={resume}
-                  onChange={doc.set}
+                  onChange={setResume}
                   onMeasure={setMeasure}
                   actionsSlot={slot}
                   commentSlot={commentEl}

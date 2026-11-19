@@ -1,6 +1,10 @@
-import type { Item, Resume, Section } from "./types";
+import type { Resume } from "./types";
 import { guardNumbers, knownNumbers } from "./analysis";
-import { normalizeResume, uid } from "./resume";
+import { emptyResume, uid, withDoc } from "./resume";
+import { buildDoc, newId, type FlatEntry } from "./doc/model";
+import {
+  HARVARD_PAGE, harvardBullet, harvardContact, harvardEntry, harvardHeading, harvardLabelLine, harvardName, harvardRole,
+} from "./template";
 
 /**
  * The guided builder ("I don't have a resume yet"): a three-step wizard whose answers become a
@@ -168,57 +172,52 @@ function draftBullets(raw: unknown): Record<string, string[]> {
 }
 
 /**
- * The master resume built from the answers and the AI's draft bullets, through normalizeResume.
- * Header, education, entries and skills come only from the answers. Each experience's bullets are
- * checked with guardNumbers against that experience's own answer (any other number becomes a
- * [placeholder]); an experience without usable bullets gets one placeholder bullet to fill in.
- * Entry ids are the experience ids, so builder facts can link to them.
+ * The master resume built from the answers and the AI's draft bullets, as a Harvard-format document. Name, contact,
+ * education, entries and skills come only from the answers. Each experience's bullets are checked with guardNumbers
+ * against that experience's own answer (any other number becomes a [placeholder]); an experience without usable
+ * bullets gets one placeholder bullet to fill in. An experience's first line has the experience id, so builder facts
+ * can link to it (the derived entry id is its first paragraph's id).
  */
 export function buildDraftResume(input: Omit<BuilderState, "step">, raw: unknown): Resume {
   const { about, experiences, skills } = input;
   const bullets = draftBullets(raw);
+  const lines: FlatEntry[] = [];
+  const name = about.name.trim();
   const contact = [about.location, about.email, about.phone, about.links].map((x) => x.trim()).filter(Boolean).join(" • ");
+  if (name) lines.push(harvardName(name));
+  if (contact) lines.push(harvardContact(contact));
+
+  const school = about.school.trim();
   const degree = [about.degree.trim(), about.major.trim()].filter(Boolean).join(" in ");
-  const education: Item = {
-    id: uid(),
-    title: about.school.trim(),
-    subtitle: degree,
-    location: "",
-    dates: about.graduation.trim(),
-    bullets: about.gpa.trim() ? [{ id: uid(), text: `GPA: ${about.gpa.trim()}` }] : [],
-  };
-  const sections: Section[] = [];
-  if (education.title || education.subtitle) sections.push({ id: uid(), title: "Education", items: [education] });
-  for (const title of SECTION_ORDER) {
-    const items: Item[] = experiences
-      .filter((x) => SECTION_OF[x.type] === title)
-      .map((x) => {
-        const known = knownNumbers([x.what, x.role, x.org]);
-        const drafted = (bullets[x.id] ?? []).map((t) => guardNumbers(t, known).text);
-        const dates = x.start.trim() ? `${x.start.trim()} – ${x.end.trim() || "Present"}` : x.end.trim();
-        return {
-          id: x.id,
-          title: x.org.trim(),
-          subtitle: x.role.trim(),
-          location: x.location.trim(),
-          dates,
-          bullets: (drafted.length ? drafted : ["[What you did and what came of it]"]).map((text) => ({ id: uid(), text })),
-        };
-      });
-    if (items.length) sections.push({ id: uid(), title, items });
+  if (school || degree) {
+    lines.push(harvardHeading("Education"));
+    lines.push(harvardEntry(school, "", { id: newId() }));
+    if (degree || about.graduation.trim()) lines.push(harvardRole(degree, about.graduation.trim()));
+    if (about.gpa.trim()) lines.push(harvardBullet(`GPA: ${about.gpa.trim()}`));
   }
-  const skillItems: Item[] = (
-    [
-      ["Languages", skills.languages],
-      ["Tools", skills.tools],
-      ["Other", skills.other],
-    ] as const
-  )
-    .filter(([, v]) => v.trim())
-    .map(([label, v]) => ({ id: uid(), title: label, subtitle: v.trim(), location: "", dates: "", bullets: [] }));
-  if (skillItems.length) sections.push({ id: uid(), title: "Skills", items: skillItems });
-  // v2 = Harvard defaults; normalizeResume turns them into explicit template formatting (see template.ts).
-  return normalizeResume({ version: 2, header: { name: about.name.trim(), contact }, sections });
+
+  for (const title of SECTION_ORDER) {
+    const items = experiences.filter((x) => SECTION_OF[x.type] === title);
+    if (!items.length) continue;
+    lines.push(harvardHeading(title));
+    items.forEach((x, i) => {
+      const known = knownNumbers([x.what, x.role, x.org]);
+      const drafted = (bullets[x.id] ?? []).map((t) => guardNumbers(t, known).text);
+      const dates = x.start.trim() ? `${x.start.trim()} – ${x.end.trim() || "Present"}` : x.end.trim();
+      lines.push(harvardEntry(x.org.trim(), x.location.trim(), { id: x.id, spaceBefore: i ? 4 : 0 }));
+      if (x.role.trim() || dates) lines.push(harvardRole(x.role.trim(), dates));
+      for (const text of drafted.length ? drafted : ["[What you did and what came of it]"]) lines.push(harvardBullet(text));
+    });
+  }
+
+  const skillRows = ([["Languages", skills.languages], ["Tools", skills.tools], ["Other", skills.other]] as const).filter(
+    ([, v]) => v.trim(),
+  );
+  if (skillRows.length) {
+    lines.push(harvardHeading("Skills"));
+    skillRows.forEach(([label, v], i) => lines.push(harvardLabelLine(label, v.trim(), { spaceBefore: i ? 4 : 0 })));
+  }
+  return withDoc({ ...emptyResume(), page: HARVARD_PAGE }, buildDoc(lines));
 }
 
 /** The builder's raw "what did you do" answers, as facts linked to their entries on the master. */

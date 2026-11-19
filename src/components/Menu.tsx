@@ -59,6 +59,13 @@ export function Menu({
   }
 
   function onListKey(e: React.KeyboardEvent) {
+    // An open menu takes Escape: nothing underneath (the document, a card) also reacts to it.
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setOpen(false);
+      button.current?.focus();
+      return;
+    }
     const all = items();
     const i = all.indexOf(document.activeElement as HTMLElement);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -96,7 +103,7 @@ export function Menu({
           data-doc-keep-selection
           role="menu"
           onKeyDown={onListKey}
-          className={`float-dark absolute top-full z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] p-1 ${
+          className={`float-dark absolute top-full z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-8rem)] overflow-y-auto p-1 ${
             alignLeft ? "left-0" : "right-0"
           }`}
         >

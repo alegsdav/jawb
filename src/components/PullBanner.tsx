@@ -9,9 +9,10 @@ import type { MasterRemoval, SaveAsMasterPlan } from "@/lib/jobSync";
 
 
 function additionText(a: PullAddition) {
-  if (a.kind === "section") return { what: "New section", text: a.label, detail: a.items ? plural(a.items, "entry", "entries") : "" };
-  if (a.kind === "item") return { what: `New entry in ${a.where}`, text: a.label, detail: a.bullets ? plural(a.bullets, "bullet") : "" };
-  return { what: `New bullet in ${a.where}`, text: a.text, detail: "" };
+  const where = a.where ? ` in ${a.where}` : "";
+  if (a.kind === "section") return { what: "New section", text: a.label };
+  if (a.kind === "item") return { what: `New entry${where}`, text: a.label };
+  return { what: `New line${where}`, text: a.label };
 }
 
 const KIND: Record<PullRemoval["kind"], string> = { bullet: "Bullet", item: "Entry", section: "Section" };
@@ -40,7 +41,7 @@ export function PullBanner({
     additions.length ? `${additions.length} new` : "",
     removals.length ? `${removals.length} removed` : "",
   ].filter(Boolean);
-  const kept = [plan.skipped ? plural(plan.skipped, "bullet") : "", plan.headerKept ? "your name/contact line" : ""].filter(Boolean);
+  const kept = plan.skipped ? [plural(plan.skipped, "line")] : [];
 
   return (
     <div className="space-y-2 rounded-lg border border-border px-3 py-2 text-[13px]">
@@ -80,7 +81,7 @@ export function PullBanner({
                   return (
                     <li key={`${a.kind}:${a.id}`} className="flex items-start gap-2">
                       <span className="flex-1 min-w-0">
-                        <span className="text-xs text-muted">{t.what}{t.detail ? ` · ${t.detail}` : ""}</span>
+                        <span className="text-xs text-muted">{t.what}</span>
                         <span className="block break-words">{t.text}</span>
                       </span>
                       <button type="button" className="btn btn-sm shrink-0 min-h-10 sm:min-h-0" onClick={() => onAdd(a)}>

@@ -1,7 +1,10 @@
 import type { Fact, Resume } from "./types";
 import { guardNumbers, knownNumbers } from "./analysis";
 import { factIsActive, freshFacts, hasPlaceholder, type NewFact } from "./facts";
-import { withBulletText } from "./resume";
+import { resumeDoc, withDoc } from "./resume";
+import { flattenDoc, insertParagraphsAfter, paragraph, setParagraphText, type FlatEntry } from "./doc/model";
+import { outlineGroups } from "./doc/outline";
+import type { DocText, FlatParagraph } from "./doc/types";
 
 /**
  * Coaching logic that runs on the server and in tests (no React, no Supabase): checking what the AI
@@ -193,9 +196,15 @@ export const initialChoices = (blanks: Blank[]): Record<string, BlankChoice | un
 
 export type CoachTarget = { sectionId: string; entryId: string; bulletId?: string | null };
 
+/** The marks of a bullet's first text run: a new bullet takes them, as the bullet it continues did. */
+const firstMarks = (p: FlatParagraph | undefined) =>
+  (p?.node.content ?? []).find((n): n is DocText => n.type === "text")?.marks;
+
 /**
- * The resume with a coached bullet added at the end of the entry ("add", as `newId`) or in place of
- * the selected bullet's text ("replace", same id so its links and change tracking stay).
+ * The resume with a coached bullet on it. "replace" rewrites the selected bullet's paragraph (same id, so its links
+ * and change tracking stay). "add" fills the entry's last bullet when it is empty, else puts a new bullet after the
+ * entry's last line, as a bullet of the same list. Returns the id of the bullet paragraph that now holds the text:
+ * the existing one when filled or replaced, `newId` for a new paragraph. An unknown entry leaves the resume unchanged.
  */
 export function insertCoachedBullet(
   r: Resume,
@@ -204,27 +213,29 @@ export function insertCoachedBullet(
   mode: "add" | "replace",
   newId: string,
 ): { resume: Resume; bulletId: string } {
-  const bulletId = mode === "replace" && target.bulletId ? target.bulletId : newId;
-  const resume: Resume = {
-    ...r,
-    sections: r.sections.map((sec) => ({
-      ...sec,
-      items: sec.items.map((it) => {
-        if (it.id !== target.entryId) return it;
-        if (mode === "replace" && target.bulletId && it.bullets.some((b) => b.id === target.bulletId)) {
-          // The new text replaces the old one, so the old marks go (the paragraph stays).
-          return { ...it, bullets: it.bullets.map((b) => (b.id === target.bulletId ? withBulletText(b, text) : b)) };
-        }
-        // Fill an empty last bullet rather than leaving it dangling.
-        const last = it.bullets[it.bullets.length - 1];
-        if (mode === "add" && last && !last.text.trim()) {
-          return { ...it, bullets: [...it.bullets.slice(0, -1), { id: bulletId, text }] };
-        }
-        return { ...it, bullets: [...it.bullets, { id: bulletId, text }] };
-      }),
-    })),
+  const doc = resumeDoc(r);
+  const ids = new Set(outlineGroups(doc).get(target.entryId) ?? []);
+  const members = flattenDoc(doc).filter((p) => ids.has(p.id));
+  if (!members.length) return { resume: r, bulletId: newId };
+
+  const bullets = members.filter((p) => p.listType !== null);
+  const last = bullets[bullets.length - 1];
+  const selected = target.bulletId ? bullets.find((p) => p.id === target.bulletId) : undefined;
+  if (mode === "replace" && selected) {
+    return { resume: withDoc(r, setParagraphText(doc, selected.id, text)), bulletId: selected.id };
+  }
+  if (mode === "add" && last && !last.text.trim()) {
+    return { resume: withDoc(r, setParagraphText(doc, last.id, text)), bulletId: last.id };
+  }
+
+  const anchor = members.filter((p) => p.text.trim()).pop() ?? members[members.length - 1];
+  const entry: FlatEntry = {
+    node: paragraph(text, { marks: firstMarks(last), attrs: { id: newId } }),
+    listType: last?.listType ?? "bulletList",
+    depth: last?.depth ?? 1,
+    bullet: true,
   };
-  return { resume, bulletId };
+  return { resume: withDoc(r, insertParagraphsAfter(doc, anchor.id, [entry])), bulletId: newId };
 }
 
 /**
