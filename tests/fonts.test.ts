@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Font } from "@react-pdf/renderer";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { cssFontStack, isSansFamily, isSerifFamily } from "@/lib/doc/fonts";
@@ -137,5 +137,35 @@ describe("registerPdfFonts", () => {
     expect(urls.sort()).toEqual(["cmu-serif-400-italic.woff2", "cmu-serif-400.woff2", "cmu-serif-700-italic.woff2", "cmu-serif-700.woff2"]);
     for (const file of urls) expect(existsSync(join(process.cwd(), "public/fonts", file)), file).toBe(true);
     expect(css).toContain(`font-family: "CMU Serif";`);
+  });
+});
+
+/** Every module the browser path loads for the .docx importer: its own imports, read as text, recursively. */
+function importGraph(entries: string[]): Set<string> {
+  const seen = new Set<string>();
+  const queue = entries.map((file) => resolve(process.cwd(), file));
+  while (queue.length) {
+    const file = queue.pop() as string;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const source = readFileSync(file, "utf8");
+    for (const [, spec] of source.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+"([^"]+)"/gm)) {
+      const local = spec.startsWith("@/") ? join(process.cwd(), "src", spec.slice(2)) : spec.startsWith(".") ? resolve(dirname(file), spec) : null;
+      if (!local) continue;
+      const candidates = [`${local}.ts`, `${local}.tsx`, join(local, "index.ts")];
+      const found = candidates.find((candidate) => existsSync(candidate));
+      if (found) queue.push(found);
+    }
+  }
+  return seen;
+}
+
+describe("the .docx importer's font path stays free of the PDF renderer", () => {
+  it("does not import @react-pdf/renderer from pdfTextWidths or pdfFaces, directly or through their imports", () => {
+    const files = importGraph(["src/lib/pdfTextWidths.ts", "src/lib/pdfFaces.ts"]);
+    expect(files.has(resolve(process.cwd(), "src/lib/pdfFaces.ts"))).toBe(true);
+    for (const file of files) {
+      expect(readFileSync(file, "utf8"), file).not.toMatch(/["']@react-pdf\/renderer["']/);
+    }
   });
 });

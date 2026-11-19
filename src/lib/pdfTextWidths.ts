@@ -5,7 +5,7 @@
  * and Helvetica use the standard AFM widths. Each table holds ASCII 32-126, then the typographic extras in TYPO_CODES.
  * Kerning is not applied, so a width can differ from the drawn one by a fraction of a point. Pure: no PDF library.
  */
-import { pdfFontFor } from "./pdfFonts";
+import { pdfFontFor } from "./pdfFaces";
 
 /** Code points after ASCII in each table: en and em dash, curly quotes, bullet and ellipsis. */
 const TYPO_CODES = [0x2013, 0x2014, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2026];
