@@ -5,7 +5,7 @@
  * margin, so the page margins are the fixture's padding.
  */
 import { createElement as h } from "react";
-import { Document, Image, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import { Document, Image, Link, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
 
 export const PAD_TOP_BOTTOM = 36; // points (0.5 in)
 export const PAD_SIDES = 43; // points (about 0.6 in)
@@ -99,6 +99,33 @@ export function ruledPdf(): Promise<Buffer> {
         h(Text, null, "Top line"),
         h(View, { style: { marginTop: 60, height: 1, backgroundColor: "#000" } }),
         h(Text, null, "Below line"),
+      ),
+    ),
+  );
+}
+
+/**
+ * A centered contact line with two links among plain text: a web link (LinkedIn) and a mailto link. Each link is a
+ * PDF Link annotation around exactly its own text.
+ */
+export function linkedPdf(): Promise<Buffer> {
+  return renderToBuffer(
+    h(
+      Document,
+      null,
+      h(
+        Page,
+        { size: "LETTER", style: s.page },
+        h(Text, { style: s.name }, "Jane Doe"),
+        h(
+          Text,
+          { style: s.center },
+          "London • ",
+          h(Link, { src: "https://linkedin.com/in/jane" }, "linkedin.com/in/jane"),
+          " • ",
+          h(Link, { src: "mailto:jane@example.com" }, "jane@example.com"),
+        ),
+        h(Text, null, "Plain text with no link."),
       ),
     ),
   );

@@ -19,6 +19,12 @@ function runMarks(state: EditorState): readonly (readonly Mark[])[] {
 
 const hasMark = (marks: readonly Mark[], name: string) => marks.some((m) => m.type.name === name);
 
+/** The link href on the selection (or at the caret): the one href every text run shares, else null. */
+export function linkHref(state: EditorState): string | null {
+  const hrefs = runMarks(state).map((marks) => (marks.find((m) => m.type.name === "link")?.attrs.href as string | undefined) ?? null);
+  return sameValue(hrefs);
+}
+
 /** The distinct values across the runs; a single value, or null when they differ. */
 function sameValue<T>(values: T[]): T | null {
   return values.every((v) => v === values[0]) ? values[0] : null;
@@ -51,6 +57,7 @@ export function formatAt(editor: Editor): Omit<FormatState, "active"> {
     list,
     lineHeight: (attrs.lineHeight as number | null) ?? DEFAULT_LINE_HEIGHT,
     borderBottom: !!attrs.borderBottom,
+    link: linkHref(state),
     canUndo: editor.can().undo(),
     canRedo: editor.can().redo(),
   };

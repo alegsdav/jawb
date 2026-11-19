@@ -9,14 +9,15 @@ import { closeHistory } from "@tiptap/pm/history";
 import type { BulletFeedback } from "@/lib/analysis";
 import type { Resume } from "@/lib/types";
 import { PAGE_DEFAULTS, type DocJSON, type PageSetup } from "@/lib/doc/types";
-import { docEquals, normalizeDoc } from "@/lib/doc/model";
+import { docEquals, normalizeDoc, normalizeHref } from "@/lib/doc/model";
 import { docExtensions } from "@/lib/doc/extensions";
 import { resumeDoc, withDoc } from "@/lib/resume";
 import { bulletInfo } from "./docDecorations";
 import { AiHighlights, paragraphPlainText, sameOptions, type HighlightOptions } from "./aiHighlights";
 import { BulletCommentCard } from "./BulletCommentCard";
 import { FormatToolbar } from "./FormatToolbar";
-import { selectionFor, formatAt } from "./editorState";
+import { selectionFor, formatAt, linkHref } from "./editorState";
+import { LinkPopover, type LinkAnchor } from "./LinkPopover";
 import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "./editorTypes";
 
 export type { DocCommands, DocSelection, FormatState } from "./editorTypes";
@@ -100,7 +101,7 @@ const DocShortcuts = Extension.create({
 const EXTENSIONS = [...docExtensions, AiHighlights, DocShortcuts];
 
 /** Every command the toolbar and the menus use, bound to this editor. Each one refocuses the editor. */
-function commandsFor(editor: Editor): DocCommands {
+function commandsFor(editor: Editor, openLink: () => void): DocCommands {
   const chain = () => editor.chain().focus();
   const adjust = (key: "spaceBefore" | "spaceAfter", delta: number) => {
     const cur = Number(editor.getAttributes("paragraph")[key] ?? 0);
@@ -134,6 +135,26 @@ function commandsFor(editor: Editor): DocCommands {
       editor.commands.focus();
       editor.commands.clearFormatting();
     },
+    setLink: (href) => {
+      if (href === null) {
+        chain().extendMarkRange("link").unsetLink().run();
+        return;
+      }
+      const safe = normalizeHref(href);
+      if (!safe) return;
+      if (!editor.state.selection.empty) {
+        chain().setLink({ href: safe }).run();
+      } else if (linkHref(editor.state)) {
+        // A caret in a link changes that whole link.
+        chain().extendMarkRange("link").setLink({ href: safe }).run();
+      } else {
+        // A caret elsewhere: the address itself becomes the linked text.
+        chain()
+          .insertContent({ type: "text", text: safe, marks: [{ type: "link", attrs: { href: safe } }] })
+          .run();
+      }
+    },
+    openLink,
   };
 }
 
@@ -185,7 +206,7 @@ const NO_CARET: CaretState = { id: null, text: "", sel: null };
 /** The formatting state before the editor exists (without `active`). */
 const EMPTY_FMT: Omit<FormatState, "active"> = {
   bold: false, italic: false, underline: false, fontFamily: EMPTY_FORMAT_STATE.fontFamily, fontSize: EMPTY_FORMAT_STATE.fontSize,
-  align: "left", list: null, lineHeight: EMPTY_FORMAT_STATE.lineHeight, borderBottom: false, canUndo: false, canRedo: false,
+  align: "left", list: null, lineHeight: EMPTY_FORMAT_STATE.lineHeight, borderBottom: false, link: null, canUndo: false, canRedo: false,
 };
 
 export function ResumeDocument({
@@ -196,6 +217,13 @@ export function ResumeDocument({
   const [selActive, setSelActive] = useState(false);
   const [caret, setCaret] = useState<CaretState>(NO_CARET);
   const [fmt, setFmt] = useState<Omit<FormatState, "active">>(EMPTY_FMT);
+  /** The link box in edit mode, at a document position, with the href it starts from. */
+  const [editing, setEditing] = useState<{ pos: number; href: string } | null>(null);
+  /** The link around a caret (shown as a bubble with its URL), or null. */
+  const [bubble, setBubble] = useState<{ pos: number; href: string } | null>(null);
+  /** Bumped on scroll and resize so the link box and bubble follow the text. */
+  const [, setViewTick] = useState(0);
+  const openLinkRef = useRef<() => void>(() => {});
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -227,7 +255,8 @@ export function ResumeDocument({
     editorProps,
     onUpdate: ({ editor: ed, transaction }) => {
       if (transaction.getMeta(EXTERNAL)) return;
-      const next = withDoc(valueRef.current, ed.getJSON() as DocJSON);
+      // normalizeDoc drops the editor's default link attrs (target, rel), so stored links hold only the href.
+      const next = withDoc(valueRef.current, normalizeDoc(ed.getJSON()));
       lastEmitted.current = next;
       valueRef.current = next;
       latest.current.onChange(next);
@@ -235,8 +264,25 @@ export function ResumeDocument({
     onTransaction: ({ editor: ed, transaction }) => {
       setFmt(formatAt(ed));
       syncCaret(ed, transaction.docChanged);
+      syncBubble(ed);
     },
   });
+
+  /** The link around a collapsed selection, for the bubble. */
+  function syncBubble(ed: Editor) {
+    const { selection } = ed.state;
+    const mark = selection.empty ? selection.$from.marks().find((m) => m.type.name === "link") : undefined;
+    const next = mark ? { pos: selection.from, href: String(mark.attrs.href) } : null;
+    setBubble((prev) => (prev?.pos === next?.pos && prev?.href === next?.href ? prev : next));
+  }
+
+  /** Opens the link box at the selection: the link's address, or empty for a new link. */
+  function openLink() {
+    if (!editor) return;
+    setSelActive(true);
+    setEditing({ pos: editor.state.selection.from, href: linkHref(editor.state) ?? "" });
+  }
+  openLinkRef.current = openLink;
 
   /** Tracks the caret paragraph: its id, text and coaching selection. */
   function syncCaret(ed: Editor, docChanged: boolean) {
@@ -251,7 +297,30 @@ export function ResumeDocument({
     setCaret(next);
   }
 
-  const commands = useMemo(() => (editor ? commandsFor(editor) : null), [editor]);
+  const commands = useMemo(() => (editor ? commandsFor(editor, () => openLinkRef.current()) : null), [editor]);
+
+  // The link box and bubble follow scrolling and resizing (their anchor is a viewport position).
+  useEffect(() => {
+    if (!editing && !bubble) return;
+    const bump = () => setViewTick((t) => t + 1);
+    window.addEventListener("scroll", bump, true);
+    window.addEventListener("resize", bump);
+    return () => {
+      window.removeEventListener("scroll", bump, true);
+      window.removeEventListener("resize", bump);
+    };
+  }, [editing, bubble]);
+
+  /** Where the text at a document position is on screen (null when the editor cannot place it). */
+  const anchorAt = (pos: number): LinkAnchor | null => {
+    if (!editor) return null;
+    try {
+      const c = editor.view.coordsAtPos(pos);
+      return { top: c.top, bottom: c.bottom, left: c.left };
+    } catch {
+      return null;
+    }
+  };
 
   // The page's value changed from outside (an accepted rewrite, a pull, an import): apply it as one undoable step.
   useEffect(() => {
@@ -367,6 +436,9 @@ export function ResumeDocument({
     return () => cancelAnimationFrame(frame);
   }, [cardId, editor]);
 
+  const editAnchor = editing ? anchorAt(editing.pos) : null;
+  const bubbleAnchor = bubble && selActive && !editing ? anchorAt(bubble.pos) : null;
+
   const toolbar =
     actionsSlot && commands
       ? createPortal(<FormatToolbar fmt={fmtState} commands={commands} />, actionsSlot)
@@ -406,6 +478,12 @@ export function ResumeDocument({
         className="doc-canvas"
         onPointerDownCapture={() => setSelActive(true)}
         onKeyDown={(e) => {
+          // Ctrl/Cmd+K opens the link box.
+          if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+            e.preventDefault();
+            openLink();
+            return;
+          }
           // Escape clears the selection, unless a menu or popover inside the canvas already handled it.
           if (e.key === "Escape" && !e.defaultPrevented && !e.nativeEvent.isComposing) setSelActive(false);
         }}
@@ -421,6 +499,40 @@ export function ResumeDocument({
         </div>
       </div>
       {card}
+      {editing && editAnchor && commands && (
+        <LinkPopover
+          anchor={editAnchor}
+          mode="edit"
+          href={editing.href}
+          onApply={(raw) => {
+            const href = normalizeHref(raw);
+            if (!href) return false;
+            commands.setLink(href);
+            setEditing(null);
+            return true;
+          }}
+          onRemove={() => {
+            commands.setLink(null);
+            setEditing(null);
+          }}
+          onEdit={() => {}}
+          onClose={(refocus) => {
+            setEditing(null);
+            if (refocus) editor?.commands.focus();
+          }}
+        />
+      )}
+      {!editing && bubble && selActive && bubbleAnchor && commands && (
+        <LinkPopover
+          anchor={bubbleAnchor}
+          mode="bubble"
+          href={bubble.href}
+          onApply={() => false}
+          onRemove={() => commands.setLink(null)}
+          onEdit={() => setEditing(bubble)}
+          onClose={() => {}}
+        />
+      )}
     </>
   );
 }

@@ -43,6 +43,10 @@ export const SparkIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.5l-1.9-5.7L4.5 10.9 10.1 9z" /></svg>
 );
 
+export const LinkIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="M10 14a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1" /><path d="M14 10a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1" /></svg>
+);
+
 export const UndoIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M9 7 5 11l4 4" /><path d="M5 11h9a5 5 0 0 1 0 10h-2" /></svg>
 );

@@ -4,7 +4,7 @@ import type { ComponentType } from "react";
 import { FONT_CHOICES } from "@/lib/doc/fonts";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { UndoRedo } from "./DocToolbar";
-import { AlignCenterIcon, AlignJustifyIcon, AlignLeftIcon, AlignRightIcon, ListIcon } from "./icons";
+import { AlignCenterIcon, AlignJustifyIcon, AlignLeftIcon, AlignRightIcon, LinkIcon, ListIcon } from "./icons";
 import { FONT_SIZES, type Align, type DocCommands, type FormatState, type MarkName } from "./editorTypes";
 
 /** Line spacing choices in the spacing menu. */
@@ -86,6 +86,18 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
           <span className={`leading-none ${b.glyphClass}`}>{b.glyph}</span>
         </button>
       ))}
+      <button
+        type="button"
+        className={btnClass}
+        title="Insert link (Ctrl+K)"
+        aria-label="Insert link"
+        aria-pressed={fmt.link !== null}
+        disabled={!on}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => commands.openLink()}
+      >
+        <LinkIcon className="h-4 w-4" />
+      </button>
       <Sep />
       {ALIGNS.map(({ align, title, Icon }) => (
         <button

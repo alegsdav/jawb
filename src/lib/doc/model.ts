@@ -307,11 +307,37 @@ const INLINE_TYPES = new Set(["text", "tab", "hardBreak"]);
 const ALIGNS = new Set(["left", "center", "right", "justify"]);
 const FONT_SIZE = /^\d+(\.\d+)?pt$/;
 
+/**
+ * A link target the document may hold: http(s) or a mailto: address. A bare host ("www.x.com", "linkedin.com/in/x")
+ * gets https://. Anything else (javascript:, data:, a scheme-less junk string) is null. Returns the trimmed href.
+ */
+export function normalizeHref(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (!s || s.length > 2048 || /\s/.test(s)) return null;
+  if (/^mailto:/i.test(s)) return /^mailto:[^@\s]+@[^@\s]+\.[^@\s]+$/i.test(s) ? s : null;
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const u = new URL(s);
+      return u.hostname.includes(".") ? s : null;
+    } catch {
+      return null;
+    }
+  }
+  // Any other scheme (javascript:, data:, ftp:) is refused rather than given https:// in front.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return null;
+  return normalizeHref(`https://${s}`);
+}
+
 function cleanMark(raw: unknown): DocMark | undefined {
   if (!isObj(raw)) return undefined;
   if (raw.type === "bold") return { type: "bold" };
   if (raw.type === "italic") return { type: "italic" };
   if (raw.type === "underline") return { type: "underline" };
+  if (raw.type === "link") {
+    const href = normalizeHref(isObj(raw.attrs) ? raw.attrs.href : undefined);
+    return href ? { type: "link", attrs: { href } } : undefined;
+  }
   if (raw.type !== "textStyle") return undefined;
   const a = isObj(raw.attrs) ? raw.attrs : {};
   const attrs: { fontSize?: string; fontFamily?: string } = {};

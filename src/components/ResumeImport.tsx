@@ -17,10 +17,12 @@ export function ResumeImport({
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  const [busyKind, setBusyKind] = useState<"pdf" | "text">("pdf");
 
   async function run(file?: File) {
     if (replaceWarning && !confirm("Replace your current master resume with the imported one? Your facts are kept.")) return;
     setBusy(true);
+    setBusyKind(file && !/\.(txt|md)$/i.test(file.name) ? "pdf" : "text");
     setError("");
     let body: FormData | { text: string };
     if (file) {
@@ -61,9 +63,10 @@ export function ResumeImport({
           dragging ? "border-accent bg-accent/5" : "border-border hover:border-fg/40"
         } ${busy ? "pointer-events-none opacity-60" : ""}`}
       >
-        <span className="text-sm font-medium">{busy ? "Reading your resume…" : "Drop your resume PDF here or tap to choose"}</span>
+        <span className="text-sm font-medium">{busy ? (busyKind === "pdf" ? "Opening your PDF…" : "Laying out your resume…") : "Drop your resume PDF here or tap to choose"}</span>
         <span className="text-xs text-muted">
-          PDF or .txt, up to 4 MB. The fonts, bold, lines and spacing stay exactly as they are. From Google Docs: File → Download → PDF.
+          A PDF opens exactly as it is: the same fonts, sizes, bold, lines and spacing, as text you can edit. No AI, no template. Up to 4 MB.
+          From Google Docs: File → Download → PDF. A .txt file is treated as pasted text.
         </span>
         <input
           type="file"
@@ -84,6 +87,12 @@ export function ResumeImport({
         </div>
       )}
       {mode !== "file" && (
+        <p className="text-xs text-muted">
+          Pasted text has no formatting to keep, so the AI lays it out in the Harvard template. That uses one of your daily AI analyses.
+          To keep your own layout, upload the PDF instead.
+        </p>
+      )}
+      {mode !== "file" && (
         <textarea
           className="input w-full h-36 font-mono text-xs"
           value={text}
@@ -95,7 +104,7 @@ export function ResumeImport({
       <div className="flex flex-wrap items-center gap-2">
         {mode !== "file" && (
           <button className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => run()}>
-            {busy ? "Importing…" : "Import text"}
+            {busy ? "Laying out…" : "Lay out with AI (Harvard template)"}
           </button>
         )}
         {onCancel && <button className="btn btn-sm" onClick={onCancel}>Cancel</button>}

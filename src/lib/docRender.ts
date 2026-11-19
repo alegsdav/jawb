@@ -21,7 +21,8 @@ export const LIST_INDENT_PT = 18;
 const BULLETS = ["•", "◦", "▪"];
 
 export type RunStyle = { bold: boolean; italic: boolean; underline: boolean; sizePt: number; fontFamily: string };
-export type Run = { text: string; style: RunStyle };
+/** A run of text; href is set when a link mark covers it (http(s) or mailto). */
+export type Run = { text: string; style: RunStyle; href?: string };
 /** One visual line (a hard break starts a new one). With a tab, `right` is the text after the first tab. */
 export type RenderLine = { left: Run[]; right: Run[] | null };
 /** A bullet or number at x (points from the left margin); the paragraph's text starts at textIndentPt. */
@@ -71,6 +72,11 @@ export function styleOf(marks: DocMark[] | undefined): RunStyle {
   return style;
 }
 
+/** The href of a link mark, if the marks carry one. */
+function hrefOfMarks(marks: DocMark[] | undefined): string | undefined {
+  return marks?.find((m): m is Extract<DocMark, { type: "link" }> => m.type === "link")?.attrs.href;
+}
+
 /** Lines of a paragraph: split at hard breaks, and each line at its first tab (text after a second tab joins the right). */
 function linesOf(content: DocInline[] | undefined): RenderLine[] {
   const lines: RenderLine[] = [];
@@ -82,7 +88,10 @@ function linesOf(content: DocInline[] | undefined): RenderLine[] {
     } else if (n.type === "tab") {
       cur.right ??= [];
     } else if (n.text) {
-      (cur.right ?? cur.left).push({ text: n.text, style: styleOf(n.marks) });
+      const run: Run = { text: n.text, style: styleOf(n.marks) };
+      const href = hrefOfMarks(n.marks);
+      if (href) run.href = href;
+      (cur.right ?? cur.left).push(run);
     }
   }
   lines.push(cur);

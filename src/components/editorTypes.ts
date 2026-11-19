@@ -32,6 +32,13 @@ export type DocCommands = {
   adjustSpaceAfter(deltaPt: number): void;
   toggleBorderBottom(): void;
   insertHorizontalLine(): void;
+  /**
+   * Link the selection to href (http(s) or mailto:; anything else is ignored). With a caret inside a link, changes
+   * that whole link; with a caret elsewhere, inserts href as linked text. null removes the link.
+   */
+  setLink(href: string | null): void;
+  /** Opens the link editor at the selection (Ctrl+K). */
+  openLink(): void;
   /** Remove all text formatting and paragraph formatting from the selected paragraphs. */
   clearFormatting(): void;
 };
@@ -54,6 +61,8 @@ export type FormatState = {
   list: ListKind | null;
   lineHeight: number;
   borderBottom: boolean;
+  /** The href of the link on the selection (or at the caret); null when none or when the selection mixes. */
+  link: string | null;
   canUndo: boolean;
   canRedo: boolean;
 };
@@ -69,6 +78,7 @@ export const EMPTY_FORMAT_STATE: FormatState = {
   list: null,
   lineHeight: DEFAULT_LINE_HEIGHT,
   borderBottom: false,
+  link: null,
   canUndo: false,
   canRedo: false,
 };

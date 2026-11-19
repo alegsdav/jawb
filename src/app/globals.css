@@ -175,6 +175,8 @@ body {
 .doc-content li > p { display: inline; }
 .doc-content li > p + p { display: block; }
 .doc-tab { display: inline-block; }
+/* Links look like Google Docs: blue and underlined, in the document and its read-only view. */
+.doc-content a { color: #1155cc; text-decoration: underline; cursor: pointer; }
 .doc-placeholder { color: #b0b0aa; pointer-events: none; user-select: none; -webkit-user-select: none; }
 .doc-ph { background: #ffd84d; border-radius: 2px; box-shadow: 0 0 0 1px #d9a800; }
 /* The rating dot and the change bar sit in the page margin, beside the paragraph. */

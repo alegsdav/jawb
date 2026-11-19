@@ -1,4 +1,4 @@
-import { Document, Page, Text, View } from "@react-pdf/renderer";
+import { Document, Link, Page, Text, View } from "@react-pdf/renderer";
 import { createElement as h, type ReactElement } from "react";
 import { pdfFontFor, registerPdfFonts } from "@/lib/pdfFonts";
 import {
@@ -19,15 +19,24 @@ function fontProps(s: RunStyle, lineHeight: number) {
   return { ...pdfFontFor(s.fontFamily, s.bold, s.italic), fontSize: s.sizePt, lineHeight };
 }
 
-/** Runs as nested Text, each with its own font, size and underline. */
+/** Links are blue and underlined, as in the editor and the read-only page. */
+const LINK_COLOR = "#1155cc";
+
+/**
+ * Runs as nested Text, each with its own font, size and underline. A run with a link is a PDF Link around its text, so
+ * the link is clickable in the downloaded file.
+ */
 function runNodes(runs: Run[], lineHeight: number): ReactElement[] {
-  return runs.map((run, i) =>
-    h(
-      Text,
-      { key: i, style: { ...fontProps(run.style, lineHeight), textDecoration: run.style.underline ? "underline" : "none" } },
-      run.text,
-    ),
-  );
+  return runs.map((run, i) => {
+    const underline = run.href || run.style.underline;
+    const style = {
+      ...fontProps(run.style, lineHeight),
+      textDecoration: underline ? "underline" : "none",
+      ...(run.href ? { color: LINK_COLOR } : {}),
+    };
+    if (!run.href) return h(Text, { key: i, style }, run.text);
+    return h(Link, { key: i, src: run.href, style }, run.text);
+  });
 }
 
 /** A line: its text, or the text before a tab at the left and after it at the right margin. */

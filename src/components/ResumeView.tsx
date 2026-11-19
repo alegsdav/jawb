@@ -21,12 +21,27 @@ function styleCss(s: RunStyle): CSSProperties {
   };
 }
 
+/** Links look like the editor's: blue and underlined. */
+const LINK_STYLE: CSSProperties = { color: "#1155cc", textDecoration: "underline" };
+
 function Runs({ runs }: { runs: Run[] }) {
   return (
     <>
-      {runs.map((run, i) => (
-        <span key={i} style={styleCss(run.style)}>{run.text}</span>
-      ))}
+      {runs.map((run, i) =>
+        run.href ? (
+          <a
+            key={i}
+            href={run.href}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            style={{ ...styleCss(run.style), ...LINK_STYLE }}
+          >
+            {run.text}
+          </a>
+        ) : (
+          <span key={i} style={styleCss(run.style)}>{run.text}</span>
+        ),
+      )}
     </>
   );
 }

@@ -67,14 +67,17 @@ export function fontInfo(rawName: string, flags: { bold?: boolean; italic?: bool
 /** The look of a run of text: its font and size in points. */
 type Style = FontInfo & { size: number };
 
-/** A run of text on a line, with where it starts and how wide it is. A tab is the piece "\t". */
-type Piece = { text: string; style: Style; x: number; w: number };
+/** A run of text on a line, with where it starts and how wide it is. A tab is the piece "\t". href: a link over it. */
+type Piece = { text: string; style: Style; x: number; w: number; href?: string };
 
 /** One text item from pdf.js, in top-down page coordinates. Whitespace-only items are kept for their gaps. */
 type TextItem = { str: string; x: number; y: number; w: number; style: Style; ws: boolean };
 
 /** A visual line: its baseline (top-down), its size and extent, and its pieces left to right. */
 type Line = { y: number; size: number; x0: number; x1: number; pieces: Piece[] };
+
+/** A link annotation: its web or mail address and its box, in top-down page coordinates. */
+type LinkBox = { href: string; x0: number; x1: number; top: number; bottom: number };
 
 /** A horizontal rule drawn on the page, in top-down coordinates. */
 type Rule = { y: number; x0: number; x1: number };
@@ -136,7 +139,91 @@ async function readPage(page: PDFPageProxy): Promise<PageText> {
   }
   // Rules come out in PDF space (y up), like the text transforms; flip them to top-down like the lines.
   const rules = rulesOf(ops).map((r) => ({ ...r, y: height - r.y }));
-  return { width, height, lines: linesOf(items), rules };
+  const links = linksOf((await page.getAnnotations()) as LinkAnnotation[], height);
+  return { width, height, lines: linkLines(linesOf(items), links), rules };
+}
+
+// ---- links ----
+
+/** The fields of a pdf.js annotation that a link needs. */
+type LinkAnnotation = { subtype?: string; url?: string; unsafeUrl?: string; rect?: number[] };
+
+const WEB_RE = /^https?:\/\/\S+$/i;
+const MAIL_RE = /^mailto:\S+$/i;
+/** A bare domain, such as linkedin.com/in/jane or www.github.com/x: it becomes an https address. */
+const DOMAIN_RE = /^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#]\S*)?$/i;
+
+/** The href of a link target: http(s) and mailto as they are, a bare domain as https. Anything else is no link. */
+export function hrefOf(raw: string | undefined): string | null {
+  const s = raw?.trim();
+  if (!s) return null;
+  if (WEB_RE.test(s) || MAIL_RE.test(s)) return s;
+  if (DOMAIN_RE.test(s)) return `https://${s}`;
+  return null;
+}
+
+/** The link annotations of a page as boxes in top-down coordinates (the rect is in PDF space, y up). */
+function linksOf(annots: LinkAnnotation[], height: number): LinkBox[] {
+  const out: LinkBox[] = [];
+  for (const a of annots) {
+    if (a.subtype !== "Link" || !a.rect) continue;
+    const href = hrefOf(a.url ?? a.unsafeUrl);
+    if (!href) continue;
+    const [x1, y1, x2, y2] = a.rect;
+    out.push({
+      href,
+      x0: Math.min(x1, x2),
+      x1: Math.max(x1, x2),
+      top: height - Math.max(y1, y2),
+      bottom: height - Math.min(y1, y2),
+    });
+  }
+  return out;
+}
+
+/**
+ * The link covering a point (the baseline sits inside the box; a little slack for the descent). A zero-width piece
+ * (a space) counts only strictly inside the box, so the space after a link is not part of it.
+ */
+function linkAt(x: number, baseline: number, size: number, links: LinkBox[], zeroWidth: boolean): string | undefined {
+  const slack = 0.3 * size;
+  const across = (l: LinkBox) =>
+    zeroWidth ? x > l.x0 + 0.5 && x < l.x1 - 0.5 : x >= l.x0 - 0.5 && x <= l.x1 + 0.5;
+  return links.find((l) => across(l) && baseline >= l.top - slack && baseline <= l.bottom + slack)?.href;
+}
+
+/**
+ * The lines with each piece split at the link boxes: a character takes the link whose box holds its centre, so a
+ * link covers exactly the characters inside its rectangle. A piece without any link is kept as it is.
+ */
+function linkLines(lines: Line[], links: LinkBox[]): Line[] {
+  if (!links.length) return lines;
+  return lines.map((line) => ({
+    ...line,
+    pieces: line.pieces.flatMap((p) => {
+      if (p.text === "\t") return [p];
+      const n = p.text.length;
+      const hrefs = Array.from({ length: n }, (_, i) =>
+        linkAt(p.x + ((i + 0.5) / n) * p.w, line.y, line.size, links, p.w === 0),
+      );
+      if (hrefs.every((h) => !h)) return [p];
+      const out: Piece[] = [];
+      let start = 0;
+      for (let i = 1; i <= n; i++) {
+        if (i < n && hrefs[i] === hrefs[start]) continue;
+        const piece: Piece = {
+          text: p.text.slice(start, i),
+          style: p.style,
+          x: p.x + (start / n) * p.w,
+          w: (p.w * (i - start)) / n,
+        };
+        if (hrefs[start]) piece.href = hrefs[start];
+        out.push(piece);
+        start = i;
+      }
+      return out;
+    }),
+  }));
 }
 
 /** The font's family and style. pdf.js knows the name of an embedded font; a standard font has only its loaded name. */
@@ -432,13 +519,14 @@ function nodeOf(
 }
 
 /** The marks of a run: bold, italic, and the size and family as textStyle. Sizes round to half points. */
-function marksOf(s: Style): DocMark[] {
+function marksOf(s: Style, href?: string): DocMark[] {
   const marks: DocMark[] = [];
   if (s.bold) marks.push({ type: "bold" });
   if (s.italic) marks.push({ type: "italic" });
   const attrs: { fontSize: string; fontFamily?: string } = { fontSize: `${Math.round(s.size * 2) / 2}pt` };
   if (s.family) attrs.fontFamily = s.family;
   marks.push({ type: "textStyle", attrs });
+  if (href) marks.push({ type: "link", attrs: { href } });
   return marks;
 }
 
@@ -452,7 +540,7 @@ function inlineOf(pieces: Piece[]): DocInline[] {
       prevKey = "";
       continue;
     }
-    const marks = marksOf(p.style);
+    const marks = marksOf(p.style, p.href);
     const key = JSON.stringify(marks);
     const last = out[out.length - 1];
     if (last?.type === "text" && key === prevKey) last.text += p.text;

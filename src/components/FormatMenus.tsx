@@ -45,6 +45,9 @@ export function FormatMenu({ commandsRef, fmt }: MenuProps) {
       <MenuItem onSelect={run((c) => c.toggleMark("underline"))} disabled={off} shortcut="Ctrl+U">
         <Tick on={fmt.underline}>Underline</Tick>
       </MenuItem>
+      <MenuItem onSelect={run((c) => c.openLink())} disabled={off} shortcut="Ctrl+K">
+        Insert link…
+      </MenuItem>
       <MenuSeparator />
       <div className="float-muted px-2 pt-1 text-[11px]">Text size</div>
       {MENU_SIZES.map((pt) => (

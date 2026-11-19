@@ -6,6 +6,7 @@ import { FontSize, TextStyle } from "@tiptap/extension-text-style";
 import { TextAlign } from "@tiptap/extension-text-align";
 import StarterKit from "@tiptap/starter-kit";
 import { cssFontStack } from "./fonts";
+import { normalizeHref } from "./model";
 import type { DocJSON } from "./types";
 
 declare module "@tiptap/core" {
@@ -318,11 +319,21 @@ export const docExtensions: Extensions = [
     codeBlock: false,
     code: false,
     strike: false,
-    link: false,
     // A horizontal line is an empty paragraph with a bottom border (see DocJSON in ./types), not a rule node.
     horizontalRule: false,
     // Off so the JSON is exactly what the user wrote, not an extra empty paragraph at the end.
     trailingNode: false,
+    // A link is a mark with only an href in the JSON (see DocMark). Target and rel are set on render only; the
+    // editor's JSON carries their defaults too, which normalizeDoc drops. Only http(s) and mailto are allowed.
+    link: {
+      openOnClick: false,
+      autolink: true,
+      linkOnPaste: true,
+      defaultProtocol: "https",
+      protocols: [],
+      isAllowedUri: (url: string) => normalizeHref(url) !== null,
+      HTMLAttributes: { rel: "noopener noreferrer nofollow", target: "_blank" },
+    },
   }),
   TextStyle,
   FontSize,

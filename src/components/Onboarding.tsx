@@ -21,12 +21,12 @@ export function Onboarding({ onImported, onBuild }: { onImported: (r: Resume) =>
       <div className="grid gap-4 md:grid-cols-3">
         <section className="card p-4 sm:p-5 space-y-3" aria-labelledby="ob-paste">
           <h3 id="ob-paste" className="font-semibold">Paste your resume</h3>
-          <p className="text-sm text-muted">Copy the text from Word, Google Docs or a PDF and paste it here.</p>
+          <p className="text-sm text-muted">Copy the text from Word, Google Docs or a PDF and paste it here. The AI lays it out in the Harvard template (uses one of your daily AI analyses).</p>
           <ResumeImport replaceWarning={false} onImported={onImported} mode="text" />
         </section>
         <section className="card p-4 sm:p-5 space-y-3" aria-labelledby="ob-upload">
           <h3 id="ob-upload" className="font-semibold">Upload a PDF</h3>
-          <p className="text-sm text-muted">Imported as it looks: the fonts, bold, lines and margins stay as they are in the PDF.</p>
+          <p className="text-sm text-muted">Opens exactly as it looks: the fonts, sizes, bold, lines and margins are kept, as text you can edit. No AI, no template.</p>
           <ResumeImport replaceWarning={false} onImported={onImported} mode="file" />
         </section>
         <section className="card p-4 sm:p-5 space-y-3 flex flex-col" aria-labelledby="ob-build">
