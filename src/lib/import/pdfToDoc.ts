@@ -26,6 +26,9 @@ export class NoTextError extends Error {
 const LINE_TOLERANCE = 0.3; // items this close vertically (in em) share a baseline
 const SPACE_GAP = 0.15; // a horizontal gap wider than this is a space between words
 const TAB_GAP = 3; // the first gap wider than this on a line is a tab (the "Company ⇥ City" layout)
+const RIGHT_PART_GAP = 1.5; // a gap this wide (em) before a part that ends at the right margin is a right tab too
+const SPACE_EM = 0.28; // a space is about this wide, in em (for turning a left-aligned gap back into spaces)
+const MARGIN_TOLERANCE = 0.05; // a line ends at the right margin when within this share of the content width
 const PITCH = 1.2; // a normal line pitch, in em
 const WRAP_PITCH = 1.6; // a line this close below the previous one continues its paragraph
 const MAX_SPACE_BEFORE = 24;
@@ -464,6 +467,38 @@ function continues(para: Para, line: Line, right: number, width: number): boolea
   return Math.abs(line.x0 - para.lines[0].x0) <= 2 && last.x1 >= right - 0.05 * width;
 }
 
+/**
+ * Which gaps in a line are the right-aligned tab. The editor's tab pushes everything after it to the right margin,
+ * so a gap is a tab only when the text after it really ends there: "Company ⇥ City, ST" and "Role ⇥ May 2025". A gap
+ * to text that does not reach the margin is a left column ("Skills: ⇥ Python, SQL", a tab stop at 1.5in), which a
+ * right tab would fling to the margin, so it becomes spaces of the same width. A line that does end at the margin
+ * after a wide gap (or a run of spaces) with no tab yet (a Word export that pads with spaces) gets its tab.
+ */
+function resolveTabs(line: Line, right: number, width: number): Line {
+  const endsAtMargin = Math.abs(line.x1 - right) <= MARGIN_TOLERANCE * width;
+  const pieces = line.pieces;
+  const at = pieces.findIndex((p) => p.text === "\t");
+  if (at >= 0) {
+    if (endsAtMargin) return line;
+    const next = pieces[at + 1];
+    const gap = next ? next.x - pieces[at].x : 0;
+    const spaces = " ".repeat(Math.min(40, Math.max(2, Math.round(gap / (SPACE_EM * line.size)))));
+    return { ...line, pieces: pieces.map((p, i) => (i === at ? { ...p, text: spaces } : p)) };
+  }
+  if (!endsAtMargin) return line;
+  // The last gap that qualifies, so a long left part with a few wide gaps keeps its tab at the right part.
+  for (let i = pieces.length - 2; i > 0; i--) {
+    const p = pieces[i];
+    if (p.text === " ") {
+      const next = pieces[i + 1];
+      if (next.x - p.x > RIGHT_PART_GAP * line.size && next.x - line.x0 > 0.5 * (right - line.x0)) {
+        return { ...line, pieces: pieces.map((q, j) => (j === i ? { ...q, text: "\t" } : q)) };
+      }
+    }
+  }
+  return line;
+}
+
 /** The page's lines as paragraphs: bullets, wrapped lines joined, one paragraph per other line. */
 function paragraphsOf(lines: Line[], right: number, width: number): Para[] {
   const out: Para[] = [];
@@ -525,7 +560,7 @@ function spaceBeforeOf(prev: Para | undefined, para: Para): number | undefined {
 function pageItems(page: PageText): Item[] {
   const left = Math.min(...page.lines.map((l) => l.x0));
   const right = contentRight(page.lines, left, page.width);
-  const paras = paragraphsOf(page.lines, right, right - left);
+  const paras = paragraphsOf(page.lines.map((l) => resolveTabs(l, right, right - left)), right, right - left);
   assignDepths(paras);
   const borders = new Set<Para>();
   const lineItems: Item[] = [];

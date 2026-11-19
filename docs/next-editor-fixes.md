@@ -23,6 +23,15 @@ template, builder only), src/lib/tailor.ts / jobSync.ts / master.ts (paragraph-l
 - Production (main) still runs the pre-rewrite code until this branch is merged.
 - A horizontal line inserted from inside a list goes after the whole list.
 
+## Next round (from round 4 review)
+- Tabs: the editor right-aligns only the LAST tab in a line (earlier tabs go to 0.5in stops), but docRender (view/PDF)
+  puts everything after the FIRST tab on the right. Make them agree (last tab rule) so a "A ⇥ B ⇥ C" line looks the same.
+- .docx import turns every w:tab into a tab node; check the paragraph's tab stops (w:tabs, val="right") and turn tabs
+  that go to LEFT stops into spaces/indent, like pdfToDoc's resolveTabs does for PDFs.
+- "Moves then resets" on the master page: not reproduced without a login; check the master save/merge path
+  (saveMasterDocument → mergeResumes → setDoc) with a real session.
+- Branch work since the last merge (Reset to master, .docx import, tab fixes) is not on main yet.
+
 ## How to verify
 `npx tsc --noEmit -p .`, `npx eslint src tests`, `npx vitest run`, `npx next build`. For UX: a temporary public
 route under `src/app/login/<sandbox>/` (paths under /login skip auth) rendering ResumeDocument with an `actionsSlot`,

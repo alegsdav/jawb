@@ -233,16 +233,57 @@ const DocFontFamily = Extension.create({
 /** Lays out right-aligned tabs: the span grows so the text after it ends at the paragraph's right edge. */
 const MIN_TAB_PX = 8;
 
+/** Default tab stops, every 0.5in (at 96dpi). */
+export const TAB_STOP_PX = 48;
+
+/** The width of an indent tab that starts `offset` px from the content's left edge: it ends on the next 0.5in stop. */
+export function indentWidth(offset: number): number {
+  const into = ((offset % TAB_STOP_PX) + TAB_STOP_PX) % TAB_STOP_PX;
+  const w = TAB_STOP_PX - into;
+  return Math.round(w < MIN_TAB_PX ? w + TAB_STOP_PX : w);
+}
+
+/**
+ * The width (in the page's own, unscaled px) a tab needs so what follows it ends at the content's right edge.
+ * `scale` is how much the page is zoomed on screen: getBoundingClientRect reports scaled sizes under a CSS
+ * transform (ZoomFrame), while an inline width is in unscaled px, so every measured distance is divided by it.
+ * A right part that does not fit on the line (`wraps`) leaves the tab at its minimum.
+ */
+export function tabWidth(m: { contentRight: number; tabLeft: number; afterWidth: number; scale: number; wraps: boolean }): number {
+  if (m.wraps) return MIN_TAB_PX;
+  const free = (m.contentRight - m.tabLeft - m.afterWidth) / (m.scale > 0 ? m.scale : 1);
+  // Rounded down with 1px to spare: a width a fraction too wide would wrap the right part onto its own line.
+  return Math.max(MIN_TAB_PX, Math.floor(free) - 1);
+}
+
 function layoutTabs(root: HTMLElement): void {
-  const tabs = Array.from(root.querySelectorAll<HTMLElement>("span.doc-tab"));
-  for (const tab of tabs) {
+  const paragraphs = new Set<HTMLElement>();
+  for (const tab of Array.from(root.querySelectorAll<HTMLElement>("span.doc-tab"))) {
     const paragraph = tab.closest("p");
-    if (!paragraph) continue;
-    tab.style.display = "inline-block";
-    tab.style.width = "0px";
-    const box = paragraph.getBoundingClientRect();
-    const style = getComputedStyle(paragraph);
-    const contentRight = box.right - parseFloat(style.paddingRight || "0");
+    if (paragraph) paragraphs.add(paragraph);
+  }
+  for (const paragraph of paragraphs) {
+    const tabs = Array.from(paragraph.querySelectorAll<HTMLElement>("span.doc-tab"));
+    // The LAST tab is the right-aligned one: it stretches so what follows ends at the margin. A tab before it
+    // (Tab pressed at the start of a line, or twice) is an ordinary indent to the next 0.5in stop, as in Docs.
+    const tab = tabs[tabs.length - 1];
+    // A paragraph inside a list item is inline: its box is its text, so the line's edge is the item's.
+    const lineStyle = getComputedStyle(paragraph);
+    const lineBlock = lineStyle.display === "inline" && paragraph.parentElement ? paragraph.parentElement : paragraph;
+    const lineBox = lineBlock.getBoundingClientRect();
+    const lineScale = lineBlock.offsetWidth > 0 ? lineBox.width / lineBlock.offsetWidth : 1;
+    const contentLeft = lineBox.left + parseFloat(getComputedStyle(lineBlock).paddingLeft || "0") * lineScale;
+    for (const t of tabs) {
+      t.style.display = "inline-block";
+      t.style.width = "0px";
+    }
+    for (const t of tabs) {
+      if (t === tab) break;
+      t.style.width = `${indentWidth((t.getBoundingClientRect().left - contentLeft) / lineScale)}px`;
+    }
+    const box = lineBox;
+    const scale = lineScale;
+    const contentRight = box.right - parseFloat(getComputedStyle(lineBlock).paddingRight || "0") * scale;
     const tabLeft = tab.getBoundingClientRect().left;
 
     const after = document.createRange();
@@ -250,11 +291,9 @@ function layoutTabs(root: HTMLElement): void {
     after.setEnd(paragraph, paragraph.childNodes.length);
     const rects = Array.from(after.getClientRects()).filter((r) => r.width > 0);
     // A styled run reports both its element box and its text box on the same line, so count lines, not rects.
-    const wraps = new Set(rects.map((r) => Math.round(r.top))).size > 1;
+    const wraps = new Set(rects.map((r) => Math.round(r.top / scale))).size > 1;
     const afterWidth = rects.length ? after.getBoundingClientRect().width : 0;
-    const width = wraps ? MIN_TAB_PX : Math.max(MIN_TAB_PX, contentRight - tabLeft - afterWidth);
-    // Rounded down with 1px to spare: a width a fraction too wide would wrap the right part onto its own line.
-    tab.style.width = `${Math.max(MIN_TAB_PX, Math.floor(width) - 1)}px`;
+    tab.style.width = `${tabWidth({ contentRight, tabLeft, afterWidth, scale, wraps })}px`;
   }
 }
 
@@ -301,11 +340,22 @@ export const Tab = Node.create({
           if (typeof window === "undefined") return {};
           const relayout = () => layoutTabs(view.dom as HTMLElement);
           relayout();
+          // The text's width changes without any edit when the window or page is resized, the margins change
+          // (the editor's own size changes), or a font finishes loading (bold and italic faces load when first
+          // used, after the first layout). Zoom needs nothing: widths are kept in the page's unscaled px.
           window.addEventListener("resize", relayout);
-          void document.fonts?.ready.then(relayout);
+          const fonts = document.fonts;
+          fonts?.addEventListener?.("loadingdone", relayout);
+          void fonts?.ready.then(relayout);
+          const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(relayout);
+          observer?.observe(view.dom);
           return {
             update: relayout,
-            destroy: () => window.removeEventListener("resize", relayout),
+            destroy: () => {
+              window.removeEventListener("resize", relayout);
+              fonts?.removeEventListener?.("loadingdone", relayout);
+              observer?.disconnect();
+            },
           };
         },
       }),
