@@ -759,9 +759,8 @@ export default function JobPage() {
     if (!resume || !master) return;
     const r = applyPull(resume, master);
     setResume(r.resume);
-    const parts = [r.header ? "your name/contact line" : "", r.bullets ? plural(r.bullets, "bullet") : ""];
-    const what = parts.filter(Boolean).join(" and ");
-    const kept = r.skipped || r.headerKept ? " Kept what you edited in this tailored copy." : "";
+    const what = r.bullets ? plural(r.bullets, "line") : "";
+    const kept = r.skipped ? " Kept what you edited in this tailored copy." : "";
     showFlash(`Updated ${what || "nothing"} from your master resume (Undo to go back).${kept}`, 7000);
   }
 
