@@ -47,10 +47,16 @@ async function readPdfHere(file: File): Promise<{ resume: Resume } | { error: st
   }
 }
 
+/** Id of the paste box: the file error's "Paste your resume text instead" action focuses it (one paste box per page). */
+const PASTE_BOX_ID = "resume-paste-text";
+
+/** Where an import came from; a file import gets the review banner (a pasted text does not). */
+export type ImportSource = { fileName: string };
+
 export function ResumeImport({
   onImported, onCancel, replaceWarning, mode = "both",
 }: {
-  onImported: (r: Resume) => void;
+  onImported: (r: Resume, source?: ImportSource) => void;
   onCancel?: () => void;
   replaceWarning: boolean;
   /** "file": only the PDF drop zone; "text": only the paste box (onboarding shows them as separate cards). */
@@ -60,6 +66,8 @@ export function ResumeImport({
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  /** The error came from a file, so the way forward is pasting the text instead. */
+  const [errorFromFile, setErrorFromFile] = useState(false);
   const [busyKind, setBusyKind] = useState<"pdf" | "docx" | "text">("pdf");
 
   // Load pdf.js (and its worker) while the user is still looking, so the first drop is instant.
@@ -72,19 +80,20 @@ export function ResumeImport({
     setBusy(true);
     setBusyKind(file && isDocx(file) ? "docx" : file && !/\.(txt|md)$/i.test(file.name) ? "pdf" : "text");
     setError("");
+    setErrorFromFile(!!file);
     if (file && isOldDoc(file) && !isDocx(file)) {
       return fail("That's an old Word (.doc) file. Save it as .docx or PDF first.");
     }
     if (file && isDocx(file)) {
       if (file.size > MAX_DOCX_BYTES) return fail("That Word file is over 20 MB.");
       const local = await readDocxHere(file);
-      if ("resume" in local) return done(local.resume);
+      if ("resume" in local) return done(local.resume, file);
       return fail(local.error);
     }
     if (file && isPdf(file)) {
       if (file.size > MAX_PDF_BYTES) return fail("That PDF is over 20 MB.");
       const local = await readPdfHere(file);
-      if (local && "resume" in local) return done(local.resume);
+      if (local && "resume" in local) return done(local.resume, file);
       if (local) return fail(local.error);
       if (file.size > MAX_SERVER_PDF_BYTES) {
         return fail("Couldn't read that file. Export it again as a text PDF, or paste the text.");
@@ -99,18 +108,25 @@ export function ResumeImport({
     }
     const { data, error } = await postApi<{ resume: Resume }>("/api/parse-resume", body);
     if (error || !data) return fail(error ?? "Import failed.");
-    done(data.resume);
+    done(data.resume, file);
   }
 
-  function done(resume: Resume) {
+  function done(resume: Resume, file?: File) {
     setBusy(false);
-    onImported(resume);
+    onImported(resume, file ? { fileName: file.name } : undefined);
     setText("");
   }
 
   function fail(message: string) {
     setBusy(false);
     setError(message);
+  }
+
+  /** Scrolls to the paste box (it may sit in another card, in onboarding) and focuses it. */
+  function pasteInstead() {
+    const box = document.getElementById(PASTE_BOX_ID);
+    box?.scrollIntoView({ behavior: "smooth", block: "center" });
+    box?.focus();
   }
 
   return (
@@ -174,6 +190,7 @@ export function ResumeImport({
       )}
       {mode !== "file" && (
         <textarea
+          id={PASTE_BOX_ID}
           className="input w-full h-36 font-mono text-xs"
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -190,6 +207,16 @@ export function ResumeImport({
         {onCancel && <button className="btn btn-sm" onClick={onCancel}>Cancel</button>}
         {error && <p role="alert" className="text-sm text-bad">{error}</p>}
       </div>
+      {error && errorFromFile && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-3 text-sm">
+          <span className="flex-1 min-w-48 text-muted">
+            Paste the text from your resume instead. It is laid out in the clean Harvard template (uses one of your daily AI analyses).
+          </span>
+          <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" onClick={pasteInstead}>
+            Paste your resume text instead
+          </button>
+        </div>
+      )}
     </div>
   );
 }

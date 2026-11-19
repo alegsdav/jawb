@@ -1,13 +1,15 @@
 "use client";
 
 import type { Resume } from "@/lib/types";
-import { ResumeImport } from "./ResumeImport";
+import { ResumeImport, type ImportSource } from "./ResumeImport";
 
 /**
  * First visit with an empty master resume: three ways to start, as cards. Pasting or uploading uses
  * the resume import, which keeps the text and formatting as they are; "I don't have a resume yet" opens the guided builder.
  */
-export function Onboarding({ onImported, onBuild }: { onImported: (r: Resume) => void; onBuild: () => void }) {
+export function Onboarding({
+  onImported, onBuild,
+}: { onImported: (r: Resume, source?: ImportSource) => void; onBuild: () => void }) {
   return (
     <div className="space-y-5 max-w-5xl">
       <div className="space-y-1">

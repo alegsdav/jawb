@@ -24,7 +24,9 @@ import { MenuItem, MenuSeparator } from "@/components/Menu";
 import { PageSetupDialog } from "@/components/PageSetupDialog";
 import { EditorCanvas } from "@/components/ZoomFrame";
 import { CopyIcon, DocIcon, DownloadIcon } from "@/components/icons";
-import { ResumeImport } from "@/components/ResumeImport";
+import { ResumeImport, type ImportSource } from "@/components/ResumeImport";
+import { ImportReview } from "@/components/ImportReview";
+import { resumePlainText } from "@/lib/importReview";
 import { FactsPanel } from "@/components/FactsPanel";
 import { Builder } from "@/components/Builder";
 import { Onboarding } from "@/components/Onboarding";
@@ -84,6 +86,12 @@ async function loadOrCreateMaster(supabase: SupabaseClient): Promise<MasterRow> 
 }
 
 type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConflict[] };
+
+/**
+ * The review of the last file import: the master as it was before the import (Undo puts it back), the facts the
+ * import added (Undo removes them), and whether the text has been rebuilt in the clean template since.
+ */
+type ImportReviewState = { fileName: string; before: Resume; addedFacts: Fact[]; rebuilt: boolean };
 
 /** "Your master resume was changed elsewhere": autosave is paused until the user picks a side. */
 function ConflictBanner({
@@ -151,6 +159,7 @@ export default function MasterResumePage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [importOpen, setImportOpen] = useState(false);
+  const [review, setReview] = useState<ImportReviewState | null>(null);
   const [pageSetupOpen, setPageSetupOpen] = useState(false);
   const [justImported, setJustImported] = useState(false);
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
@@ -291,13 +300,52 @@ export default function MasterResumePage() {
 
   const empty = isEmptyResume(resume);
   const factCount = facts.facts.length;
-  const onImported = (r: Resume) => {
-    const next = mergeImport(resume, r);
+  /** Puts an import (or a rebuild) on the master, merged so bullets keep their ids; returns the new master. */
+  const takeImport = (r: Resume): Resume => {
+    const next = mergeImport(latestDoc.current ?? resume, r);
     setResume(next);
+    return next;
+  };
+  /**
+   * Every bullet you imported is a fact the AI can use, linked to its bullet (it follows your edits). The facts
+   * that were actually added are reported back, so Undo can remove them again.
+   */
+  const linkImportFacts = (next: Resume, onAdded: (added: Fact[]) => void) => {
+    if (!id) return;
+    void facts.add(importedBulletFacts(next, id, facts.facts)).then((added) => {
+      if (added?.length) onAdded(added);
+    });
+  };
+  const addReviewFacts = (before: Resume, added: Fact[]) =>
+    setReview((cur) => (cur && cur.before === before ? { ...cur, addedFacts: [...cur.addedFacts, ...added] } : cur));
+  const onImported = (r: Resume, source?: ImportSource) => {
+    const before = resume;
+    const next = takeImport(r);
     setImportOpen(false);
     if (empty) setJustImported(true);
-    // Every bullet you imported is a fact the AI can use, linked to its bullet (it follows your edits).
-    if (id) void facts.add(importedBulletFacts(next, id, facts.facts));
+    if (!source) {
+      setReview(null);
+      linkImportFacts(next, () => {});
+      return;
+    }
+    setReview({ fileName: source.fileName, before, addedFacts: [], rebuilt: false });
+    linkImportFacts(next, (added) => addReviewFacts(before, added));
+  };
+  /** The review's rebuild: the clean-template text replaces the document; Undo still goes back to before the file. */
+  const onRebuilt = (r: Resume) => {
+    if (!review) return;
+    const before = review.before;
+    const next = takeImport(r);
+    setReview((cur) => (cur ? { ...cur, rebuilt: true } : cur));
+    linkImportFacts(next, (added) => addReviewFacts(before, added));
+  };
+  /** Undo: the master as it was before the file import, and without the facts that import added. */
+  const undoImport = () => {
+    if (!review) return;
+    setResume(review.before);
+    setJustImported(false);
+    if (review.addedFacts.length) void facts.remove(review.addedFacts.map((f) => f.id));
+    setReview(null);
   };
   /** Put a coached bullet on the master (an undo step); returns its id. */
   const insertBullet = (target: CoachTarget, text: string, mode: "add" | "replace"): string | null => {
@@ -327,6 +375,16 @@ export default function MasterResumePage() {
   const onboarding = empty && !importOpen;
   const banners = (
     <>
+      {review && (
+        <ImportReview
+          fileName={review.fileName}
+          rebuilt={review.rebuilt}
+          resumeText={() => resumePlainText(latestDoc.current?.doc)}
+          onRebuilt={onRebuilt}
+          onUndo={undoImport}
+          onDismiss={() => setReview(null)}
+        />
+      )}
       {built && (
         <section aria-labelledby="built-heading" className="space-y-2 rounded-lg border border-border bg-surface p-4">
           <h2 id="built-heading" className="text-sm font-medium">Your first draft is ready.</h2>
