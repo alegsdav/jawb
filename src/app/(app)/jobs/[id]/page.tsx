@@ -789,15 +789,26 @@ export default function JobPage() {
     showFlash(choice === "remove" ? "Removed here too (Undo to go back)" : "Kept in this tailored copy");
   }
 
-  async function resetFromMaster() {
-    if (!confirm("Discard this job's tailored edits and start over from your current master resume?")) return;
+  /**
+   * "Reset to master resume": the tailored copy becomes a fresh clone of the current master (text, formatting, page
+   * setup; same paragraph ids and baseline), then the analysis runs again for this job. Never while applied (the
+   * submitted snapshot is separate and must not change) and never while an analysis is already running.
+   */
+  async function resetToMaster() {
+    if (applied || analyzing) return;
+    if (!confirm(
+      "Replace this job's resume with your current master resume (all its text and formatting)? " +
+      "Edits you made for this job are replaced. Then the AI re-analyzes it for this job.",
+    )) return;
     const { data: m, error } = await supabase.from("resumes").select("content").eq("is_master", true).maybeSingle();
     if (error) return fail(error, "Couldn't load your master resume. Try again.");
     const fresh = m ? normalizeResume(m.content) : emptyResume();
     if (isEmptyResume(fresh)) return setError("Your master resume is empty. Import it on the Master resume page first.");
     setMaster(fresh);
-    setResume(cloneForJob(fresh));
-    showFlash("Replaced with your master resume (Undo to go back)");
+    // showDoc (not setResume) so the autosave and analyze below read the new copy, not the one on screen before this render.
+    showDoc(cloneForJob(fresh));
+    showFlash("Reset to your master resume. Re-analyzing…", 5000);
+    await analyze();
   }
 
   /** "Save this tailored copy as my master resume…": warn about placeholders, then show what it will do. */
@@ -1066,6 +1077,14 @@ export default function JobPage() {
                 onRemoval={onRemoval}
               />
             )}
+            {resumeBar && !applied && (
+              // Always offered (not only when the banner shows): the banner only sees text changes, not formatting.
+              <div className="flex justify-end">
+                <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={resetToMaster} disabled={analyzing}>
+                  Reset to master resume
+                </button>
+              </div>
+            )}
     </>
   );
 
@@ -1135,8 +1154,13 @@ export default function JobPage() {
           >
             Save this tailored copy as my master resume…
           </MenuItem>
-          <MenuItem onSelect={resetFromMaster} hint="Discards this job's tailored edits" danger>
-            Start over from master resume…
+          <MenuItem
+            onSelect={resetToMaster}
+            disabled={applied || analyzing}
+            hint={applied ? "Locked: this job is marked Applied" : "Copies your master resume here and re-analyzes it"}
+            danger
+          >
+            Reset to master resume…
           </MenuItem>
         </MenuBarMenu>
         <EditMenu commandsRef={commandsRef} fmt={formatState} />

@@ -510,6 +510,41 @@ describe("missingOptionalColumns", () => {
   });
 });
 
+// ---------- reset to master resume (the job page's "Reset to master resume") ----------
+
+describe("reset to master resume", () => {
+  it("copies the master's paragraphs, ids, formatting and page setup, without facts", () => {
+    const m: Resume = { ...master1(), page: { marginTop: 0.75, marginBottom: 0.75, marginLeft: 1, marginRight: 1 } };
+    const copy = cloneForJob(m);
+    expect(ids(copy)).toBe(ids(m));
+    expect(copy.page).toEqual(m.page);
+    expect(copy.facts).toBeUndefined();
+    // Formatting travels with the copy: the centred name line keeps its alignment.
+    const name = flattenDoc(resumeDoc(copy)).find((p) => p.id === "name");
+    expect(name?.node.attrs?.textAlign).toBe("center");
+  });
+
+  it("replaces edits made for the job and starts with a fresh baseline (nothing pending)", () => {
+    const m = master1();
+    const edited = retext(cloneForJob(m), "a", "Edited for this job only");
+    expect(flattenDoc(resumeDoc(edited)).find((p) => p.id === "a")?.text).toBe("Edited for this job only");
+    const reset = cloneForJob(m); // what the page does after the edit
+    expect(flattenDoc(resumeDoc(reset)).find((p) => p.id === "a")?.text).toBe("A1");
+    expect(reset.baseline).toEqual(makeBaseline(m));
+    expect(planPull(reset, m)).toMatchObject({ total: 0, additions: [], removals: [] });
+  });
+
+  it("picks up a master that changed since the copy was made, including reworded and added lines", () => {
+    const copy = cloneForJob(master1());
+    const newer = withInserted(retext(master1(), "a", "A1 reworded"), "b", [bulletLine("n", "New line")]);
+    const reset = cloneForJob(newer);
+    expect(flattenDoc(resumeDoc(reset)).find((p) => p.id === "a")?.text).toBe("A1 reworded");
+    expect(flattenDoc(resumeDoc(reset)).some((p) => p.id === "n")).toBe(true);
+    expect(planPull(reset, newer).additions).toEqual([]);
+    expect(copy).not.toEqual(reset);
+  });
+});
+
 // keep the fixture helper honest
 describe("fixtures", () => {
   it("master1 has the expected bullets", () => {
