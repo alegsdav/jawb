@@ -59,9 +59,6 @@ type Props = {
 /** Transaction meta: the change came from the page (an accepted rewrite, a pull, an import), not from typing. */
 const EXTERNAL = "docExternal";
 
-/** One line of 11pt text at 1.15 line height, in px. */
-const LINE = 16.87;
-
 /**
  * The line boxes of the editor's paragraphs, as tops and bottoms in unscaled px from the page's top. A text rect is
  * the glyphs' box, so it is centred in the line box the line-height gives (the PDF lays out line boxes). Measured on
@@ -408,13 +405,17 @@ export function ResumeDocument({
   // Page-length measurement, with the page's own margins.
   useEffect(() => {
     const el = contentRef.current;
-    if (!el || !onMeasure) return;
+    const pageEl = pageRef.current;
+    if (!el || !pageEl || !onMeasure) return;
     const ro = new ResizeObserver(() => {
       if (el.offsetWidth < 600) return; // reflowed phone layout isn't page-accurate
       const page = valueRef.current.page ?? PAGE_DEFAULTS;
       const usable = PAGE_HEIGHT_IN * PX_PER_IN - (page.marginTop + page.marginBottom) * PX_PER_IN;
       const h = el.scrollHeight;
-      onMeasure({ pages: Math.max(1, Math.ceil(h / usable)), overflowLines: Math.max(0, Math.ceil((h - usable) / LINE)) });
+      // Lines are counted from their own boxes: a 9pt line is shorter than an 11pt one, so a height gives the wrong count.
+      const pageBottom = (PAGE_HEIGHT_IN - page.marginBottom) * PX_PER_IN;
+      const overflowLines = lineBoxesOf(el, pageEl).filter((b) => b.bottom > pageBottom).length;
+      onMeasure({ pages: Math.max(1, Math.ceil(h / usable)), overflowLines });
     });
     ro.observe(el);
     return () => ro.disconnect();

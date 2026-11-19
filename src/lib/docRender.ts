@@ -36,6 +36,8 @@ export type RenderParagraph = {
   align: "left" | "center" | "right" | "justify";
   spaceBeforePt: number;
   spaceAfterPt: number;
+  /** The paragraph's own size (see paragraphSizePt): its line boxes and its marker are this size. */
+  sizePt: number;
   /** Line spacing multiplier. */
   lineHeight: number;
   /** A thin full-width rule under the paragraph (an empty paragraph with a bottom border is a horizontal line). */
@@ -56,6 +58,19 @@ const DEFAULT_STYLE: RunStyle = {
   sizePt: DEFAULT_FONT_SIZE_PT,
   fontFamily: DEFAULT_FONT_FAMILY,
 };
+
+/**
+ * The size a paragraph's line boxes are built from: its largest run size (a run without a size is the document
+ * default). Like Google Docs and Word, a line is as tall as the text on it, not as tall as a document default, so a
+ * 9pt paragraph is 9pt tall even when the page's default is 11pt. An empty paragraph has no run, so it is the default.
+ */
+export function paragraphSizePt(content: DocInline[] | undefined): number {
+  let largest: number | null = null;
+  for (const n of content ?? []) {
+    if (n.type === "text" && n.text) largest = Math.max(largest ?? 0, styleOf(n.marks).sizePt);
+  }
+  return largest ?? DEFAULT_FONT_SIZE_PT;
+}
 
 /** The page setup of a resume (PAGE_DEFAULTS when it has none). */
 export const pageOf = (r: { page?: PageSetup }): PageSetup => r.page ?? PAGE_DEFAULTS;
@@ -183,7 +198,8 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
   const inline = align === "center" || align === "right";
   const lines = linesOf(p.content);
   const firstRun = lines.flatMap((l) => [...l.left, ...(l.right ?? [])])[0];
-  const style = firstRun?.style ?? DEFAULT_STYLE;
+  const sizePt = paragraphSizePt(p.content);
+  const style = { ...(firstRun?.style ?? DEFAULT_STYLE), sizePt };
 
   // An empty line still takes one line of height, like a blank line in a document.
   for (const l of lines) {
@@ -196,6 +212,7 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
     align,
     spaceBeforePt: a?.spaceBefore ?? 0,
     spaceAfterPt: a?.spaceAfter ?? 0,
+    sizePt,
     lineHeight: a?.lineHeight ?? DEFAULT_LINE_HEIGHT,
     rule: a?.borderBottom === true,
     textIndentPt: level * LIST_INDENT_PT,

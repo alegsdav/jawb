@@ -1,15 +1,15 @@
 import { type Command, type Extensions, Extension, Node, getSchema, markPasteRule } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { type EditorState, Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
-import type { EditorView } from "@tiptap/pm/view";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { FontSize, TextStyle } from "@tiptap/extension-text-style";
 import Link from "@tiptap/extension-link";
 import { TextAlign } from "@tiptap/extension-text-align";
 import StarterKit from "@tiptap/starter-kit";
-import { tabGapPx } from "../docRender";
+import { paragraphSizePt, tabGapPx } from "../docRender";
 import { cssFontStack } from "./fonts";
 import { normalizeHref } from "./model";
-import type { DocJSON } from "./types";
+import { DEFAULT_FONT_SIZE_PT, type DocJSON } from "./types";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -81,6 +81,7 @@ function idFixTransaction(state: EditorState): Transaction | null {
 }
 
 const idKey = new PluginKey("paragraphIds");
+const sizeKey = new PluginKey("paragraphSize");
 
 const ParagraphFormat = Extension.create({
   name: "paragraphFormat",
@@ -136,6 +137,16 @@ const ParagraphFormat = Extension.create({
   addProseMirrorPlugins() {
     return [
       new Plugin({
+        key: sizeKey,
+        state: {
+          init: (_config, state) => sizeDecorations(state.doc),
+          apply: (tr, set, _old, newState) => (tr.docChanged ? sizeDecorations(newState.doc) : set),
+        },
+        props: {
+          decorations: (state) => sizeKey.getState(state),
+        },
+      }),
+      new Plugin({
         key: idKey,
         // Enter copies attrs and paste can carry data-id, so fix duplicates and gaps after every edit.
         appendTransaction(transactions, _oldState, newState) {
@@ -155,6 +166,29 @@ const ParagraphFormat = Extension.create({
     ];
   },
 });
+
+/**
+ * Node decorations that give each paragraph its own font size (see paragraphSizePt), so its line box is built from
+ * the text on it and not from the 11pt default. A list item takes its first paragraph's size: the item's own line
+ * strut and its bullet are drawn at the item's size. Only sizes other than the default get a decoration.
+ */
+export function sizeDecorations(doc: PMNode): DecorationSet {
+  const decos: Decoration[] = [];
+  const sized = (pos: number, node: PMNode, pt: number) => {
+    if (pt !== DEFAULT_FONT_SIZE_PT) decos.push(Decoration.node(pos, pos + node.nodeSize, { style: `font-size: ${pt}pt` }));
+  };
+  doc.descendants((node, pos) => {
+    if (node.type.name === "paragraph") {
+      sized(pos, node, paragraphSizePt(node.toJSON().content));
+      return false;
+    }
+    if (node.type.name === "listItem" && node.firstChild?.type.name === "paragraph") {
+      sized(pos, node, paragraphSizePt(node.firstChild.toJSON().content));
+    }
+    return true;
+  });
+  return DecorationSet.create(doc, decos);
+}
 
 /** Sets the given attributes on every paragraph the selection touches. */
 function setParagraphAttrs(attrs: Record<string, unknown>): Command {

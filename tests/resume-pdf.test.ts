@@ -231,3 +231,31 @@ describe("tab rows in the view and PDF follow the editor's last-tab rule", () =>
     expect(line.right?.map((r) => r.text).join("")).toBe("Boston, MA");
   });
 });
+
+describe("line height follows each paragraph's own size", () => {
+  /** The baselines (pt from the page bottom) of the text items starting with `prefix`, top to bottom. */
+  async function baselinesOf(d: DocJSON, prefix: string): Promise<number[]> {
+    const buffer = await renderToBuffer(ResumePdf({ resume: withDoc(emptyResume(), d) }));
+    const task = getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false });
+    const page = await (await task.promise).getPage(1);
+    const items = (await page.getTextContent()).items.filter((it) => "str" in it && it.str.startsWith(prefix));
+    await task.destroy();
+    return items.map((it) => (it as { transform: number[] }).transform[5]);
+  }
+  /** The gaps between consecutive baselines, in pt. */
+  const gaps = (ys: number[]) => ys.slice(1).map((y, i) => ys[i] - y);
+
+  it("spaces 9pt paragraphs 9 x 1.15 apart, not 11 x 1.15", async () => {
+    const nine = Array.from({ length: 6 }, (_, i) => para(`Nine point ${i}`, {}, [size("9pt")]));
+    const ys = await baselinesOf({ type: "doc", content: nine }, "Nine point");
+    expect(ys).toHaveLength(6);
+    for (const g of gaps(ys)) expect(g).toBeCloseTo(9 * 1.15, 1);
+  });
+
+  it("spaces 9pt bullets the same way", async () => {
+    const items = Array.from({ length: 5 }, (_, i) => item(para(`Bullet ${i}`, {}, [size("9pt")])));
+    const ys = await baselinesOf({ type: "doc", content: [bullets(...items)] }, "Bullet");
+    expect(ys).toHaveLength(5);
+    for (const g of gaps(ys)) expect(g).toBeCloseTo(9 * 1.15, 1);
+  });
+});
