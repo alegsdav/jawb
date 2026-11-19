@@ -7,7 +7,7 @@ is derived by src/lib/doc/outline.ts and cached on the Resume as `header`/`secti
 change `doc` and go through `withDoc`.
 
 Key files: src/lib/doc/model.ts (flatten/build and paragraph edits), src/lib/doc/legacy.ts (v1-3 migration),
-src/lib/import/pdfToDoc.ts + textToDoc.ts (import, no AI), src/lib/docRender.ts + ResumeView.tsx + ResumePdf.tsx
+src/lib/import/pdfToDoc.ts (PDF import as is: fonts, sizes, bold/italic, alignment, bullets, tabs, rules, margins, links; no AI), src/lib/import/textToHarvard.ts (pasted text: AI parse into the Harvard template), src/lib/docRender.ts + ResumeView.tsx + ResumePdf.tsx
 (read-only and PDF), src/components/aiHighlights.ts (AI tints, dots, changed bar), src/lib/template.ts (Harvard
 template, builder only), src/lib/tailor.ts / jobSync.ts / master.ts (paragraph-level pull, save-as-master, 3-way merge).
 
@@ -17,6 +17,10 @@ template, builder only), src/lib/tailor.ts / jobSync.ts / master.ts (paragraph-l
 - The tailored copy's baseline holds text only, so a formatting change the master makes later can be carried back by
   "Save as master" as if the copy made it.
 - PDF import: underline isn't detected; spacing above paragraphs comes back about 1pt smaller; scanned PDFs need text.
+  A link whose label differs from its URL is placed by proportional width and can be a character or two off.
+- PDF import runs on the server (upload + cold start). Parsing in the browser with pdf.js would make it instant
+  (worker via new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url), dynamic import on click).
+- Production (main) still runs the pre-rewrite code until this branch is merged.
 - A horizontal line inserted from inside a list goes after the whole list.
 
 ## How to verify
