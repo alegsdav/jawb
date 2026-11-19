@@ -100,8 +100,8 @@ function ParagraphView({ p }: { p: RenderParagraph }) {
       style={{
         marginTop: pt(p.spaceBeforePt),
         marginBottom: pt(p.spaceAfterPt),
-        // The line box is this paragraph's size, not the page's default (see paragraphSizePt).
-        fontSize: pt(p.sizePt),
+        // The line strut: unsized text keeps the default, and each line is as tall as its text (see paragraphStrutPt).
+        fontSize: pt(p.strutPt),
         lineHeight: p.lineHeight,
         textAlign: p.align,
         ...(p.rule ? { borderBottom: RULE_BORDER, paddingBottom: "1pt" } : {}),

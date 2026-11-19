@@ -6,7 +6,7 @@ import { FontSize, TextStyle } from "@tiptap/extension-text-style";
 import Link from "@tiptap/extension-link";
 import { TextAlign } from "@tiptap/extension-text-align";
 import StarterKit from "@tiptap/starter-kit";
-import { paragraphSizePt, tabGapPx } from "../docRender";
+import { paragraphStrutPt, tabGapPx } from "../docRender";
 import { cssFontStack } from "./fonts";
 import { normalizeHref } from "./model";
 import { DEFAULT_FONT_SIZE_PT, type DocJSON, clampIndentPt } from "./types";
@@ -81,7 +81,7 @@ function idFixTransaction(state: EditorState): Transaction | null {
 }
 
 const idKey = new PluginKey("paragraphIds");
-const sizeKey = new PluginKey("paragraphSize");
+const strutKey = new PluginKey("paragraphStrut");
 const listIndentKey = new PluginKey("listIndent");
 /** The indent of a list level the CSS gives it (.doc-content ul/ol: 0.5in), in points. */
 const EDITOR_LIST_STEP_PT = 36;
@@ -140,13 +140,13 @@ const ParagraphFormat = Extension.create({
   addProseMirrorPlugins() {
     return [
       new Plugin({
-        key: sizeKey,
+        key: strutKey,
         state: {
-          init: (_config, state) => sizeDecorations(state.doc),
-          apply: (tr, set, _old, newState) => (tr.docChanged ? sizeDecorations(newState.doc) : set),
+          init: (_config, state) => strutDecorations(state.doc),
+          apply: (tr, set, _old, newState) => (tr.docChanged ? strutDecorations(newState.doc) : set),
         },
         props: {
-          decorations: (state) => sizeKey.getState(state),
+          decorations: (state) => strutKey.getState(state),
         },
       }),
       new Plugin({
@@ -171,22 +171,22 @@ const ParagraphFormat = Extension.create({
 });
 
 /**
- * Node decorations that give each paragraph its own font size (see paragraphSizePt), so its line box is built from
- * the text on it and not from the 11pt default. A list item takes its first paragraph's size: the item's own line
- * strut and its bullet are drawn at the item's size. Only sizes other than the default get a decoration.
+ * Node decorations that set each paragraph's line strut (see paragraphStrutPt), so its lines are as tall as the text on
+ * them and unsized text keeps the 11pt default. A list item takes its first paragraph's strut: the item's bullet is
+ * drawn at that size. Only strut sizes other than the default get a decoration.
  */
-export function sizeDecorations(doc: PMNode): DecorationSet {
+export function strutDecorations(doc: PMNode): DecorationSet {
   const decos: Decoration[] = [];
-  const sized = (pos: number, node: PMNode, pt: number) => {
+  const strut = (pos: number, node: PMNode, pt: number) => {
     if (pt !== DEFAULT_FONT_SIZE_PT) decos.push(Decoration.node(pos, pos + node.nodeSize, { style: `font-size: ${pt}pt` }));
   };
   doc.descendants((node, pos) => {
     if (node.type.name === "paragraph") {
-      sized(pos, node, paragraphSizePt(node.toJSON().content));
+      strut(pos, node, paragraphStrutPt(node.toJSON().content));
       return false;
     }
     if (node.type.name === "listItem" && node.firstChild?.type.name === "paragraph") {
-      sized(pos, node, paragraphSizePt(node.firstChild.toJSON().content));
+      strut(pos, node, paragraphStrutPt(node.firstChild.toJSON().content));
     }
     return true;
   });

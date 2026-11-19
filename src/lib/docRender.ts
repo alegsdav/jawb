@@ -44,8 +44,8 @@ export type RenderParagraph = {
   align: "left" | "center" | "right" | "justify";
   spaceBeforePt: number;
   spaceAfterPt: number;
-  /** The paragraph's own size (see paragraphSizePt): its line boxes and its marker are this size. */
-  sizePt: number;
+  /** The line strut (see paragraphStrutPt): the paragraph's element size, and its marker's size. */
+  strutPt: number;
   /** Line spacing multiplier. */
   lineHeight: number;
   /** A thin full-width rule under the paragraph (an empty paragraph with a bottom border is a horizontal line). */
@@ -67,17 +67,32 @@ const DEFAULT_STYLE: RunStyle = {
   fontFamily: DEFAULT_FONT_FAMILY,
 };
 
-/**
- * The size a paragraph's line boxes are built from: its largest run size (a run without a size is the document
- * default). Like Google Docs and Word, a line is as tall as the text on it, not as tall as a document default, so a
- * 9pt paragraph is 9pt tall even when the page's default is 11pt. An empty paragraph has no run, so it is the default.
- */
-export function paragraphSizePt(content: DocInline[] | undefined): number {
-  let largest: number | null = null;
-  for (const n of content ?? []) {
-    if (n.type === "text" && n.text) largest = Math.max(largest ?? 0, styleOf(n.marks).sizePt);
+/** The font size a run's marks set, or null when it has no size mark (it then renders at the document default). */
+function fontSizeOfMarks(marks: DocMark[] | undefined): number | null {
+  let pt: number | null = null;
+  for (const m of marks ?? []) {
+    if (m.type !== "textStyle") continue;
+    const size = parseFloat(m.attrs?.fontSize ?? "");
+    if (Number.isFinite(size)) pt = size;
   }
-  return largest ?? DEFAULT_FONT_SIZE_PT;
+  return pt;
+}
+
+/**
+ * The line strut of a paragraph: the size its element is set at, which every line starts from. Text without a size
+ * mark renders at the document default, so a paragraph with any such text has the default strut and the marked text
+ * sits on top of it. A paragraph of marked text only takes its smallest size, so no line is taller than its own text
+ * needs. An empty paragraph has the default. Each run keeps its own size (see styleOf).
+ */
+export function paragraphStrutPt(content: DocInline[] | undefined): number {
+  let smallest: number | null = null;
+  for (const n of content ?? []) {
+    if (n.type !== "text" || !n.text) continue;
+    const pt = fontSizeOfMarks(n.marks);
+    if (pt === null) return DEFAULT_FONT_SIZE_PT;
+    smallest = Math.min(smallest ?? pt, pt);
+  }
+  return smallest ?? DEFAULT_FONT_SIZE_PT;
 }
 
 /** The page setup of a resume (PAGE_DEFAULTS when it has none). */
@@ -91,8 +106,8 @@ export function styleOf(marks: DocMark[] | undefined): RunStyle {
     else if (m.type === "italic") style.italic = true;
     else if (m.type === "underline") style.underline = true;
     else if (m.type === "textStyle") {
-      const pt = parseFloat(m.attrs?.fontSize ?? "");
-      if (Number.isFinite(pt)) style.sizePt = pt;
+      const pt = fontSizeOfMarks([m]);
+      if (pt !== null) style.sizePt = pt;
       if (m.attrs?.fontFamily) style.fontFamily = m.attrs.fontFamily;
     }
   }
@@ -261,8 +276,8 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
   const inline = align === "center" || align === "right";
   const lines = linesOf(p.content);
   const firstRun = lines.flatMap((l) => [...l.left, ...(l.right ?? [])])[0];
-  const sizePt = paragraphSizePt(p.content);
-  const style = { ...(firstRun?.style ?? DEFAULT_STYLE), sizePt };
+  const strutPt = paragraphStrutPt(p.content);
+  const style = { ...(firstRun?.style ?? DEFAULT_STYLE), sizePt: strutPt };
 
   // An empty line still takes one line of height, like a blank line in a document.
   for (const l of lines) {
@@ -275,7 +290,7 @@ function paragraphBlock(p: DocParagraph, list: ListPos | null): RenderParagraph 
     align,
     spaceBeforePt: a?.spaceBefore ?? 0,
     spaceAfterPt: a?.spaceAfter ?? 0,
-    sizePt,
+    strutPt,
     lineHeight: a?.lineHeight ?? DEFAULT_LINE_HEIGHT,
     rule: a?.borderBottom === true,
     textIndentPt,

@@ -177,8 +177,8 @@ body {
 .doc-content ol[type="A"] { list-style-type: upper-alpha; }
 .doc-content ol[type="i"] { list-style-type: lower-roman; }
 .doc-content ol[type="I"] { list-style-type: upper-roman; }
-.doc-content li > p { display: inline; }
-.doc-content li > p + p { display: block; }
+/* Every paragraph in a list item is a block, so its spacing (margins) applies, as it does in the view and the PDF. */
+.doc-content li > p { display: block; }
 .doc-tab { display: inline-block; }
 /* Links look like Google Docs: blue and underlined, in the document and its read-only view. */
 .doc-content a { color: #1155cc; text-decoration: underline; cursor: pointer; }

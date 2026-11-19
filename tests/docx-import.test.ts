@@ -398,6 +398,44 @@ describe("tabs", () => {
   });
 });
 
+/** A Letter page with 605-twip margins, so the text area is about 11030 twips wide (as in Google Docs exports). */
+const LETTER_SECT = `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="605" w:right="605" w:bottom="605" w:left="605" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>`;
+
+describe("tabs set against the right margin", () => {
+  const firstContent = (body: string) => (plain(docxToDoc(makeDocx(body + LETTER_SECT)).doc) as { content: { content: unknown[] }[] }).content[0].content;
+
+  it("turns a left stop near the right margin, and the tab before the text, into one right-aligned tab", () => {
+    const body = `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="9489"/></w:tabs></w:pPr><w:r><w:t>University of California - Santa Cruz</w:t></w:r><w:r><w:tab/><w:t xml:space="preserve">  Santa Cruz, CA</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "University of California - Santa Cruz" }, { type: "tab" }, { type: "text", text: "Santa Cruz, CA" }]);
+  });
+
+  it("turns default stops with several tabs and spaces that end at the right margin into one tab", () => {
+    const body = `<w:p><w:r><w:t>Ellis Chi, CPA</w:t></w:r><w:r><w:tab/><w:tab/><w:tab/><w:t xml:space="preserve">${" ".repeat(120)}June 2026 - Present</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Ellis Chi, CPA" }, { type: "tab" }, { type: "text", text: "June 2026 - Present" }]);
+  });
+
+  it("turns a long run of spaces that reaches the right margin into one tab", () => {
+    const body = `<w:p><w:r><w:t>B.S. Computer Engineering</w:t></w:r><w:r><w:t xml:space="preserve">${" ".repeat(120)}2024-Expected June 2028</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "B.S. Computer Engineering" }, { type: "tab" }, { type: "text", text: "2024-Expected June 2028" }]);
+  });
+
+  it("keeps a tab to a 1 in stop with short text after it as spaces, a column and not a right-aligned date", () => {
+    const body = `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="1440"/></w:tabs></w:pPr><w:r><w:t>Languages:</w:t></w:r><w:r><w:tab/><w:t>Python</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Languages:    Python" }]);
+  });
+
+  it("keeps two spaces inside a sentence as typed", () => {
+    const body = `<w:p><w:r><w:t xml:space="preserve">Skills: Python,  SQL and Git</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Skills: Python,  SQL and Git" }]);
+  });
+
+  it("keeps the spaces that indent a line, even when the text after them reaches the margin", () => {
+    const text = `${"    "}${"word ".repeat(60)}end`;
+    const body = `<w:p><w:r><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text }]);
+  });
+});
+
 describe("resumeFromDocx", () => {
   it("returns a version 4 resume with the document and page setup", () => {
     const r = resumeFromDocx(makeDocx(SAMPLE));

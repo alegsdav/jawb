@@ -6,7 +6,7 @@ import { pdfFontFor } from "@/lib/pdfFonts";
 import { hangingMarkerOf, linesWithMarker, renderBlocks, type RenderParagraph } from "@/lib/docRender";
 import { paragraph } from "@/lib/doc/model";
 import { pdfToDoc } from "@/lib/import/pdfToDoc";
-import type { DocJSON, DocList, DocListItem, DocMark, DocParagraph, DocText, ParagraphAttrs } from "@/lib/doc/types";
+import type { DocInline, DocJSON, DocList, DocListItem, DocMark, DocParagraph, DocText, ParagraphAttrs } from "@/lib/doc/types";
 import { emptyResume, withDoc } from "@/lib/resume";
 
 const bold: DocMark = { type: "bold" };
@@ -257,5 +257,52 @@ describe("line height follows each paragraph's own size", () => {
     const ys = await baselinesOf({ type: "doc", content: [bullets(...items)] }, "Bullet");
     expect(ys).toHaveLength(5);
     for (const g of gaps(ys)) expect(g).toBeCloseTo(9 * 1.15, 1);
+  });
+});
+
+describe("unsized text keeps 11pt beside a big name, and list items keep their spacing", () => {
+  /** The text items of page 1 that start with `prefix`: their text, font size (pt) and baseline (pt from the page bottom). */
+  async function glyphsOf(d: DocJSON, prefixes: string[]) {
+    const buffer = await renderToBuffer(ResumePdf({ resume: withDoc(emptyResume(), d) }));
+    const task = getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false });
+    const page = await (await task.promise).getPage(1);
+    const items = (await page.getTextContent()).items.filter((it) => "str" in it && prefixes.some((p) => it.str.startsWith(p)));
+    await task.destroy();
+    return items.map((it) => {
+      const t = (it as { transform: number[] }).transform;
+      return { text: (it as { str: string }).str, size: Math.abs(t[3]), baseline: t[5] };
+    });
+  }
+  const name: DocInline[] = [{ type: "text", text: "Ada Lovelace", marks: [bold, size("18pt")] }, { type: "hardBreak" }];
+  const contact = "London | ada@example.com";
+  const nameAndContact: DocJSON = {
+    type: "doc",
+    content: [{ type: "paragraph", attrs: { id: "name" }, content: [...name, { type: "text", text: contact }] }],
+  };
+
+  it("draws the unsized contact line at 11pt, and the name at 18pt", async () => {
+    const [n, c] = await glyphsOf(nameAndContact, ["Ada", "London"]);
+    expect(n.size).toBeCloseTo(18, 1);
+    expect(c.size).toBeCloseTo(11, 1);
+    // The contact line sits below the name, by the name's line and the contact's own line.
+    expect(n.baseline - c.baseline).toBeGreaterThan(11 * 1.15);
+  });
+
+  /** The gap (pt) between the baselines of the last bullet of one job and the first bullet of the next. */
+  async function jobGap(lastAfter: number, firstBefore: number): Promise<number> {
+    const job1 = bullets(item(para("Job one bullet")), item(para("Job one last", { spaceAfter: lastAfter })));
+    const job2 = bullets(item(para("Job two first", { spaceBefore: firstBefore })));
+    const [a, b] = await glyphsOf({ type: "doc", content: [job1, job2] }, ["Job one last", "Job two first"]);
+    return a.baseline - b.baseline;
+  }
+
+  it("applies a list item's last-paragraph spaceAfter before the next job", async () => {
+    const plain = await jobGap(0, 0);
+    expect(await jobGap(12, 0)).toBeCloseTo(plain + 12, 1);
+  });
+
+  it("applies a list item's first-paragraph spaceBefore", async () => {
+    const plain = await jobGap(0, 0);
+    expect(await jobGap(0, 6)).toBeCloseTo(plain + 6, 1);
   });
 });

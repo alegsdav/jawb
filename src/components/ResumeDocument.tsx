@@ -59,29 +59,51 @@ type Props = {
 /** Transaction meta: the change came from the page (an accepted rewrite, a pull, an import), not from typing. */
 const EXTERNAL = "docExternal";
 
+type LineBox = { top: number; bottom: number };
+
 /**
- * The line boxes of the editor's paragraphs, as tops and bottoms in unscaled px from the page's top. A text rect is
- * the glyphs' box, so it is centred in the line box the line-height gives (the PDF lays out line boxes). Measured on
- * the screen and divided by the zoom, so the result does not depend on it.
+ * The line boxes of the editor's text, as tops and bottoms in unscaled px from the page's top. Each text node has its own
+ * size, so its box is its span's line-height (a 18pt name is taller than the 11pt contact line in its paragraph). A text
+ * rect is the glyphs' box, centred in that line box. Measured on the screen and divided by the zoom, so the result does
+ * not depend on it. Rects of one line are merged, so a line of several runs counts once.
  */
-function lineBoxesOf(content: HTMLElement, pageEl: HTMLElement): { top: number; bottom: number }[] {
+function lineBoxesOf(content: HTMLElement, pageEl: HTMLElement): LineBox[] {
   const page = pageEl.getBoundingClientRect();
   const scale = pageEl.offsetWidth > 0 ? page.width / pageEl.offsetWidth : 1;
-  const boxes: { top: number; bottom: number }[] = [];
-  for (const p of Array.from(content.querySelectorAll<HTMLElement>("p"))) {
-    const style = getComputedStyle(p);
+  const boxes: LineBox[] = [];
+  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const span = node.parentElement;
+    if (!span?.closest("p") || !node.textContent?.trim()) continue;
+    const style = getComputedStyle(span);
     const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.15;
     const range = document.createRange();
-    range.selectNodeContents(p);
-    const rects = Array.from(range.getClientRects()).filter((r) => r.height > 0);
-    for (const r of rects.length ? rects : [p.getBoundingClientRect()]) {
+    range.selectNodeContents(node);
+    for (const r of Array.from(range.getClientRects())) {
       if (r.height <= 0) continue;
-      const textTop = (r.top - page.top) / scale;
-      const top = textTop - (lineHeight - r.height / scale) / 2;
+      const top = (r.top - page.top) / scale - (lineHeight - r.height / scale) / 2;
       boxes.push({ top, bottom: top + lineHeight });
     }
   }
-  return boxes;
+  return mergeLineBoxes(boxes);
+}
+
+/**
+ * Merges boxes whose centres are within half the shorter box, which are the same line. Consecutive lines never are, so
+ * each line comes out once, as tall as the tallest text on it.
+ */
+function mergeLineBoxes(boxes: LineBox[]): LineBox[] {
+  const merged: LineBox[] = [];
+  for (const b of [...boxes].sort((x, y) => x.top - y.top)) {
+    const last = merged[merged.length - 1];
+    const same = last && Math.abs((b.top + b.bottom) / 2 - (last.top + last.bottom) / 2) < Math.min(b.bottom - b.top, last.bottom - last.top) / 2;
+    if (same) {
+      last.top = Math.min(last.top, b.top);
+      last.bottom = Math.max(last.bottom, b.bottom);
+    }
+    else merged.push({ ...b });
+  }
+  return merged;
 }
 
 declare module "@tiptap/core" {

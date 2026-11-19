@@ -22,6 +22,7 @@ import {
   type PageSetup,
   type ParagraphAttrs,
 } from "@/lib/doc/types";
+import { textWidthPt } from "@/lib/pdfTextWidths";
 
 /** A file the import cannot read (not a .docx, or damaged). The message is safe to show. */
 export class DocxError extends Error {}
@@ -99,6 +100,9 @@ function onOff(n: XNode | undefined): boolean | undefined {
 // ---- Properties ----
 
 type RProps = { bold?: boolean; italic?: boolean; underline?: boolean; caps?: boolean; size?: number; font?: string };
+/** A tab stop, in twips from the left margin; `clear` removes the stop at that position from the levels above. */
+type TabStop = { pos: number; clear: boolean };
+
 type PProps = {
   align?: "left" | "center" | "right" | "justify";
   before?: number;
@@ -112,6 +116,7 @@ type PProps = {
   indentRight?: number;
   /** A right or end tab stop applies, so a tab in the paragraph goes to the margin. */
   rightTab?: boolean;
+  tabs?: TabStop[];
   numId?: string;
   ilvl?: number;
 };
@@ -210,7 +215,13 @@ function readPPr(el: XNode | undefined): PProps {
     if (right !== undefined) p.indentRight = right;
   }
   readBorders(kid(el, "pBdr"), p);
-  if (kidsOf(kid(el, "tabs"), "tab").some((t) => ["right", "end"].includes(attr(t, "val") ?? ""))) p.rightTab = true;
+  const tabEls = kidsOf(kid(el, "tabs"), "tab");
+  const tabs = tabEls.flatMap((t): TabStop[] => {
+    const pos = num(attr(t, "pos"));
+    return pos === undefined ? [] : [{ pos, clear: attr(t, "val") === "clear" }];
+  });
+  if (tabs.length) p.tabs = tabs;
+  if (tabEls.some((t) => ["right", "end"].includes(attr(t, "val") ?? ""))) p.rightTab = true;
   const numPr = kid(el, "numPr");
   if (numPr) {
     const numId = attr(kid(numPr, "numId"), "val");
@@ -245,7 +256,16 @@ type Ctx = {
   rels: Map<string, string>;
   /** Relationship id -> package path of a header or footer part of the document. */
   parts: Map<string, string>;
+  /** The default tab stop spacing (twips): where a tab goes past the last custom stop. */
+  defaultTab: number;
+  /** The text width of the page (twips): the page width less its margins. */
+  contentTwips: number;
 };
+
+/** Word's defaults when a file does not say: a Letter page with 1 in margins, and 0.5 in tab stops. */
+const DEFAULT_PAGE_WIDTH = 12240;
+const DEFAULT_MARGIN = 1440;
+const DEFAULT_TAB_STOP = 720;
 
 /** Limits on what a .docx may inflate to (a long resume's document.xml is well under 1 MB). */
 const MAX_PART_BYTES = 30 * 1024 * 1024;
@@ -257,6 +277,7 @@ const KEEP = new Set([
   "word/document.xml",
   "word/styles.xml",
   "word/numbering.xml",
+  "word/settings.xml",
   "word/theme/theme1.xml",
   "word/_rels/document.xml.rels",
 ]);
@@ -343,6 +364,7 @@ function readContext(files: Record<string, Uint8Array>): { ctx: Ctx; body: XNode
   }
 
   const rels = readRels(part("word/_rels/document.xml.rels"), "word/");
+  const defaultTab = num(attr(kid(part("word/settings.xml"), "defaultTabStop"), "val"));
   const ctx: Ctx = {
     theme,
     docR: readRPr(kid(kid(defaults, "rPrDefault"), "rPr"), theme),
@@ -354,8 +376,19 @@ function readContext(files: Record<string, Uint8Array>): { ctx: Ctx; body: XNode
     levels,
     rels: rels.links,
     parts: rels.parts,
+    defaultTab: defaultTab !== undefined && defaultTab > 0 ? defaultTab : DEFAULT_TAB_STOP,
+    contentTwips: contentWidthOf(body),
   };
   return { ctx, body };
+}
+
+/** The text width of the body's last section, in twips: the page width less its left and right margins. */
+function contentWidthOf(body: XNode): number {
+  const sect = kid(body, "sectPr");
+  const mar = kid(sect, "pgMar");
+  const page = num(attr(kid(sect, "pgSz"), "w")) ?? DEFAULT_PAGE_WIDTH;
+  const width = page - (num(attr(mar, "left")) ?? DEFAULT_MARGIN) - (num(attr(mar, "right")) ?? DEFAULT_MARGIN);
+  return width > 0 ? width : DEFAULT_PAGE_WIDTH - 2 * DEFAULT_MARGIN;
 }
 
 function findAll(n: XNode | undefined, tag: string, out: XNode[] = []): XNode[] {
@@ -518,8 +551,26 @@ function mergeText(nodes: DocInline[]): DocInline[] {
   return out;
 }
 
-/** ind: the paragraph's own left indent (twips), which overrides the list level's. */
-type Parts = { inline: DocInline[]; pp: PProps; ind?: number };
+/**
+ * ind: the paragraph's own left indent (twips), which overrides the list level's. stops: the tab stops in effect
+ * (twips from the left margin, sorted).
+ */
+type Parts = { inline: DocInline[]; pp: PProps; ind?: number; stops: number[] };
+
+/**
+ * The tab stops in effect: each level's stops in turn (document defaults, then the style chain, then the paragraph).
+ * A stop with w:val="clear" removes the stop at its position.
+ */
+function tabStopsOf(levels: PProps[]): number[] {
+  const stops = new Set<number>();
+  for (const level of levels) {
+    for (const t of level.tabs ?? []) {
+      if (t.clear) stops.delete(t.pos);
+      else stops.add(t.pos);
+    }
+  }
+  return [...stops].sort((a, b) => a - b);
+}
 
 /** The inline content of a w:p and its paragraph properties, with the paragraph style applied. */
 function paragraphParts(p: XNode, ctx: Ctx): Parts {
@@ -527,11 +578,12 @@ function paragraphParts(p: XNode, ctx: Ctx): Parts {
   const styleId = attr(kid(pPrEl, "pStyle"), "val") ?? ctx.defaultPara;
   const chain = styleChain(styleId, ctx);
   const own = readPPr(pPrEl);
-  const pp = merged<PProps>(ctx.docP, ...chain.map((s) => s.p), own);
+  const levels = [ctx.docP, ...chain.map((s) => s.p), own];
+  const pp = merged<PProps>(...levels);
   const base = merged<RProps>(ctx.docR, ...chain.map((s) => s.r));
   const inline: DocInline[] = [];
   collectRuns(p, base, undefined, ctx, inline);
-  return { inline: mergeText(inline), pp, ind: own.indentLeft };
+  return { inline: mergeText(inline), pp, ind: own.indentLeft, stops: tabStopsOf(levels) };
 }
 
 function paragraphAttrs(pp: PProps): ParagraphAttrs {
@@ -605,7 +657,7 @@ function cellParagraphs(n: XNode): XNode[] {
  * reads "Company ⇥ City" with the city on the right margin). Earlier cells are separated by a space. Paragraphs
  * inside a cell are joined with a line break. Its formatting comes from the first cell that has text.
  */
-function rowParts(tr: XNode, ctx: Ctx): Parts | null {
+function rowParts(tr: XNode, ctx: Ctx): { inline: DocInline[]; pp: PProps } | null {
   const cells: DocInline[][] = [];
   let pp: PProps | undefined;
   for (const tc of kidsOf(tr, "tc")) {
@@ -637,13 +689,141 @@ function ruleGroupKey(pp: PProps): string | undefined {
   return `${pp.border}|${pp.indentLeft ?? 0}|${pp.indentRight ?? 0}`;
 }
 
+/** The page's tab layout for one paragraph: where its text starts, its stops and the right edge (twips from the margin). */
+type TabLayout = { x0: number; stops: number[]; defaultTab: number; right: number };
+
+/** One character of a line, or a tab; `end` is where it ends (twips from the left margin) once the line is laid out. */
+type Unit = { ch: string; tab: boolean; marks?: DocMark[]; end: number };
+
+/** A run of whitespace between text: how many of its characters are tabs and how many are spaces. */
+type Gap = { start: number; end: number; tabs: number; spaces: number };
+
+/** A final segment that ends within this distance (twips, 0.75 in) of the right edge was set against the margin. */
+const MARGIN_REACH = 0.75 * 1440;
+
 /**
- * A tab with no right-aligned stop only lines text up in a column, so it becomes spaces, as the PDF importer does for
- * left-aligned columns. Four spaces stand in for a tab: the editor cannot know Word's stop positions.
+ * The tab layout of a paragraph. Its text starts at its list's text indent when it is a list item (the level's indent
+ * is not in the paragraph), else at its left indent. Tab stops are measured from the margin, not from the indent.
  */
-function columnTabs(inline: DocInline[], rightStop: boolean): DocInline[] {
-  if (rightStop) return inline;
-  return mergeText(inline.map((n): DocInline => (n.type === "tab" ? { type: "text", text: "    " } : n)));
+function tabLayoutOf(pp: PProps, ind: number | undefined, stops: number[], ctx: Ctx): TabLayout {
+  const list = listOf(pp, ind, ctx);
+  return {
+    x0: (list?.indentPt ?? pp.indentLeft ?? 0) * TWIPS_PER_PT,
+    stops,
+    defaultTab: ctx.defaultTab,
+    right: ctx.contentTwips - (pp.indentRight ?? 0),
+  };
+}
+
+/** The font a text node is drawn in, from its marks: the importer leaves out marks equal to the editor's defaults. */
+function faceOfMarks(marks: DocMark[] | undefined) {
+  const style = marks?.find((m): m is Extract<DocMark, { type: "textStyle" }> => m.type === "textStyle")?.attrs;
+  const size = style?.fontSize ? parseFloat(style.fontSize) : NaN;
+  return {
+    family: style?.fontFamily ?? DEFAULT_FONT_FAMILY,
+    size: Number.isFinite(size) ? size : DEFAULT_FONT_SIZE_PT,
+    bold: marks?.some((m) => m.type === "bold") ?? false,
+    italic: marks?.some((m) => m.type === "italic") ?? false,
+  };
+}
+
+/**
+ * The next tab stop after x. Word drops the default stops that lie before a custom stop, so a custom stop beyond x
+ * comes first; past the last custom stop the default stops go on.
+ */
+function nextStop(x: number, lay: TabLayout): number {
+  return lay.stops.find((s) => s > x) ?? (Math.floor(x / lay.defaultTab) + 1) * lay.defaultTab;
+}
+
+/** The characters and tabs of a line, each with where it ends: a tab ends at the next stop, a character after its width. */
+function unitsOf(line: DocInline[], lay: TabLayout): Unit[] {
+  const units: Unit[] = [];
+  let x = lay.x0;
+  for (const n of line) {
+    if (n.type === "tab") {
+      x = nextStop(x, lay);
+      units.push({ ch: "", tab: true, end: x });
+    } else if (n.type === "text") {
+      const face = faceOfMarks(n.marks);
+      for (const ch of n.text) {
+        x += textWidthPt(ch, face.family, face.bold, face.italic, face.size) * TWIPS_PER_PT;
+        units.push({ ch, tab: false, marks: n.marks, end: x });
+      }
+    }
+  }
+  return units;
+}
+
+const isSpaceUnit = (u: Unit): boolean => u.tab || u.ch === " ";
+
+/**
+ * The whitespace runs that sit between text (a run at the start of a line is indentation, not a column), in order.
+ * A run after the last text is dropped: nothing follows it.
+ */
+function gapsOf(units: Unit[]): Gap[] {
+  const gaps: Gap[] = [];
+  let run: Gap | undefined;
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (isSpaceUnit(u)) {
+      run ??= { start: i, end: i, tabs: 0, spaces: 0 };
+      run.end = i + 1;
+      if (u.tab) run.tabs++;
+      else run.spaces++;
+    } else {
+      if (run && run.start > 0) gaps.push(run);
+      run = undefined;
+    }
+  }
+  return gaps;
+}
+
+/**
+ * One line (no hard break) with its tabs resolved. The last gap is a column when it is a tab or four or more spaces
+ * (two spaces is a sentence). When the text after that gap ends within MARGIN_REACH of the right edge, the text was
+ * set against the margin: the whole gap becomes one tab, which the editor right-aligns. Any other tab is a column and
+ * becomes four spaces, as a tab with no right-aligned stop always did. Spaces stay as typed.
+ */
+function alignLine(line: DocInline[], lay: TabLayout): DocInline[] {
+  const units = unitsOf(line, lay);
+  const gap = gapsOf(units)
+    .filter((g) => g.tabs > 0 || g.spaces >= 2)
+    .pop();
+  const finalEnd = units.filter((u) => !isSpaceUnit(u)).pop()?.end ?? 0;
+  if (gap && (gap.tabs > 0 || gap.spaces >= 4) && finalEnd >= lay.right - MARGIN_REACH) {
+    return [...toInline(units.slice(0, gap.start)), { type: "tab" }, ...toInline(units.slice(gap.end))];
+  }
+  return toInline(units);
+}
+
+/** Units back to inline content: a tab becomes four spaces, and characters merge into runs with their marks. */
+function toInline(units: Unit[]): DocInline[] {
+  return mergeText(
+    units.map((u): DocInline => {
+      if (u.tab) return { type: "text", text: "    " };
+      return u.marks?.length ? { type: "text", text: u.ch, marks: u.marks } : { type: "text", text: u.ch };
+    }),
+  );
+}
+
+/**
+ * The inline content with its tabs resolved, line by line. A paragraph with a right-aligned stop keeps its tabs: the
+ * editor sends the text after the last one to the margin, as Word does. Otherwise see alignLine. Table rows keep theirs.
+ */
+function resolveTabs(inline: DocInline[], pp: PProps, lay: TabLayout): DocInline[] {
+  if (pp.rightTab) return inline;
+  const out: DocInline[] = [];
+  let line: DocInline[] = [];
+  for (const n of inline) {
+    if (n.type === "hardBreak") {
+      out.push(...alignLine(line, lay), n);
+      line = [];
+    } else {
+      line.push(n);
+    }
+  }
+  out.push(...alignLine(line, lay));
+  return mergeText(out);
 }
 
 /** A list entry or a paragraph, with the list format a numbered list needs (see ListFormat) and its text indent (points). */
@@ -654,8 +834,8 @@ function walkBody(nodes: XNode[], ctx: Ctx, out: ImportEntry[]): void {
   let group: { entry: ImportEntry; key: string } | undefined;
   for (const n of nodes) {
     if (n.tag === "p") {
-      const { inline, pp, ind } = paragraphParts(n, ctx);
-      const entry = entryOf(columnTabs(inline, pp.rightTab === true), pp, ctx, ind);
+      const { inline, pp, ind, stops } = paragraphParts(n, ctx);
+      const entry = entryOf(resolveTabs(inline, pp, tabLayoutOf(pp, ind, stops, ctx)), pp, ctx, ind);
       const key = ruleGroupKey(pp);
       if (key !== undefined && group?.key === key) delete group.entry.node.attrs?.borderBottom;
       group = key === undefined ? undefined : { entry, key };
@@ -767,9 +947,10 @@ function medianIndentPt(values: number[]): number {
 
 /**
  * A .docx as a version 4 document and its page setup. Throws DocxError when the file is not a readable .docx.
- * A tab becomes a tab node only where the paragraph has a right-aligned stop (the "Company ⇥ City" line): the editor
- * sends the text after a tab to the right margin. Other tabs are columns and become spaces. Table rows keep their tabs.
- * The header comes first, the footer last; text boxes sit at their anchoring paragraph.
+ * A tab becomes a tab node where the paragraph has a right-aligned stop, or where its text was set against the right
+ * margin with tabs or spaces (see alignLine): the editor sends the text after a tab to the right margin. Other tabs
+ * are columns and become spaces. Table rows keep their tabs. The header comes first, the footer last; text boxes sit
+ * at their anchoring paragraph.
  */
 export function docxToDoc(data: Uint8Array): { doc: DocJSON; page: PageSetup } {
   let files: Record<string, Uint8Array>;
