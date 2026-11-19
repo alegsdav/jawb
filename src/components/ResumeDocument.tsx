@@ -13,7 +13,7 @@ import { docEquals, normalizeDoc } from "@/lib/doc/model";
 import { docExtensions } from "@/lib/doc/extensions";
 import { resumeDoc, withDoc } from "@/lib/resume";
 import { bulletInfo } from "./docDecorations";
-import { AiHighlights, paragraphPlainText } from "./aiHighlights";
+import { AiHighlights, paragraphPlainText, sameOptions, type HighlightOptions } from "./aiHighlights";
 import { BulletCommentCard } from "./BulletCommentCard";
 import { FormatToolbar } from "./FormatToolbar";
 import { selectionFor, formatAt } from "./editorState";
@@ -208,19 +208,23 @@ export function ResumeDocument({
   const latest = useRef({ onChange, onSelectionChange, onFormatStateChange });
   latest.current = { onChange, onSelectionChange, onFormatStateChange };
 
+  // useEditor re-applies its options (resetting the view's selection to the editor state) whenever an option
+  // is a new object, so the initial content and the editor props are created once.
+  const [initialContent] = useState(() => resumeDoc(value));
+  const [editorProps] = useState(() => ({
+    attributes: { class: "doc-editor", spellcheck: "true", role: "textbox", "aria-multiline": "true", "aria-label": "Resume" },
+    handleDOMEvents: {
+      focus: () => {
+        setSelActive(true);
+        return false;
+      },
+    },
+  }));
   const editor = useEditor({
     immediatelyRender: false,
     extensions: EXTENSIONS,
-    content: resumeDoc(value),
-    editorProps: {
-      attributes: { class: "doc-editor", spellcheck: "true", role: "textbox", "aria-multiline": "true", "aria-label": "Resume" },
-      handleDOMEvents: {
-        focus: () => {
-          setSelActive(true);
-          return false;
-        },
-      },
-    },
+    content: initialContent,
+    editorProps,
     onUpdate: ({ editor: ed, transaction }) => {
       if (transaction.getMeta(EXTERNAL)) return;
       const next = withDoc(valueRef.current, ed.getJSON() as DocJSON);
@@ -258,8 +262,14 @@ export function ResumeDocument({
   }, [value, editor]);
 
   // AI highlights: options change the decorations only, never the document or its history.
+  // Only real changes dispatch: a transaction from a re-render can land between the browser moving the caret
+  // (arrow keys) and ProseMirror reading it, and would put the caret back.
+  const lastHighlights = useRef<HighlightOptions | null>(null);
   useEffect(() => {
-    editor?.commands.setHighlightOptions({ feedback, showHighlights, baseline, showChanges, quiet });
+    const opts: HighlightOptions = { feedback, showHighlights, baseline, showChanges, quiet };
+    if (!editor || (lastHighlights.current && sameOptions(lastHighlights.current, opts))) return;
+    lastHighlights.current = opts;
+    editor.commands.setHighlightOptions(opts);
   }, [editor, feedback, showHighlights, baseline, showChanges, quiet]);
 
   // Selection is cleared by a pointer or focus outside the document, its toolbar and the comment card.

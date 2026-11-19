@@ -263,7 +263,11 @@ export function IconButton({
   children: React.ReactNode;
 }) {
   return (
-    <button type="button" className="icon-btn" aria-label={label} title={label} onClick={onClick} disabled={disabled}>
+    // Pressing the button doesn't take focus from the document, so typing right after Undo goes on in the text.
+    <button
+      type="button" className="icon-btn" aria-label={label} title={label} onClick={onClick} disabled={disabled}
+      onMouseDown={(e) => e.preventDefault()}
+    >
       {children}
     </button>
   );

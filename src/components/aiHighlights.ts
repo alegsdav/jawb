@@ -32,6 +32,13 @@ type HighlightState = { opts: HighlightOptions; decorations: DecorationSet };
 const NO_HIGHLIGHTS: HighlightOptions = { showHighlights: false, showChanges: false, quiet: false };
 const highlightKey = new PluginKey<HighlightState>("aiHighlights");
 
+/** Options that draw the same highlights (the page may pass equal objects that are not the same object). */
+export function sameOptions(a: HighlightOptions, b: HighlightOptions): boolean {
+  return a.showHighlights === b.showHighlights && a.showChanges === b.showChanges && a.quiet === b.quiet
+    && JSON.stringify(a.feedback ?? null) === JSON.stringify(b.feedback ?? null)
+    && JSON.stringify([...(a.baseline ?? [])]) === JSON.stringify([...(b.baseline ?? [])]);
+}
+
 const LEAF_TEXT: Record<string, string> = { tab: "\t", hardBreak: "\n" };
 
 /** A paragraph's text with the same characters as paragraphText in src/lib/doc/model.ts (tab "\t", break "\n"). */
@@ -124,7 +131,10 @@ export const AiHighlights = Extension.create({
     return {
       setHighlightOptions:
         (opts) =>
-        ({ tr }) => {
+        ({ tr, state }) => {
+          // Same options: nothing to change (callers should skip the call: TipTap dispatches the transaction anyway).
+          const cur = highlightKey.getState(state)?.opts;
+          if (cur && sameOptions(cur, opts)) return false;
           tr.setMeta(highlightKey, opts).setMeta("addToHistory", false);
           return true;
         },

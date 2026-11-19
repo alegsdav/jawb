@@ -251,7 +251,8 @@ function layoutTabs(root: HTMLElement): void {
     const wraps = rects.length > 1;
     const afterWidth = rects.length ? after.getBoundingClientRect().width : 0;
     const width = wraps ? MIN_TAB_PX : Math.max(MIN_TAB_PX, contentRight - tabLeft - afterWidth);
-    tab.style.width = `${Math.round(width)}px`;
+    // Rounded down with 1px to spare: a width a fraction too wide would wrap the right part onto its own line.
+    tab.style.width = `${Math.max(MIN_TAB_PX, Math.floor(width) - 1)}px`;
   }
 }
 
