@@ -1,24 +1,34 @@
-// Copies the Carlito font files the app serves from public/fonts (see src/app/fonts.css and src/lib/pdfFonts.ts).
-// Run after upgrading @fontsource/carlito: `node scripts/copy-fonts.mjs`. Nothing runs this automatically.
+// Copies the web font files the app serves from public/fonts (see src/app/fonts.css and src/lib/pdfFonts.ts):
+// Carlito (the Calibri stand-in) and Tinos (the Times New Roman stand-in and serif fallback for LaTeX fonts).
+// Run after upgrading either @fontsource package: `node scripts/copy-fonts.mjs`. Nothing runs this automatically.
 import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const from = join(root, "node_modules/@fontsource/carlito/files");
 const to = join(root, "public/fonts");
 mkdirSync(to, { recursive: true });
 
+// [fontsource package, file prefix in the package, served name prefix in public/fonts]
+const families = [
+  ["carlito", "carlito", "carlito"],
+  ["tinos", "tinos", "tinos"],
+];
+// [fontsource file suffix, served suffix]
 const weights = [
   ["400-normal", "400"],
   ["400-italic", "400-italic"],
   ["700-normal", "700"],
   ["700-italic", "700-italic"],
 ];
-for (const [src, dst] of weights) {
-  for (const ext of ["woff2", "woff"]) {
-    copyFileSync(join(from, `carlito-latin-${src}.${ext}`), join(to, `carlito-${dst}.${ext}`));
+
+for (const [pkg, prefix, served] of families) {
+  const from = join(root, `node_modules/@fontsource/${pkg}/files`);
+  for (const [src, dst] of weights) {
+    for (const ext of ["woff2", "woff"]) {
+      copyFileSync(join(from, `${prefix}-latin-${src}.${ext}`), join(to, `${served}-${dst}.${ext}`));
+    }
   }
+  copyFileSync(join(root, `node_modules/@fontsource/${pkg}/LICENSE`), join(to, `${served}-OFL.txt`));
 }
-copyFileSync(join(root, "node_modules/@fontsource/carlito/LICENSE"), join(to, "carlito-OFL.txt"));
-console.log(`Copied Carlito fonts to ${to}`);
+console.log(`Copied fonts to ${to}`);

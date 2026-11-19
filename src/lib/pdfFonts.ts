@@ -1,5 +1,5 @@
 import { Font } from "@react-pdf/renderer";
-import { isSerifFamily } from "./doc/fonts";
+import { isSansFamily, isSerifFamily } from "./doc/fonts";
 
 /**
  * The PDF resume uses Carlito (the metric-compatible stand-in for Calibri, see src/app/fonts.css) for Calibri and
@@ -41,7 +41,7 @@ type FaceKind = "carlito" | "helvetica" | "times";
 /** Which PDF face a document family maps to (see the file comment). */
 export function pdfFaceKind(family: string | null): FaceKind {
   const name = (family ?? "").trim().toLowerCase();
-  if (name === "arial" || name === "helvetica" || name.includes("sans")) return "helvetica";
+  if (name === "arial" || name === "helvetica" || isSansFamily(name)) return "helvetica";
   if (name && name !== "calibri" && isSerifFamily(name)) return "times";
   return "carlito";
 }

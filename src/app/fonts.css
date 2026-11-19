@@ -35,3 +35,40 @@
   font-style: italic;
   font-display: swap;
 }
+
+/*
+ * Tinos is the open, metric-compatible stand-in for Times New Roman (SIL OFL, see public/fonts/tinos-OFL.txt).
+ * It is the serif fallback in the font stacks of src/lib/doc/fonts.ts, so a LaTeX face (Latin Modern, which
+ * has no web file here) renders as a Times-like serif on every machine rather than as the browser's default.
+ */
+@font-face {
+  font-family: "Tinos";
+  src: url("/fonts/tinos-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tinos";
+  src: url("/fonts/tinos-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tinos";
+  src: url("/fonts/tinos-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tinos";
+  src: url("/fonts/tinos-700-italic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
