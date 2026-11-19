@@ -5,9 +5,10 @@ import {
   mergeBaselines, mergeTailored, planSaveAsMaster, planTailoredRefresh, rebaseJob, removeIds, saveTailoredDocument,
   statusConflictOutcome, tailoredFromRow, writeJobIfUnchanged,
 } from "@/lib/jobSync";
-import { buildDoc, flattenDoc, insertParagraphsAfter, paragraph, removeParagraphs, setParagraphText, type FlatEntry } from "@/lib/doc/model";
+import { buildDoc, flattenDoc, insertParagraphsAfter, paragraph, paragraphText, removeParagraphs, setParagraphText, type FlatEntry } from "@/lib/doc/model";
 import { resumeDoc, withDoc } from "@/lib/resume";
-import { cloneForJob, makeBaseline } from "@/lib/tailor";
+import { cloneForJob } from "@/lib/tailor";
+import type { DocParagraph } from "@/lib/doc/types";
 import type { Analysis, Job, Resume } from "@/lib/types";
 
 // ---------- fixtures: a master resume as a document ----------
@@ -44,6 +45,9 @@ const textOf = (r: Resume, id: string) => flattenDoc(resumeDoc(r)).find((p) => p
 const withText = (r: Resume, id: string, text: string): Resume => withDoc(r, setParagraphText(resumeDoc(r), id, text));
 const withoutIds = (r: Resume, drop: string[]): Resume => withDoc(r, removeParagraphs(resumeDoc(r), drop));
 const insertAfter = (r: Resume, afterId: string, entries: FlatEntry[]): Resume => withDoc(r, insertParagraphsAfter(resumeDoc(r), afterId, entries));
+/** Paragraph `id` replaced by `fn(node)` (same list placement). */
+const mapPara = (r: Resume, id: string, fn: (node: DocParagraph) => DocParagraph): Resume =>
+  withDoc(r, buildDoc(flattenDoc(resumeDoc(r)).map((p) => (p.id === id ? { ...p, node: fn(p.node) } : p))));
 
 const analysis = (over: Partial<Analysis> = {}): Analysis => ({
   fit: "possible",
@@ -367,6 +371,13 @@ describe("planSaveAsMaster", () => {
     expect(ids(applySaveAsMaster(copy, m1, new Set(["beta"])))).toEqual(ids(m1).filter((id) => id !== "beta" && id !== "b1"));
   });
 
+  it("carries a formatting-only change in the copy (its text is unchanged)", () => {
+    const copy = mapPara(copy0(), "a2", (n) => paragraph(paragraphText(n), { attrs: { id: "a2" }, marks: [{ type: "bold" }] }));
+    const plan = planSaveAsMaster(copy, m1);
+    expect(plan.edited).toBe(1);
+    expect(flattenDoc(resumeDoc(plan.merged)).find((p) => p.id === "a2")!.node.content?.[0]).toMatchObject({ marks: [{ type: "bold" }] });
+  });
+
   it("returns the same master object when the copy adds nothing (so updateMaster skips the write)", () => {
     expect(applySaveAsMaster(copy0(), m1, new Set())).toBe(m1);
   });
@@ -443,6 +454,8 @@ describe("baselineAfterMasterSave", () => {
     expect(baselineAfterMasterSave(copy, newMaster)).toHaveProperty("a3");
   });
 });
+
+type Filters = { eq: Record<string, unknown>; is: Record<string, unknown> };
 
 function fakeDb(table: "resumes" | "jobs", row: Record<string, unknown>) {
   let n = 0;
