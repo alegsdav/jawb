@@ -1,40 +1,46 @@
 import { describe, it, expect } from "vitest";
-import type { Node as PMNode } from "prosemirror-model";
-import type { Decoration } from "prosemirror-view";
-import { linesToDoc } from "../src/lib/pmSchema";
-import type { DocLine } from "../src/lib/docLineTypes";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import type { Decoration } from "@tiptap/pm/view";
+import type { DocJSON, DocInline } from "../src/lib/doc/types";
+import { paragraph } from "../src/lib/doc/model";
+import { docFromJSON } from "../src/lib/doc/extensions";
 import type { BulletFeedback } from "../src/lib/analysis";
-import { buildDecorations, bulletInfo, type DecorationOptions } from "../src/components/docDecorations";
+import { RATING, bulletInfo } from "../src/components/docDecorations";
+import {
+  buildHighlights,
+  paragraphPlainText,
+  type HighlightOptions,
+} from "../src/components/aiHighlights";
 
-const base: DecorationOptions = { showHighlights: true, showChanges: false, quiet: false, caretLine: -1 };
+const base: HighlightOptions = { showHighlights: true, showChanges: false, quiet: false };
 
-const lines: DocLine[] = [
-  { kind: "name", text: "Ada Lovelace" }, // 0
-  { kind: "contact", text: "London" }, // 1
-  { kind: "heading", text: "EXPERIENCE", sid: "s1" }, // 2
-  { kind: "entry", text: "Analytical Engines", right: "London", sid: "s1", iid: "i1" }, // 3
-  { kind: "role", text: "Engineer", right: "2020", sid: "s1", iid: "i1" }, // 4
-  { kind: "bullet", text: "Wrote [metric] things", sid: "s1", iid: "i1", bid: "b1" }, // 5
-  { kind: "bullet", text: "Designed the notation", sid: "s1", iid: "i1", bid: "b2" }, // 6
-  { kind: "entry", text: "Ada Co", right: "", sid: "s1", iid: "i2" }, // 7 (empty location)
-  { kind: "text", text: "Languages: Python", sid: "s2", iid: "i3" }, // 8
-];
+/** A paragraph with the given id and inline content (text, or a list of inline nodes). */
+const para = (id: string, content: string | DocInline[]) =>
+  typeof content === "string"
+    ? paragraph(content, { attrs: { id } })
+    : { type: "paragraph" as const, attrs: { id, textAlign: null }, content };
 
-const doc = linesToDoc(lines);
+function docOf(...paras: ReturnType<typeof para>[]): PMNode {
+  const json: DocJSON = { type: "doc", content: paras };
+  return docFromJSON(json);
+}
 
-/** Start position of line `index` in the doc. */
-function lineStart(d: PMNode, index: number): number {
+/** Start position (before the paragraph node) of child `index`. */
+function paraStart(d: PMNode, index: number): number {
   let pos = 0;
   for (let i = 0; i < index; i++) pos += d.child(i).nodeSize;
   return pos;
 }
 
-const cls = (d: Decoration): string | undefined =>
-  (d as unknown as { type: { attrs?: { class?: string } } }).type.attrs?.class;
+type Attrs = { class?: string; "data-change"?: string };
+const attrsOf = (d: Decoration): Attrs => (d as unknown as { type: { attrs?: Attrs } }).type.attrs ?? {};
+const cls = (d: Decoration): string | undefined => attrsOf(d).class;
 const key = (d: Decoration): string | undefined => (d.spec as { key?: string } | undefined)?.key;
+const RATING_TINTS = new Set(Object.values(RATING).map((r) => r.tint));
+const ratingTints = (set: Decoration[]) => set.filter((x) => RATING_TINTS.has(cls(x) ?? ""));
 
-function decos(opts: Partial<DecorationOptions> = {}, d: PMNode = doc): Decoration[] {
-  return buildDecorations(d, { ...base, ...opts }).find();
+function decos(d: PMNode, opts: Partial<HighlightOptions> = {}): Decoration[] {
+  return buildHighlights(d, { ...base, ...opts }).find();
 }
 
 const fb = (rating: BulletFeedback["rating"], over: Partial<BulletFeedback> = {}): BulletFeedback => ({
@@ -45,31 +51,152 @@ const fb = (rating: BulletFeedback["rating"], over: Partial<BulletFeedback> = {}
   ...over,
 });
 
-describe("placeholders for empty parts", () => {
-  it("shown only on the caret line", () => {
-    const off = decos({ caretLine: 3 }).filter((x) => key(x)?.startsWith("ph:"));
-    expect(off).toEqual([]);
+const doc = docOf(
+  para("h1", "Ada Lovelace"),                    // 0
+  para("b1", "Wrote [metric] things"),           // 1
+  para("b2", "Designed the notation"),           // 2
+  para("e1", ""),                                // 3 (empty paragraph)
+);
+
+describe("rating tint and dot", () => {
+  it("a rated paragraph gets the rating tint over its text and a dot at its end", () => {
+    const d = docOf(para("b2", "Designed the notation"));
+    const set = decos(d, { feedback: { b2: fb("weak") } });
+    const from = 1;
+    const to = from + "Designed the notation".length;
+    const tint = set.find((x) => cls(x) === "bg-[#fdecec]");
+    expect([tint?.from, tint?.to]).toEqual([from, to]);
+    const dot = set.find((x) => key(x)?.startsWith("dot:b2:"));
+    expect(dot).toBeDefined();
+    expect([dot!.from, dot!.to]).toEqual([to, to]);
+    expect(key(dot!)).toBe("dot:b2:current:weak:n");
   });
 
-  it("an empty location shows 'Location' on the caret line, and nothing else is a placeholder", () => {
-    const set = decos({ caretLine: 7 }).filter((x) => key(x)?.startsWith("ph:"));
-    expect(set.map(key)).toEqual(["ph:Location"]);
-    expect(set[0].from).toBe(lineStart(doc, 7) + 1 + "Ada Co".length + 1);
+  it("the dot key changes with the rating", () => {
+    const a = decos(doc, { feedback: { b2: fb("weak") } }).find((x) => key(x)?.startsWith("dot:"));
+    const b = decos(doc, { feedback: { b2: fb("strong") } }).find((x) => key(x)?.startsWith("dot:"));
+    expect(key(a!)).not.toBe(key(b!));
   });
 
-  it("empty heading and text lines show their own placeholders, not all caps", () => {
-    const d = linesToDoc([
-      { kind: "heading", text: "", sid: "s" },
-      { kind: "text", text: "", sid: "s", iid: "i" },
+  it("a suggestion is part of the dot key", () => {
+    const set = decos(doc, { feedback: { b2: fb("ok", { suggestion: "better" }) } });
+    expect(set.find((x) => key(x)?.startsWith("dot:"))).toBeDefined();
+    expect(key(set.find((x) => key(x)?.startsWith("dot:"))!)).toBe("dot:b2:current:ok:s");
+  });
+
+  it("nothing when showHighlights is false", () => {
+    const set = decos(doc, { feedback: { b2: fb("weak") }, showHighlights: false });
+    expect(set.filter((x) => cls(x) === "bg-[#fdecec]")).toEqual([]);
+    expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
+  });
+
+  it("nothing for stale feedback", () => {
+    const set = decos(doc, { feedback: { b2: fb("weak", { state: "stale", suggestion: "s" }) } });
+    expect(ratingTints(set)).toEqual([]);
+    expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
+  });
+
+  it("updated feedback keeps the grey dot but no rating tint", () => {
+    const set = decos(doc, { feedback: { b2: fb("strong", { state: "updated" }) } });
+    expect(ratingTints(set)).toEqual([]);
+    expect(key(set.find((x) => key(x)?.startsWith("dot:"))!)).toBe("dot:b2:updated:-:n");
+  });
+
+  it("a paragraph without feedback gets nothing", () => {
+    const set = decos(doc, { feedback: { other: fb("weak") } });
+    expect(ratingTints(set)).toEqual([]);
+    expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
+  });
+});
+
+describe("placeholders", () => {
+  it("each [placeholder] gets a doc-ph mark on its own characters", () => {
+    const from = paraStart(doc, 1) + 1 + "Wrote ".length;
+    const marks = decos(doc).filter((x) => cls(x) === "doc-ph");
+    expect(marks.map((x) => [x.from, x.to])).toEqual([[from, from + "[metric]".length]]);
+  });
+
+  it("a paragraph with a placeholder gets the placeholder tint, which beats the rating tint", () => {
+    const set = decos(doc, { feedback: { b1: fb("weak") } });
+    const start = paraStart(doc, 1);
+    const node = set.find((x) => cls(x) === "bg-[#fff6d6]");
+    expect([node?.from, node?.to]).toEqual([start, start + doc.child(1).nodeSize]);
+    expect(set.filter((x) => cls(x) === "bg-[#fdecec]")).toEqual([]);
+  });
+
+  it("quiet removes the placeholder tint and marks, and the rating tint shows again", () => {
+    const set = decos(doc, { feedback: { b1: fb("weak") }, quiet: true });
+    expect(set.filter((x) => cls(x) === "doc-ph" || cls(x) === "bg-[#fff6d6]")).toEqual([]);
+    expect(set.filter((x) => cls(x) === "bg-[#fdecec]")).toHaveLength(1);
+  });
+
+  it("placeholders in any paragraph count, not only bullets", () => {
+    const d = docOf(para("h", "Skills [tool]"));
+    expect(decos(d).filter((x) => cls(x) === "doc-ph")).toHaveLength(1);
+  });
+});
+
+describe("changed vs master", () => {
+  const baseline = new Map([
+    ["h1", "Ada Lovelace"],
+    ["b1", "old text"],
+    ["b2", "Designed the notation"],
+  ]);
+  const bars = (set: Decoration[]) =>
+    set.filter((x) => cls(x) === "doc-changed").map((x) => attrsOf(x)["data-change"]);
+
+  it("changed paragraphs get the change bar, unchanged ones do not", () => {
+    const set = decos(doc, { baseline, showChanges: true });
+    const changed = set.filter((x) => cls(x) === "doc-changed");
+    expect(changed.map((x) => [x.from, x.to])).toEqual([
+      [paraStart(doc, 1), paraStart(doc, 1) + doc.child(1).nodeSize],
     ]);
-    expect(decos({ caretLine: 0 }, d).filter((x) => key(x)?.startsWith("ph:")).map(key)).toEqual(["ph:Section heading"]);
-    expect(decos({ caretLine: 1 }, d).filter((x) => key(x)?.startsWith("ph:")).map(key)).toEqual(["ph:Type here"]);
   });
 
-  it("an empty bullet shows the accomplishment placeholder on the caret line", () => {
-    const empty = linesToDoc([{ kind: "bullet", text: "", sid: "s", iid: "i", bid: "b" }]);
-    const set = decos({ caretLine: 0 }, empty).filter((x) => key(x)?.startsWith("ph:"));
-    expect(set.map(key)).toEqual(["ph:Accomplishment: verb + what + measurable impact"]);
+  it("nothing when showChanges is off", () => {
+    expect(bars(decos(doc, { baseline, showChanges: false }))).toEqual([]);
+  });
+
+  it("a non-empty paragraph missing from the master is new; an empty one is not", () => {
+    const set = decos(doc, { baseline: new Map(), showChanges: true });
+    expect(bars(set)).toEqual(["new", "new", "new"]); // h1, b1, b2; the empty e1 has no bar
+  });
+
+  it("an empty paragraph with no master counterpart gets no bar", () => {
+    const d = docOf(para("e", ""));
+    expect(bars(decos(d, { baseline: new Map(), showChanges: true }))).toEqual([]);
+  });
+
+  it("a tab compares as \\t against the master text", () => {
+    const tabbed = docOf(
+      para("t", [{ type: "text", text: "Ada" }, { type: "tab" }, { type: "text", text: "London" }]),
+    );
+    expect(bars(decos(tabbed, { baseline: new Map([["t", "Ada\tLondon"]]), showChanges: true }))).toEqual([]);
+    expect(bars(decos(tabbed, { baseline: new Map([["t", "Ada London"]]), showChanges: true }))).toEqual(["changed"]);
+  });
+
+  it("paragraphPlainText maps tabs and hard breaks like paragraphText", () => {
+    const node = docFromJSON({
+      type: "doc",
+      content: [
+        para("x", [
+          { type: "text", text: "a" },
+          { type: "tab" },
+          { type: "text", text: "b" },
+          { type: "hardBreak" },
+          { type: "text", text: "c" },
+        ]),
+      ],
+    }).child(0);
+    expect(paragraphPlainText(node)).toBe("a\tb\nc");
+  });
+});
+
+describe("document is untouched", () => {
+  it("decorations are built without changing the document JSON", () => {
+    const before = JSON.stringify(doc.toJSON());
+    decos(doc, { feedback: { b1: fb("weak"), b2: fb("ok") }, baseline: new Map(), showChanges: true });
+    expect(JSON.stringify(doc.toJSON())).toBe(before);
   });
 });
 
@@ -94,7 +221,7 @@ describe("bulletInfo", () => {
     expect(info.fb).toBeNull();
   });
 
-  it("baseline: new, changed and unchanged bullets", () => {
+  it("baseline: new, changed and unchanged paragraphs", () => {
     const baseline = new Map([["b1", "old"], ["b3", "same"]]);
     const opts = { baseline };
     expect(bulletInfo("b1", "new", opts)).toMatchObject({ original: "old", changed: true, isNew: false });
@@ -112,69 +239,5 @@ describe("bulletInfo", () => {
       { text: "[metric]", start: 6 },
       { text: "[team]", start: 19 },
     ]);
-  });
-});
-
-describe("bullet tint, marks and dot", () => {
-  const bulletStart = lineStart(doc, 5);
-  const bulletEnd = bulletStart + doc.child(5).nodeSize;
-  const tintsOn = (set: Decoration[]) =>
-    set.filter((x) => x.from === bulletStart && x.to === bulletEnd).map(cls);
-
-  it("placeholder tint beats the rating tint", () => {
-    const set = decos({ feedback: { b1: fb("weak") } });
-    expect(tintsOn(set)).toEqual(["bg-[#fff6d6]"]);
-  });
-
-  it("the rating tint shows when there is no placeholder", () => {
-    const set = decos({ feedback: { b2: fb("weak") } });
-    const s = lineStart(doc, 6);
-    expect(set.filter((x) => x.from === s && x.to === s + doc.child(6).nodeSize).map(cls)).toEqual(["bg-[#fdecec]"]);
-  });
-
-  it("quiet removes the placeholder tint and marks, and the rating tint shows again", () => {
-    const set = decos({ feedback: { b1: fb("weak") }, quiet: true });
-    expect(tintsOn(set)).toEqual(["bg-[#fdecec]"]);
-    expect(set.filter((x) => cls(x) === "doc-ph")).toEqual([]);
-  });
-
-  it("placeholder marks cover each [placeholder]", () => {
-    const set = decos({});
-    const marks = set.filter((x) => cls(x) === "doc-ph");
-    expect(marks.map((x) => [x.from, x.to])).toEqual([[bulletStart + 1 + 6, bulletStart + 1 + 6 + 8]]);
-  });
-
-  it("showHighlights false removes the rating tint and the dot", () => {
-    const set = decos({ feedback: { b2: fb("weak") }, showHighlights: false });
-    expect(set.filter((x) => cls(x) === "bg-[#fdecec]")).toEqual([]);
-    expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
-  });
-
-  it("the dot key changes when the rating changes", () => {
-    const a = decos({ feedback: { b2: fb("weak") } }).find((x) => key(x)?.startsWith("dot:"));
-    const b = decos({ feedback: { b2: fb("strong") } }).find((x) => key(x)?.startsWith("dot:"));
-    expect(key(a!)).toBeDefined();
-    expect(key(a!)).not.toBe(key(b!));
-  });
-
-  it("no dot for a stale bullet", () => {
-    const set = decos({ feedback: { b2: fb("weak", { state: "stale" }) } });
-    expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
-  });
-});
-
-describe("change bar", () => {
-  const baseline = new Map([["b1", "old text"], ["b2", "Designed the notation"]]);
-
-  it("shown for changed and new bullets only when showChanges is on", () => {
-    const on = decos({ baseline, showChanges: true }).filter((x) => key(x)?.startsWith("bar:"));
-    expect(on.map(key).sort()).toEqual(["bar:b1:changed"]);
-    const off = decos({ baseline, showChanges: false }).filter((x) => key(x)?.startsWith("bar:"));
-    expect(off).toEqual([]);
-  });
-
-  it("a new bullet gets the 'new' key", () => {
-    const set = decos({ baseline: new Map(), showChanges: true }).filter((x) => key(x)?.startsWith("bar:"));
-    expect(set.map(key).sort()).toEqual(["bar:b1:new", "bar:b2:new"]);
   });
 });
