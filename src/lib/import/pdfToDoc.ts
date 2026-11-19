@@ -703,7 +703,7 @@ function resolveTabs(line: Line, right: number, width: number): Line {
   const endsAtMargin = Math.abs(line.x1 - right) <= MARGIN_TOLERANCE * width;
   const gaps = columnGaps(line.pieces, line.size);
   if (gaps.length > 1 || (gaps.length === 1 && !endsAtMargin)) return columnLine(line, gaps, endsAtMargin);
-  if (gaps.length === 1 && endsAtMargin) return rightPartLine(line, right, width);
+  if (gaps.length === 1 && endsAtMargin) return rightPartLine(line, right);
   return line;
 }
 
@@ -711,7 +711,7 @@ function resolveTabs(line: Line, right: number, width: number): Line {
  * A line with a single right-aligned part: its wide gap becomes the right tab. A gap to text that starts in the left
  * half is left as spaces, as it always was. A tab already in the line is kept.
  */
-function rightPartLine(line: Line, right: number, width: number): Line {
+function rightPartLine(line: Line, right: number): Line {
   const pieces = line.pieces;
   if (pieces.some((p) => p.text === "\t")) return line;
   for (let i = pieces.length - 2; i > 0; i--) {
