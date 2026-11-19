@@ -17,7 +17,9 @@ export type DocMark =
   | { type: "bold" }
   | { type: "italic" }
   | { type: "underline" }
-  | { type: "textStyle"; attrs: { fontSize?: string | null; fontFamily?: string | null } };
+  | { type: "textStyle"; attrs: { fontSize?: string | null; fontFamily?: string | null } }
+  /** A hyperlink. href is always http(s): or mailto: (normalizeDoc drops anything else). */
+  | { type: "link"; attrs: { href: string } };
 
 export type DocText = { type: "text"; text: string; marks?: DocMark[] };
 /**
