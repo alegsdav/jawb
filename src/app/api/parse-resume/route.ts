@@ -39,7 +39,7 @@ export async function POST(req: Request) {
       if (!text.trim()) return NextResponse.json({ error: "Couldn't find any text in that file." }, { status: 422 });
     } else {
       return NextResponse.json(
-        { error: "Upload a PDF or text file. For Word/Google Docs, use File → Download → PDF first." },
+        { error: "Upload a PDF, a Word (.docx) or a text file." },
         { status: 415 },
       );
     }

@@ -5,8 +5,28 @@ import type { Resume } from "@/lib/types";
 import { postApi } from "@/lib/api";
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024; // read in the browser
+const MAX_DOCX_BYTES = 20 * 1024 * 1024; // read in the browser
 const MAX_SERVER_PDF_BYTES = 4 * 1024 * 1024; // the server fallback (its request limit)
 const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const isDocx = (f: File) => f.type === DOCX_TYPE || /\.docx$/i.test(f.name);
+const isOldDoc = (f: File) => /\.doc$/i.test(f.name);
+
+/**
+ * Reads a .docx in the browser (its XML is unzipped here; nothing is uploaded). Resolves to the resume or to an
+ * error message to show.
+ */
+async function readDocxHere(file: File): Promise<{ resume: Resume } | { error: string }> {
+  const { resumeFromDocx } = await import("@/lib/import/resumeFromDocx");
+  const { DocxError } = await import("@/lib/import/docxToDoc");
+  try {
+    return { resume: resumeFromDocx(new Uint8Array(await file.arrayBuffer())) };
+  } catch (e) {
+    if (e instanceof DocxError) return { error: e.message };
+    console.error("Reading the Word file failed.", e);
+    return { error: "Couldn't read that Word file. Save it again as .docx, or export it as PDF." };
+  }
+}
 
 /**
  * Reads a PDF in the browser (pdf.js, loaded on demand). Resolves to the resume, to an error message when the PDF
@@ -40,7 +60,7 @@ export function ResumeImport({
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
-  const [busyKind, setBusyKind] = useState<"pdf" | "text">("pdf");
+  const [busyKind, setBusyKind] = useState<"pdf" | "docx" | "text">("pdf");
 
   // Load pdf.js (and its worker) while the user is still looking, so the first drop is instant.
   useEffect(() => {
@@ -50,8 +70,17 @@ export function ResumeImport({
   async function run(file?: File) {
     if (replaceWarning && !confirm("Replace your current master resume with the imported one? Your facts are kept.")) return;
     setBusy(true);
-    setBusyKind(file && !/\.(txt|md)$/i.test(file.name) ? "pdf" : "text");
+    setBusyKind(file && isDocx(file) ? "docx" : file && !/\.(txt|md)$/i.test(file.name) ? "pdf" : "text");
     setError("");
+    if (file && isOldDoc(file) && !isDocx(file)) {
+      return fail("That's an old Word (.doc) file. Save it as .docx or PDF first.");
+    }
+    if (file && isDocx(file)) {
+      if (file.size > MAX_DOCX_BYTES) return fail("That Word file is over 20 MB.");
+      const local = await readDocxHere(file);
+      if ("resume" in local) return done(local.resume);
+      return fail(local.error);
+    }
     if (file && isPdf(file)) {
       if (file.size > MAX_PDF_BYTES) return fail("That PDF is over 20 MB.");
       const local = await readPdfHere(file);
@@ -109,14 +138,19 @@ export function ResumeImport({
           dragging ? "border-accent bg-accent/5" : "border-border hover:border-fg/40"
         } ${busy ? "pointer-events-none opacity-60" : ""}`}
       >
-        <span className="text-sm font-medium">{busy ? (busyKind === "pdf" ? "Opening your PDF…" : "Laying out your resume…") : "Drop your resume PDF here or tap to choose"}</span>
+        <span className="text-sm font-medium">
+          {busy
+            ? busyKind === "docx" ? "Opening your document…" : busyKind === "pdf" ? "Opening your PDF…" : "Laying out your resume…"
+            : "Drop your resume here (PDF or Word .docx) or tap to choose"}
+        </span>
         <span className="text-xs text-muted">
-          A PDF opens exactly as it is: the same fonts, sizes, bold, lines and spacing, as text you can edit. No AI, no template. Up to 20 MB.
-          From Google Docs: File → Download → PDF. A .txt file is treated as pasted text.
+          A PDF or Word (.docx) file opens exactly as it is: the same fonts, sizes, bold, lines and spacing, as text you can
+          edit. No AI, no template. A .docx is the most accurate. From Google Docs: File → Download → Microsoft Word (.docx)
+          or PDF. Up to 20 MB. A .txt file is treated as pasted text.
         </span>
         <input
           type="file"
-          accept="application/pdf,.pdf,text/plain,.txt"
+          accept={`application/pdf,.pdf,${DOCX_TYPE},.docx,application/msword,.doc,text/plain,.txt`}
           className="sr-only"
           disabled={busy}
           onChange={(e) => {

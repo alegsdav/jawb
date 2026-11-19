@@ -25,8 +25,8 @@ export function Onboarding({ onImported, onBuild }: { onImported: (r: Resume) =>
           <ResumeImport replaceWarning={false} onImported={onImported} mode="text" />
         </section>
         <section className="card p-4 sm:p-5 space-y-3" aria-labelledby="ob-upload">
-          <h3 id="ob-upload" className="font-semibold">Upload a PDF</h3>
-          <p className="text-sm text-muted">Opens exactly as it looks: the fonts, sizes, bold, lines and margins are kept, as text you can edit. No AI, no template.</p>
+          <h3 id="ob-upload" className="font-semibold">Upload a PDF or Word file</h3>
+          <p className="text-sm text-muted">Opens exactly as it looks: the fonts, sizes, bold, lines and margins are kept, as text you can edit. No AI, no template. A Word (.docx) file is the most accurate.</p>
           <ResumeImport replaceWarning={false} onImported={onImported} mode="file" />
         </section>
         <section className="card p-4 sm:p-5 space-y-3 flex flex-col" aria-labelledby="ob-build">
