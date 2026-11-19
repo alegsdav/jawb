@@ -21,18 +21,36 @@ const KIND: Record<PullRemoval["kind"], string> = { bullet: "Bullet", item: "Ent
  * "Your master resume changed" banner on a job's tailored copy: one button for the safe automatic
  * updates (rewordings, name/contact still as they were), and a list of new master content to add and
  * removed master content to remove here too. Nothing is added or deleted without a tap.
+ * When the master was replaced rather than edited (`replaced`), line-by-line pulls would blend two
+ * resumes, so the banner only offers "Reset to master resume" (which confirms first).
  */
 export function PullBanner({
-  plan, onPull, onAdd, onAddAll, onDismissAdditions, onRemoval,
+  plan, replaced, resetBusy, onPull, onAdd, onAddAll, onDismissAdditions, onRemoval, onReset,
 }: {
   plan: PullPlan;
+  replaced: boolean;
+  resetBusy: boolean;
   onPull: () => void;
   onAdd: (a: PullAddition) => void;
   onAddAll: () => void;
   onDismissAdditions: () => void;
   onRemoval: (r: PullRemoval, choice: "remove" | "keep") => void;
+  onReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  if (replaced) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border px-3 py-2 text-[13px]">
+        <span className="flex-1 min-w-48">
+          Your master resume was replaced (for example by a new import). Start this job&apos;s copy from it with Reset to master
+          resume. Your edits for this job will be replaced.
+        </span>
+        <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" disabled={resetBusy} onClick={onReset}>
+          Reset to master resume
+        </button>
+      </div>
+    );
+  }
   if (!hasPullChanges(plan)) return null;
   const { additions, removals } = plan;
   const listed = additions.length + removals.length;

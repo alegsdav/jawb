@@ -4,7 +4,7 @@ import type { DocParagraph, FlatParagraph } from "./doc/types";
 import { buildDoc, flattenDoc, removeParagraphs, setParagraphText } from "./doc/model";
 import { headingPredicate } from "./doc/outline";
 import {
-  MASTER_RETRIES, mergeDocs, mergeResumes, placeInto, sameJson, sameParagraph, type MergeConflict, type MergeResult,
+  isReplacement, MASTER_RETRIES, mergeDocs, mergeResumes, placeInto, sameJson, sameParagraph, type MergeConflict, type MergeResult,
 } from "./master";
 import { normalizeResume, resumeDoc, setOpt, withDoc } from "./resume";
 import { normalizeAnalysis } from "./analysis";
@@ -325,6 +325,17 @@ function baseEntries(copy: Resume, master: Resume): FlatParagraph[] {
 /** The master as the copy saw it when the copy was made (or last pulled): see baseEntries. */
 export function baseFromBaseline(copy: Resume, master: Resume): Resume {
   return withDoc({ ...master }, buildDoc(baseEntries(copy, master)));
+}
+
+/**
+ * Did the master resume get replaced since this copy was made or last pulled (a new import, or a re-import with
+ * different paragraphs), rather than edited? Pulling line by line would then blend the old copy with the new master,
+ * so the page offers "Reset to master resume" instead. Same test as the master page's save guard (isReplacement),
+ * with the master as the copy saw it as the base.
+ */
+export function masterReplacedSince(copy: Resume, master: Resume): boolean {
+  if (!copy.baseline) return false;
+  return isReplacement(baseFromBaseline(copy, master), master);
 }
 
 /**

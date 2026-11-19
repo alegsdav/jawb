@@ -27,7 +27,7 @@ import {
 } from "@/lib/tailor";
 import {
   applySaveAsMaster, baselineAfterMasterSave, carryDrafts, freezesSnapshot, isApplied, jobFromRow, jobPatch, mergeTailored,
-  planSaveAsMaster, planTailoredRefresh, readJob, rebaseJob, saveTailoredDocument, statusConflictOutcome, tailoredFromRow,
+  masterReplacedSince, planSaveAsMaster, planTailoredRefresh, readJob, rebaseJob, saveTailoredDocument, statusConflictOutcome, tailoredFromRow,
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
 import { ResumeDocument } from "@/components/ResumeDocument";
@@ -551,6 +551,7 @@ export default function JobPage() {
   const compareTo = useMemo(() => compareMap(baseline, master), [baseline, master]);
   const changedCount = useMemo(() => (resume && compareTo ? countChangedBullets(resume, compareTo) : 0), [resume, compareTo]);
   const pull = useMemo(() => planPull(resume, master), [resume, master]);
+  const replaced = useMemo(() => !!resume && !!master && masterReplacedSince(resume, master), [resume, master]);
   const placeholderCount = useMemo(() => (resume ? countPlaceholders(resumeTexts(resume)) : 0), [resume]);
   const factTexts = useMemo(() => facts.facts.map((f) => f.text), [facts.facts]);
   const priority = useMemo(() => (resume && !quiet ? priorityItems(resume, feedback) : []), [resume, feedback, quiet]);
@@ -1081,11 +1082,14 @@ export default function JobPage() {
             {resumeBar && !quiet && (
               <PullBanner
                 plan={pull}
+                replaced={replaced}
+                resetBusy={analyzing}
                 onPull={pullFromMaster}
                 onAdd={addOne}
                 onAddAll={addAll}
                 onDismissAdditions={leaveOut}
                 onRemoval={onRemoval}
+                onReset={resetToMaster}
               />
             )}
             {resumeBar && !applied && (

@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   applySaveAsMaster, baseFromBaseline, baselineAfterMasterSave, carryDrafts, freezesSnapshot, isApplied, jobPatch, mergeAnalyses,
+  masterReplacedSince,
   mergeBaselines, mergeTailored, planSaveAsMaster, planTailoredRefresh, rebaseJob, removeIds, saveTailoredDocument,
   statusConflictOutcome, tailoredFromRow, writeJobIfUnchanged,
 } from "@/lib/jobSync";
 import { buildDoc, flattenDoc, insertParagraphsAfter, paragraph, paragraphText, removeParagraphs, setParagraphText, type FlatEntry } from "@/lib/doc/model";
 import { resumeDoc, withDoc } from "@/lib/resume";
-import { cloneForJob } from "@/lib/tailor";
+import { applyPull, cloneForJob, planPull, stripBaseline } from "@/lib/tailor";
 import type { DocParagraph } from "@/lib/doc/types";
 import type { Analysis, Job, Resume } from "@/lib/types";
 
@@ -420,6 +421,65 @@ describe("baseFromBaseline and removeIds", () => {
   it("removeIds drops paragraphs by id, leaving lists that still have items", () => {
     const r = removeIds(master1(), new Set(["beta", "b1", "a2"]));
     expect(ids(r)).toEqual(["ann", "contact", "h-exp", "acme", "acme-sub", "a1", "a3", "h-edu", "uni", "g1"]);
+  });
+});
+
+describe("masterReplacedSince", () => {
+  /** A different resume (new text, new paragraph ids), as a re-import of another file gives. */
+  const otherResume = (): Resume =>
+    resumeOf([
+      L("x-name", "Sam Other"),
+      L("x-contact", "sam@example.org"),
+      L("x-h", "WORK"),
+      L("x-co", "Other Co\tDenver"),
+      B("x1", "Shipped a product"),
+      B("x2", "Managed a team"),
+      L("x-h2", "SCHOOL"),
+      B("x3", "GPA 3.1"),
+    ]);
+
+  it("an ordinary edit to the master is not a replacement, so Pull still offers it", () => {
+    const copy = cloneForJob(master1());
+    const edited = withText(master1(), "a1", "Built a bigger dashboard");
+    expect(masterReplacedSince(copy, edited)).toBe(false);
+    expect(planPull(copy, edited).total).toBe(1);
+    expect(textOf(applyPull(copy, edited).resume, "a1")).toBe("Built a bigger dashboard");
+  });
+
+  it("a few reworded lines in the master are still an edit, not a replacement", () => {
+    const copy = cloneForJob(master1());
+    const edited = withText(withText(withText(master1(), "a1", "One"), "a2", "Two"), "b1", "Three");
+    expect(masterReplacedSince(copy, edited)).toBe(false);
+  });
+
+  it("the same resume re-imported (same text and ids) is not a replacement", () => {
+    expect(masterReplacedSince(cloneForJob(master1()), master1())).toBe(false);
+  });
+
+  it("a different resume (new paragraphs) replaces the master", () => {
+    const copy = withText(cloneForJob(master1()), "a1", "Edited for this job");
+    expect(masterReplacedSince(copy, otherResume())).toBe(true);
+  });
+
+  it("a re-import that reuses the old ids but changes most of the text is a replacement", () => {
+    const reused = resumeOf([
+      L("ann", "Sam Other"),
+      L("contact", "sam@example.org"),
+      L("h-exp", "WORK"),
+      L("acme", "Other Co\tDenver"),
+      B("a1", "Shipped a product"),
+      B("a2", "Managed a team"),
+      L("beta", "Beta\tBoston"),
+      B("b1", "Ran a study"),
+      L("h-edu", "SCHOOL"),
+      L("uni", "State U"),
+      B("g1", "GPA 3.9"),
+    ]);
+    expect(masterReplacedSince(cloneForJob(master1()), reused)).toBe(true);
+  });
+
+  it("a copy with no baseline cannot tell, so it is not treated as replaced", () => {
+    expect(masterReplacedSince(stripBaseline(cloneForJob(master1())), otherResume())).toBe(false);
   });
 });
 
