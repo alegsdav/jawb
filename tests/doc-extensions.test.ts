@@ -114,6 +114,7 @@ describe("docSchema", () => {
 
   it("rejects unknown node types and a listItem directly in the doc", () => {
     expect(isValidDoc({ type: "doc", content: [{ type: "sectionTitle", content: [] }] })).toBe(false);
+    expect(isValidDoc({ type: "doc", content: [{ type: "horizontalRule" }] })).toBe(false);
     expect(
       isValidDoc({ type: "doc", content: [{ type: "listItem", content: [{ type: "paragraph", attrs: para("x1x1x1x1") }] }] }),
     ).toBe(false);
@@ -129,7 +130,7 @@ describe("docSchema", () => {
   it("does not allow the removed StarterKit nodes", () => {
     const names = Object.keys(docSchema.nodes);
     expect(names).toEqual(expect.arrayContaining(["paragraph", "bulletList", "orderedList", "listItem", "tab", "hardBreak"]));
-    for (const gone of ["heading", "blockquote", "codeBlock", "link"]) expect(names).not.toContain(gone);
+    for (const gone of ["heading", "blockquote", "codeBlock", "link", "horizontalRule"]) expect(names).not.toContain(gone);
     expect(docExtensions.length).toBeGreaterThan(0);
   });
 });

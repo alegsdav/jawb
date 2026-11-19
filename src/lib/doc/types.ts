@@ -39,7 +39,10 @@ export type ParagraphAttrs = {
   spaceAfter?: number | null;
   /** Line spacing multiplier (1, 1.15, 1.5, 2). null = 1.15. */
   lineHeight?: number | null;
-  /** A thin full-width line under the paragraph (Docs: paragraph border bottom). */
+  /**
+   * A thin full-width line under the paragraph (Docs: paragraph border bottom). A horizontal line is an empty
+   * paragraph with this set: there is no separate rule node, so every merge and save keeps it.
+   */
   borderBottom?: boolean | null;
 };
 
@@ -48,8 +51,7 @@ export type DocListItem = { type: "listItem"; content: (DocParagraph | DocList)[
 export type DocList =
   | { type: "bulletList"; content: DocListItem[] }
   | { type: "orderedList"; attrs?: { start?: number; type?: string | null }; content: DocListItem[] };
-export type DocHorizontalRule = { type: "horizontalRule" };
-export type DocBlock = DocParagraph | DocList | DocHorizontalRule;
+export type DocBlock = DocParagraph | DocList;
 export type DocJSON = { type: "doc"; content: DocBlock[] };
 
 /** Page setup, in inches. Letter size. Defaults: PAGE_DEFAULTS. */

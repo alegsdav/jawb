@@ -4,7 +4,6 @@
  */
 import type {
   DocBlock,
-  DocHorizontalRule,
   DocInline,
   DocJSON,
   DocList,
@@ -90,17 +89,15 @@ export function paragraphText(p: DocParagraph): string {
 /** Paragraph id, tolerant of data without attrs. */
 const idOfPara = (p: DocParagraph): string => p.attrs?.id ?? "";
 
-/** The document as a sequence: paragraphs (with list info) and horizontal rules, in order. */
-type SeqItem = { kind: "para"; entry: FlatEntry } | { kind: "rule"; node: DocHorizontalRule };
-
-function seqOf(doc: DocJSON): SeqItem[] {
-  const out: SeqItem[] = [];
+/** The document as a sequence of paragraphs (with list info), in order. */
+function seqOf(doc: DocJSON): FlatEntry[] {
+  const out: FlatEntry[] = [];
   const walkList = (list: DocList, depth: number) => {
     for (const li of list.content ?? []) {
       let first = true;
       for (const child of li.content ?? []) {
         if (child.type === "paragraph") {
-          out.push({ kind: "para", entry: { node: child, listType: list.type, depth, bullet: first } });
+          out.push({ node: child, listType: list.type, depth, bullet: first });
           first = false;
         } else if (child.type === "bulletList" || child.type === "orderedList") {
           walkList(child, depth + 1);
@@ -109,9 +106,8 @@ function seqOf(doc: DocJSON): SeqItem[] {
     }
   };
   for (const b of doc.content ?? []) {
-    if (b.type === "paragraph") out.push({ kind: "para", entry: { node: b, listType: null, depth: 0, bullet: false } });
+    if (b.type === "paragraph") out.push({ node: b, listType: null, depth: 0, bullet: false });
     else if (b.type === "bulletList" || b.type === "orderedList") walkList(b, 1);
-    else if (b.type === "horizontalRule") out.push({ kind: "rule", node: b });
   }
   return out;
 }
@@ -119,21 +115,15 @@ function seqOf(doc: DocJSON): SeqItem[] {
 /**
  * Rebuild a document from the sequence. A list entry at depth d goes into the list at level d; a list of another
  * type at that level closes it; bullet:true starts a new list item, bullet:false continues the current one, and a
- * deeper entry nests inside the current item. Any non-list paragraph or rule closes all lists.
+ * deeper entry nests inside the current item. A non-list paragraph closes all lists.
  */
-function buildSeq(seq: SeqItem[]): DocJSON {
+function buildSeq(seq: FlatEntry[]): DocJSON {
   type Level = { list: DocList; item?: DocListItem };
   const content: DocBlock[] = [];
   let stack: Level[] = [];
   const newItem = (): DocListItem => ({ type: "listItem", content: [] });
 
-  for (const s of seq) {
-    if (s.kind === "rule") {
-      stack = [];
-      content.push({ type: "horizontalRule" });
-      continue;
-    }
-    const e = s.entry;
+  for (const e of seq) {
     if (e.listType === null) {
       stack = [];
       content.push({ ...e.node });
@@ -167,12 +157,10 @@ function buildSeq(seq: SeqItem[]): DocJSON {
   return content.length ? { type: "doc", content } : emptyDoc();
 }
 
-/** Paragraphs in document order, including those in nested lists. Horizontal rules are skipped. */
+/** Paragraphs in document order, including those in nested lists. */
 export function flattenDoc(doc: DocJSON): FlatParagraph[] {
   const out: FlatParagraph[] = [];
-  for (const s of seqOf(doc)) {
-    if (s.kind !== "para") continue;
-    const e = s.entry;
+  for (const e of seqOf(doc)) {
     out.push({
       id: idOfPara(e.node),
       node: e.node,
@@ -185,9 +173,9 @@ export function flattenDoc(doc: DocJSON): FlatParagraph[] {
   return out;
 }
 
-/** Inverse of flattenDoc (horizontal rules are not in the entries, so they are not restored). Empty input gives emptyDoc(). */
+/** Inverse of flattenDoc. Empty input gives emptyDoc(). */
 export function buildDoc(entries: FlatEntry[]): DocJSON {
-  return buildSeq(entries.map((entry) => ({ kind: "para" as const, entry })));
+  return buildSeq(entries);
 }
 
 function plainList(list: DocList, depth: number, out: string[]): void {
@@ -265,7 +253,7 @@ const countParagraphs = (doc: DocJSON): number => flattenDoc(doc).length;
 export function removeParagraphs(doc: DocJSON, ids: Iterable<string>): DocJSON {
   const drop = new Set(ids);
   const seq = seqOf(doc);
-  const kept = seq.filter((s) => !(s.kind === "para" && drop.has(idOfPara(s.entry.node))));
+  const kept = seq.filter((e) => !drop.has(idOfPara(e.node)));
   if (kept.length === seq.length) return doc;
   const out = buildSeq(kept);
   return countParagraphs(out) ? out : emptyDoc();
@@ -278,19 +266,19 @@ export function removeParagraphs(doc: DocJSON, ids: Iterable<string>): DocJSON {
 export function insertParagraphsAfter(doc: DocJSON, afterId: string | null, entries: FlatEntry[]): DocJSON {
   if (!entries.length) return doc;
   const seq = seqOf(doc);
-  const used = new Set(seq.flatMap((s) => (s.kind === "para" ? [idOfPara(s.entry.node)] : [])));
-  const fresh = entries.map((e): SeqItem => {
+  const used = new Set(seq.map((e) => idOfPara(e.node)));
+  const fresh = entries.map((e): FlatEntry => {
     let id = e.node.attrs?.id;
     if (!id || used.has(id)) {
       id = newId();
       while (used.has(id)) id = newId();
     }
     used.add(id);
-    return { kind: "para", entry: { ...e, node: { ...e.node, attrs: { ...e.node.attrs, id } } } };
+    return { ...e, node: { ...e.node, attrs: { ...e.node.attrs, id } } };
   });
   let at = 0;
   if (afterId !== null) {
-    const idx = seq.findIndex((s) => s.kind === "para" && idOfPara(s.entry.node) === afterId);
+    const idx = seq.findIndex((e) => idOfPara(e.node) === afterId);
     at = idx < 0 ? seq.length : idx + 1;
   }
   return buildSeq([...seq.slice(0, at), ...fresh, ...seq.slice(at)]);
@@ -379,7 +367,7 @@ function paragraphFromInline(content: DocInline[]): DocParagraph {
 
 function listItemFrom(li: Record<string, unknown>): DocListItem {
   const kids = li.type === "listItem" ? arr(li.content) : [li];
-  let blocks = blocksFrom(kids).filter((b): b is DocParagraph | DocList => b.type !== "horizontalRule");
+  let blocks = blocksFrom(kids);
   // A list item starts with its own paragraph (the line with the bullet).
   if (!blocks.length || blocks[0].type !== "paragraph") blocks = [paragraphFromInline([]), ...blocks];
   return { type: "listItem", content: blocks };
@@ -399,7 +387,8 @@ function blockFrom(n: unknown): DocBlock[] {
   if (!isObj(n)) return [];
   if (n.type === "paragraph") return [paragraphFrom(n)];
   if (n.type === "bulletList" || n.type === "orderedList") return listFrom(n);
-  if (n.type === "horizontalRule") return [{ type: "horizontalRule" }];
+  // A stored horizontal line (older documents) is an empty paragraph with a bottom border.
+  if (n.type === "horizontalRule") return [{ type: "paragraph", attrs: { id: newId(), borderBottom: true } }];
   if (Array.isArray(n.content)) return blocksFrom(n.content);
   // A leaf with text (or nothing): keep the text, drop the rest (images, embeds).
   return typeof n.text === "string" ? [paragraphFromInline(inlineFrom([n]))] : [];

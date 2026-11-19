@@ -318,6 +318,8 @@ export const docExtensions: Extensions = [
     code: false,
     strike: false,
     link: false,
+    // A horizontal line is an empty paragraph with a bottom border (see DocJSON in ./types), not a rule node.
+    horizontalRule: false,
     // Off so the JSON is exactly what the user wrote, not an extra empty paragraph at the end.
     trailingNode: false,
   }),

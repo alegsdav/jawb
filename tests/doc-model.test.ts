@@ -101,11 +101,6 @@ describe("flattenDoc and buildDoc", () => {
     expect(flat[1].text).toBe("First");
   });
 
-  it("skips horizontal rules", () => {
-    const d: DocJSON = { type: "doc", content: [plain("a", "A").node, { type: "horizontalRule" }, plain("b", "B").node] };
-    expect(flattenDoc(d).map((p) => p.id)).toEqual(["a", "b"]);
-  });
-
   it("round-trips nested lists, continuation paragraphs and ordered lists", () => {
     const d = sample();
     expect(docEquals(buildDoc(flattenDoc(d).map(toEntry)), d)).toBe(true);
@@ -213,9 +208,14 @@ describe("removeParagraphs and insertParagraphsAfter", () => {
     expect(d.content.length).toBeGreaterThan(0);
   });
 
-  it("keeps horizontal rules when removing", () => {
-    const d: DocJSON = { type: "doc", content: [plain("a", "A").node, { type: "horizontalRule" }, plain("b", "B").node] };
-    expect(removeParagraphs(d, ["a"]).content.map((b) => b.type)).toEqual(["horizontalRule", "paragraph"]);
+  it("keeps a horizontal line (an empty bordered paragraph) when removing its neighbours", () => {
+    const line = paragraph("", { attrs: { id: "line0001", borderBottom: true } });
+    const d: DocJSON = { type: "doc", content: [plain("a", "A").node, line, plain("b", "B").node] };
+    const out = removeParagraphs(d, ["a"]);
+    expect(flattenDoc(out).map((p) => [p.id, p.text, p.node.attrs.borderBottom ?? false])).toEqual([
+      ["line0001", "", true],
+      ["b", "B", false],
+    ]);
   });
 
   it("inserts a bullet into a list after a bullet", () => {
@@ -316,6 +316,15 @@ describe("normalizeDoc", () => {
     const d = normalizeDoc({ type: "doc", content: [{ type: "paragraph" }, { type: "bulletList", content: [] }, 42] });
     expect(flattenDoc(d)).toHaveLength(1);
     expect(d.content.every((b) => b.type === "paragraph")).toBe(true);
+  });
+
+  it("turns a stored horizontal rule into an empty paragraph with a bottom border", () => {
+    const d = normalizeDoc({ type: "doc", content: [plain("a", "A").node, { type: "horizontalRule" }, plain("b", "B").node] });
+    expect(d.content.map((b) => b.type)).toEqual(["paragraph", "paragraph", "paragraph"]);
+    const [, line] = flattenDoc(d);
+    expect(line.text).toBe("");
+    expect(line.node.attrs.borderBottom).toBe(true);
+    expect(line.id).toBeTruthy();
   });
 
   it("gives every list item a paragraph first and gives ids to paragraphs without one", () => {

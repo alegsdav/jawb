@@ -129,12 +129,26 @@ function commandsFor(editor: Editor): DocCommands {
     adjustSpaceBefore: (delta) => adjust("spaceBefore", delta),
     adjustSpaceAfter: (delta) => adjust("spaceAfter", delta),
     toggleBorderBottom: () => chain().toggleBorderBottom().run(),
-    insertHorizontalRule: () => chain().setHorizontalRule().run(),
+    insertHorizontalRule: () => insertHorizontalLine(editor),
     clearFormatting: () => {
       editor.commands.focus();
       editor.commands.clearFormatting();
     },
   };
+}
+
+/**
+ * Google Docs style horizontal line: an empty paragraph with a bottom border after the caret's block, then an empty
+ * normal paragraph under it with the caret in it, so the user keeps typing below the line.
+ */
+function insertHorizontalLine(editor: Editor) {
+  const at = editor.state.selection.$from.after(1); // after the top-level block (or list) the caret is in
+  editor
+    .chain()
+    .focus()
+    .insertContentAt(at, [{ type: "paragraph", attrs: { borderBottom: true } }, { type: "paragraph" }])
+    .setTextSelection(at + 3) // inside the second paragraph: open + close of the line, then its open token
+    .run();
 }
 
 /**

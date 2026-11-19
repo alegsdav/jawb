@@ -9,7 +9,7 @@
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { buildDoc, newId, normalizeDoc, type FlatEntry } from "@/lib/doc/model";
-import type { DocBlock, DocInline, DocJSON, DocMark, DocParagraph, PageSetup, ParagraphAttrs } from "@/lib/doc/types";
+import type { DocInline, DocJSON, DocMark, DocParagraph, PageSetup, ParagraphAttrs } from "@/lib/doc/types";
 
 export const NO_TEXT_MESSAGE =
   "This PDF has no selectable text (it may be a scan). Export it again as a text PDF, or paste the text.";
@@ -80,8 +80,8 @@ type PageText = { width: number; height: number; lines: Line[]; rules: Rule[] };
 /** A paragraph being assembled from one line (a bullet or plain) and any wrapped lines that continue it. */
 type Para = { bullet: boolean; lines: Line[]; pieces: Piece[]; textX: number; depth: number };
 
-/** Paragraphs and rules in reading order, ready to become document blocks. */
-type Item = { y: number; entry: FlatEntry } | { y: number; rule: true };
+/** Paragraphs and horizontal lines in reading order. A line is an empty paragraph with a bottom border. */
+type Item = { y: number; entry: FlatEntry };
 
 /**
  * The document and page setup of a PDF. Throws NoTextError when the PDF has no text.
@@ -390,14 +390,14 @@ function pageItems(page: PageText): Item[] {
   const paras = paragraphsOf(page.lines, right, right - left);
   assignDepths(paras);
   const borders = new Set<Para>();
-  const ruleItems: Item[] = [];
+  const lineItems: Item[] = [];
   for (const rule of page.rules) {
     if (rule.x1 - rule.x0 < RULE_MIN_WIDTH * (right - left)) continue;
     const above = paras.filter((p) => p.lines[p.lines.length - 1].y < rule.y);
     const near = above[above.length - 1];
     const gap = near ? rule.y - near.lines[near.lines.length - 1].y : Infinity;
     if (near && gap <= 1.5 * near.lines[near.lines.length - 1].size) borders.add(near);
-    else ruleItems.push({ y: rule.y, rule: true });
+    else lineItems.push({ y: rule.y, entry: lineEntry() });
   }
   const items: Item[] = paras.flatMap((para, i) => {
     const node = nodeOf(para, {
@@ -411,7 +411,7 @@ function pageItems(page: PageText): Item[] {
       : { node, listType: null, depth: 0, bullet: false };
     return [{ y: para.lines[0].y, entry }];
   });
-  return [...items, ...ruleItems].sort((a, b) => a.y - b.y);
+  return [...items, ...lineItems].sort((a, b) => a.y - b.y);
 }
 
 function nodeOf(
@@ -458,24 +458,14 @@ function inlineOf(pieces: Piece[]): DocInline[] {
   return out;
 }
 
-/** The document: runs of paragraphs as lists and paragraphs, and each rule block between them. */
+/** A horizontal line drawn on the page: an empty paragraph with a bottom border (the editor's representation). */
+function lineEntry(): FlatEntry {
+  return { node: { type: "paragraph", attrs: { id: newId(), borderBottom: true } }, listType: null, depth: 0, bullet: false };
+}
+
+/** The document from the items in reading order. */
 function docFromItems(items: Item[]): DocJSON {
-  const content: DocBlock[] = [];
-  let run: FlatEntry[] = [];
-  const flush = () => {
-    if (run.length) content.push(...buildDoc(run).content);
-    run = [];
-  };
-  for (const item of items) {
-    if ("rule" in item) {
-      flush();
-      content.push({ type: "horizontalRule" });
-    } else {
-      run.push(item.entry);
-    }
-  }
-  flush();
-  return normalizeDoc({ type: "doc", content });
+  return normalizeDoc(buildDoc(items.map((item) => item.entry)));
 }
 
 // ---- page setup ----
