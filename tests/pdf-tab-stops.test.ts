@@ -46,3 +46,15 @@ describe("PDF tab stops", () => {
     await task.destroy();
   });
 });
+
+describe("DejaVu widths", () => {
+  it("measures DejaVu runs with their own tables, bold wider than regular", async () => {
+    const { textWidthPt } = await import("@/lib/pdfTextWidths");
+    const serif = textWidthPt("Resume", "DejaVu Serif", false, false, 10);
+    const bold = textWidthPt("Resume", "DejaVu Serif", true, false, 10);
+    const sans = textWidthPt("Resume", "DejaVu Sans", false, true, 10);
+    expect(serif).toBeGreaterThan(30);
+    expect(bold).toBeGreaterThan(serif);
+    expect(sans).toBeGreaterThan(0);
+  });
+});

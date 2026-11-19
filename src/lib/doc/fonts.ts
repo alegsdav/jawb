@@ -48,6 +48,10 @@ export function cssFontStack(family: string | null | undefined): string {
     case "garamond":
     case "eb garamond":
       return `Garamond, "EB Garamond", "Times New Roman", serif`;
+    case "dejavu serif":
+      return `"DejaVu Serif", Tinos, "Times New Roman", serif`;
+    case "dejavu sans":
+      return `"DejaVu Sans", Arial, Helvetica, sans-serif`;
     default:
       return texOrGenericStack(name);
   }

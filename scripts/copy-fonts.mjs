@@ -1,6 +1,7 @@
 // Copies the web font files the app serves from public/fonts (see src/app/fonts.css and src/lib/pdfFonts.ts):
-// Carlito (the Calibri stand-in) and Tinos (the Times New Roman stand-in and serif fallback for LaTeX fonts).
-// Run after upgrading either @fontsource package: `node scripts/copy-fonts.mjs`. Nothing runs this automatically.
+// Carlito (the Calibri stand-in), Tinos (the Times New Roman stand-in and serif fallback for LaTeX fonts), and
+// DejaVu Serif and DejaVu Sans (the faces ReportLab-style resumes name, which Windows and Mac lack).
+// Run after upgrading any @fontsource package: `node scripts/copy-fonts.mjs`. Nothing runs this automatically.
 import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,8 @@ mkdirSync(to, { recursive: true });
 const families = [
   ["carlito", "carlito", "carlito"],
   ["tinos", "tinos", "tinos"],
+  ["dejavu-serif", "dejavu-serif", "dejavu-serif"],
+  ["dejavu-sans", "dejavu-sans", "dejavu-sans"],
 ];
 // [fontsource file suffix, served suffix]
 const weights = [

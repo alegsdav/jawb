@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { Font } from "@react-pdf/renderer";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { cssFontStack, isSansFamily, isSerifFamily } from "@/lib/doc/fonts";
-import { pdfFaceKind, pdfFontFor } from "@/lib/pdfFonts";
+import { pdfFaceKind, pdfFontFor, registerPdfFonts } from "@/lib/pdfFonts";
+
+vi.mock("@react-pdf/renderer", () => ({
+  Font: { register: vi.fn(), registerHyphenationCallback: vi.fn() },
+}));
 
 const LATIN_MODERN_SERIF = `"Latin Modern Roman", "LM Roman 10", "CMU Serif", Tinos, "Times New Roman", serif`;
 const LATIN_MODERN_SANS = `"Latin Modern Sans", "LM Sans 10", "CMU Sans Serif", Arial, Helvetica, sans-serif`;
@@ -58,5 +65,52 @@ describe("PDF face for LaTeX families", () => {
     expect(pdfFaceKind("Calibri")).toBe("carlito");
     expect(pdfFaceKind("Verdana")).toBe("carlito");
     expect(pdfFaceKind(null)).toBe("carlito");
+  });
+});
+
+describe("DejaVu families", () => {
+  it("names the DejaVu faces with the Times-like or sans fallbacks after them", () => {
+    expect(cssFontStack("DejaVu Serif")).toBe(`"DejaVu Serif", Tinos, "Times New Roman", serif`);
+    expect(cssFontStack("DejaVu Sans")).toBe(`"DejaVu Sans", Arial, Helvetica, sans-serif`);
+  });
+
+  it("classifies DejaVu Serif as serif and DejaVu Sans as sans", () => {
+    expect(isSerifFamily("DejaVu Serif")).toBe(true);
+    expect(isSansFamily("DejaVu Sans")).toBe(true);
+    expect(isSansFamily("DejaVu Serif")).toBe(false);
+  });
+
+  it("sets DejaVu runs in the registered DejaVu families, not the built-in faces", () => {
+    expect(pdfFaceKind("DejaVu Serif")).toBe("dejavuSerif");
+    expect(pdfFaceKind("DejaVu Sans")).toBe("dejavuSans");
+    expect(pdfFontFor("DejaVu Serif", false, false)).toEqual({ fontFamily: "DejaVu Serif" });
+    expect(pdfFontFor("dejavu serif", true, true)).toEqual({ fontFamily: "DejaVu Serif", fontWeight: 700, fontStyle: "italic" });
+    expect(pdfFontFor("DejaVu Sans", true, false)).toEqual({ fontFamily: "DejaVu Sans", fontWeight: 700 });
+    expect(pdfFontFor("DejaVu Sans", false, true)).toEqual({ fontFamily: "DejaVu Sans", fontStyle: "italic" });
+  });
+});
+
+describe("registerPdfFonts", () => {
+  beforeAll(() => {
+    registerPdfFonts();
+  });
+
+  it("registers Carlito and both DejaVu families with the four woff styles each", () => {
+    const families = vi.mocked(Font.register).mock.calls.map(([arg]) => (arg as { family: string }).family);
+    expect(families.sort()).toEqual(["Carlito", "DejaVu Sans", "DejaVu Serif"]);
+    for (const [arg] of vi.mocked(Font.register).mock.calls) {
+      expect((arg as { fonts: unknown[] }).fonts).toHaveLength(4);
+    }
+  });
+
+  it("points every registered font at a woff file that is served from public/fonts", () => {
+    for (const [arg] of vi.mocked(Font.register).mock.calls) {
+      for (const font of (arg as { fonts: { src: string }[] }).fonts) {
+        expect(font.src.endsWith(".woff")).toBe(true);
+        expect(existsSync(font.src), font.src).toBe(true);
+      }
+    }
+    expect(existsSync(join(process.cwd(), "public/fonts/dejavu-serif-OFL.txt"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "public/fonts/dejavu-sans-OFL.txt"))).toBe(true);
   });
 });

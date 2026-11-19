@@ -3,10 +3,19 @@ import { isSansFamily, isSerifFamily } from "./doc/fonts";
 
 /**
  * The PDF resume uses Carlito (the metric-compatible stand-in for Calibri, see src/app/fonts.css) for Calibri and
- * for unknown sans families, and the built-in PDF Times and Helvetica for the others. @react-pdf/renderer can only
- * use fonts it is given as files, so Carlito is registered here once.
+ * for unknown sans families, DejaVu Serif and DejaVu Sans for the families of those names (imported resumes name
+ * them, and the PDF must match the original's wrapping), and the built-in PDF Times and Helvetica for the others.
+ * @react-pdf/renderer can only use fonts it is given as files (ttf or woff, not woff2), so the web faces are
+ * registered here once.
  */
-const CARLITO = "Carlito";
+type WebFace = "carlito" | "dejavuSerif" | "dejavuSans";
+
+/** The family each web face is registered under, and its file prefix in public/fonts (400, 400-italic, 700, 700-italic). */
+const WEB_FACES: Record<WebFace, { family: string; file: string }> = {
+  carlito: { family: "Carlito", file: "carlito" },
+  dejavuSerif: { family: "DejaVu Serif", file: "dejavu-serif" },
+  dejavuSans: { family: "DejaVu Sans", file: "dejavu-sans" },
+};
 
 let registered = false;
 
@@ -20,15 +29,17 @@ function fontSrc(file: string): string {
 export function registerPdfFonts(): void {
   if (registered) return;
   registered = true;
-  Font.register({
-    family: CARLITO,
-    fonts: [
-      { src: fontSrc("carlito-400.woff"), fontWeight: 400 },
-      { src: fontSrc("carlito-400-italic.woff"), fontWeight: 400, fontStyle: "italic" },
-      { src: fontSrc("carlito-700.woff"), fontWeight: 700 },
-      { src: fontSrc("carlito-700-italic.woff"), fontWeight: 700, fontStyle: "italic" },
-    ],
-  });
+  for (const { family, file } of Object.values(WEB_FACES)) {
+    Font.register({
+      family,
+      fonts: [
+        { src: fontSrc(`${file}-400.woff`), fontWeight: 400 },
+        { src: fontSrc(`${file}-400-italic.woff`), fontWeight: 400, fontStyle: "italic" },
+        { src: fontSrc(`${file}-700.woff`), fontWeight: 700 },
+        { src: fontSrc(`${file}-700-italic.woff`), fontWeight: 700, fontStyle: "italic" },
+      ],
+    });
+  }
   // Never split a word across lines in the PDF (ATS-friendly, and keeps Calibri-like wrapping).
   Font.registerHyphenationCallback((word) => [word]);
 }
@@ -36,17 +47,20 @@ export function registerPdfFonts(): void {
 /** Style props for one run in @react-pdf: a registered family with weight/style, or a built-in face by its name. */
 export type PdfFont = { fontFamily: string; fontWeight?: 700; fontStyle?: "italic" };
 
-type FaceKind = "carlito" | "helvetica" | "times";
+type BuiltInFace = "times" | "helvetica";
+type FaceKind = WebFace | BuiltInFace;
 
-/** Which PDF face a document family maps to (see the file comment). */
+/** Which PDF face a document family maps to (see the file comment). The DejaVu names come first: "DejaVu Sans" is sans. */
 export function pdfFaceKind(family: string | null): FaceKind {
   const name = (family ?? "").trim().toLowerCase();
+  if (name === "dejavu serif") return "dejavuSerif";
+  if (name === "dejavu sans") return "dejavuSans";
   if (name === "arial" || name === "helvetica" || isSansFamily(name)) return "helvetica";
   if (name && name !== "calibri" && isSerifFamily(name)) return "times";
   return "carlito";
 }
 
-const BUILT_IN: Record<Exclude<FaceKind, "carlito">, [regular: string, bold: string, italic: string, boldItalic: string]> = {
+const BUILT_IN: Record<BuiltInFace, [regular: string, bold: string, italic: string, boldItalic: string]> = {
   times: ["Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic"],
   helvetica: ["Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique"],
 };
@@ -54,12 +68,12 @@ const BUILT_IN: Record<Exclude<FaceKind, "carlito">, [regular: string, bold: str
 /** The PDF font for a document family with bold and italic: the style props to spread on a Text. */
 export function pdfFontFor(family: string | null, bold: boolean, italic: boolean): PdfFont {
   const kind = pdfFaceKind(family);
-  if (kind !== "carlito") {
+  if (kind === "times" || kind === "helvetica") {
     const [regular, boldName, italicName, boldItalic] = BUILT_IN[kind];
     return { fontFamily: bold ? (italic ? boldItalic : boldName) : italic ? italicName : regular };
   }
   return {
-    fontFamily: CARLITO,
+    fontFamily: WEB_FACES[kind].family,
     ...(bold ? { fontWeight: 700 as const } : {}),
     ...(italic ? { fontStyle: "italic" as const } : {}),
   };
