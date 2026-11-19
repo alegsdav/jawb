@@ -18,6 +18,14 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Heading1"/>
     <w:rPr><w:sz w:val="24"/></w:rPr></w:style>
   <w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Ruled"><w:name w:val="Ruled"/><w:basedOn w:val="Normal"/>
+    <w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/></w:pBdr></w:pPr></w:style>
+  <w:style w:type="paragraph" w:styleId="NoRule"><w:name w:val="No rule"/><w:basedOn w:val="Ruled"/>
+    <w:pPr><w:pBdr><w:bottom w:val="nil"/></w:pBdr></w:pPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Entry"><w:name w:val="Entry"/><w:basedOn w:val="Normal"/>
+    <w:pPr><w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs></w:pPr></w:style>
+  <w:style w:type="table" w:styleId="RuledTable"><w:name w:val="Ruled table"/>
+    <w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/></w:pBdr></w:pPr></w:style>
 </w:styles>`;
 
 const NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -29,8 +37,21 @@ const NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <w:abstractNum w:abstractNumId="1">
     <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
   </w:abstractNum>
+  <w:abstractNum w:abstractNumId="2">
+    <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1)"/></w:lvl>
+  </w:abstractNum>
+  <w:abstractNum w:abstractNumId="3">
+    <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="upperRoman"/><w:lvlText w:val="%1."/></w:lvl>
+  </w:abstractNum>
+  <w:abstractNum w:abstractNumId="4">
+    <w:lvl w:ilvl="0"><w:start w:val="3"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1."/></w:lvl>
+  </w:abstractNum>
   <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
   <w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>
+  <w:num w:numId="3"><w:abstractNumId w:val="2"/></w:num>
+  <w:num w:numId="4"><w:abstractNumId w:val="3"/></w:num>
+  <w:num w:numId="5"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="3"/></w:lvlOverride></w:num>
+  <w:num w:numId="6"><w:abstractNumId w:val="4"/></w:num>
 </w:numbering>`;
 
 const THEME = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -46,9 +67,19 @@ const RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:ada@example.com" TargetMode="External"/>
   <Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="javascript:alert(1)" TargetMode="External"/>
   <Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://github.com/ada" TargetMode="External"/>
+  <Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+  <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>
+  <Relationship Id="rId10" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header2.xml"/>
 </Relationships>`;
 
-function makeDocx(body: string, opts: { theme?: boolean; styles?: boolean; numbering?: boolean } = {}): Uint8Array {
+/** A section that names the header and footer parts (see RELS): default ones, plus a first-page header with titlePg. */
+const SECT_WITH_PARTS = `<w:sectPr><w:headerReference w:type="default" r:id="rId8"/><w:footerReference w:type="default" r:id="rId9"/>
+  <w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1080" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>`;
+
+function makeDocx(
+  body: string,
+  opts: { theme?: boolean; styles?: boolean; numbering?: boolean; parts?: Record<string, string> } = {},
+): Uint8Array {
   const files: Record<string, Uint8Array> = {
     "[Content_Types].xml": strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>'),
     "word/document.xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W}><w:body>${body}</w:body></w:document>`),
@@ -57,7 +88,33 @@ function makeDocx(body: string, opts: { theme?: boolean; styles?: boolean; numbe
   if (opts.styles !== false) files["word/styles.xml"] = strToU8(STYLES);
   if (opts.numbering !== false) files["word/numbering.xml"] = strToU8(NUMBERING);
   if (opts.theme !== false) files["word/theme/theme1.xml"] = strToU8(THEME);
+  for (const [name, xml] of Object.entries(opts.parts ?? {})) files[name] = strToU8(xml);
   return zipSync(files);
+}
+
+/** A header or footer part with the given body paragraphs. */
+const PART = (root: "hdr" | "ftr", paras: string) =>
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:${root} ${W}>${paras}</w:${root}>`;
+const TEXT_P = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
+/** A PAGE field as Word writes it: begin, instruction, separate, the page number, end. */
+const PAGE_FIELD_RUNS =
+  '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>' +
+  '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>';
+
+/** The text of each top-level block, in order (lists flattened to their paragraphs). */
+function blockTexts(doc: DocJSON): string[] {
+  const out: string[] = [];
+  const walk = (blocks: unknown[]) => {
+    for (const b of blocks as { type: string; content?: unknown[] }[]) {
+      if (b.type === "paragraph") {
+        out.push(((b.content ?? []) as { text?: string }[]).map((n) => n.text ?? "").join(""));
+      } else {
+        walk(b.content ?? []);
+      }
+    }
+  };
+  walk(doc.content);
+  return out;
 }
 
 /** The document with paragraph ids removed, so expectations stay readable. */
@@ -116,12 +173,12 @@ describe("docxToDoc", () => {
           content: [{ type: "text", text: "EDUCATION", marks: [{ type: "bold" }] }],
         },
         {
+          // No right-aligned stop: the tab only lines the text up in a column, so it becomes spaces.
           type: "paragraph",
           attrs: { ...lh, spaceBefore: 6 },
           content: [
             { type: "text", text: "Harvard University", marks: [{ type: "bold" }] },
-            { type: "tab" },
-            { type: "text", text: "Cambridge, MA" },
+            { type: "text", text: "    Cambridge, MA" },
           ],
         },
         // The table row: "Acme & Co" left, a tab, "2020" (the last cell) on the right margin.
@@ -200,9 +257,9 @@ describe("docxToDoc", () => {
     });
   });
 
-  it("joins paragraphs inside a table cell with a line break and skips text boxes", () => {
+  it("joins paragraphs inside a table cell with a line break", () => {
     const body = `
-      <w:p><w:drawing><w:txbxContent><w:p><w:r><w:t>Box text</w:t></w:r></w:p></w:txbxContent></w:drawing><w:r><w:t>Body</w:t></w:r></w:p>
+      <w:p><w:r><w:t>Body</w:t></w:r></w:p>
       <w:tbl><w:tr>
         <w:tc><w:p><w:r><w:t>Line one</w:t></w:r></w:p><w:p><w:r><w:t>Line two</w:t></w:r></w:p></w:tc>
         <w:tc><w:p><w:r><w:t>Right</w:t></w:r></w:p></w:tc>
@@ -242,6 +299,95 @@ describe("docxToDoc", () => {
   });
 });
 
+/** Per top-level paragraph (table rows included): whether a rule is drawn under it. */
+function rules(body: string): boolean[] {
+  const { doc } = docxToDoc(makeDocx(body));
+  return (plain(doc) as { content: { attrs?: { borderBottom?: boolean } }[] }).content.map((p) => p.attrs?.borderBottom === true);
+}
+
+const para = (ppr: string, text = "x") => `<w:p><w:pPr>${ppr}</w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+const RULE = '<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/></w:pBdr>';
+
+describe("paragraph rules", () => {
+  it("reads nil, none and zero-width borders as no rule, also over a rule from the style", () => {
+    const body = [
+      para('<w:pStyle w:val="Ruled"/>'),
+      para('<w:pStyle w:val="Ruled"/><w:pBdr><w:bottom w:val="nil"/></w:pBdr>'),
+      para('<w:pStyle w:val="Ruled"/><w:pBdr><w:bottom w:val="none"/></w:pBdr>'),
+      para('<w:pStyle w:val="Ruled"/><w:pBdr><w:bottom w:val="single" w:sz="0" w:space="1" w:color="auto"/></w:pBdr>'),
+      para('<w:pStyle w:val="NoRule"/>'),
+      para('<w:pBdr><w:bottom w:val="nil"/></w:pBdr>'),
+    ].join("");
+    expect(rules(body)).toEqual([true, false, false, false, false, false]);
+  });
+
+  it("draws one rule under a group of paragraphs with the same border and indent: the last one", () => {
+    const body = [
+      para(RULE),
+      para(RULE),
+      para(RULE),
+      para(RULE + '<w:ind w:left="360"/>'), // another indent: a group of its own
+      para('<w:spacing w:after="0"/>'),
+      para('<w:pStyle w:val="Ruled"/>'),
+      para('<w:pStyle w:val="Ruled"/>'),
+    ].join("");
+    expect(rules(body)).toEqual([false, false, true, true, false, false, true]);
+  });
+
+  it("draws a between border under each paragraph of the group", () => {
+    const between = '<w:pBdr><w:between w:val="single" w:sz="4" w:space="1" w:color="auto"/></w:pBdr>';
+    expect(rules(para(between) + para(between))).toEqual([true, true]);
+  });
+
+  it("never makes a top, side or box border a rule", () => {
+    const body = [
+      para('<w:pBdr><w:top w:val="single" w:sz="6" w:space="1" w:color="auto"/></w:pBdr>'),
+      para(
+        '<w:pBdr><w:top w:val="single" w:sz="6" w:space="1" w:color="auto"/><w:left w:val="single" w:sz="6" w:space="4" w:color="auto"/>' +
+          '<w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/><w:right w:val="single" w:sz="6" w:space="4" w:color="auto"/></w:pBdr>',
+      ),
+      para('<w:pBdr><w:left w:val="single" w:sz="18" w:space="4" w:color="auto"/></w:pBdr>'),
+    ].join("");
+    expect(rules(body)).toEqual([false, false, false]);
+  });
+
+  it("keeps table and cell borders out of paragraph rules, and table styles give no rules", () => {
+    const body = `<w:tbl><w:tblPr><w:tblBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="auto"/></w:tblBorders></w:tblPr>
+      <w:tr>
+        <w:tc><w:tcPr><w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="auto"/></w:tcBorders></w:tcPr>
+          <w:p><w:pPr>${RULE}</w:pPr><w:r><w:t>Cell</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>Right</w:t></w:r></w:p></w:tc>
+      </w:tr></w:tbl>` +
+      para('<w:pStyle w:val="RuledTable"/>') +
+      para(RULE);
+    expect(rules(body)).toEqual([false, false, true]);
+  });
+});
+
+describe("tabs", () => {
+  const firstContent = (body: string) => (plain(docxToDoc(makeDocx(body)).doc) as { content: { content: unknown[] }[] }).content[0].content;
+
+  it("keeps a tab that has a right-aligned stop in the paragraph", () => {
+    const body = `<w:p><w:pPr><w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs></w:pPr><w:r><w:t>Acme</w:t></w:r><w:r><w:tab/><w:t>Austin</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Acme" }, { type: "tab" }, { type: "text", text: "Austin" }]);
+  });
+
+  it("turns a tab with no tab stops into spaces", () => {
+    const body = `<w:p><w:r><w:t>Languages:</w:t></w:r><w:r><w:tab/><w:t>Python, Java</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Languages:    Python, Java" }]);
+  });
+
+  it("turns a tab at a left-aligned stop into spaces", () => {
+    const body = `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="1440"/></w:tabs></w:pPr><w:r><w:t>Skills:</w:t></w:r><w:r><w:tab/><w:t>SQL</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Skills:    SQL" }]);
+  });
+
+  it("keeps a tab when the right-aligned stop is in the paragraph style", () => {
+    const body = `<w:p><w:pPr><w:pStyle w:val="Entry"/></w:pPr><w:r><w:t>Acme</w:t></w:r><w:r><w:tab/><w:t>Austin</w:t></w:r></w:p>`;
+    expect(firstContent(body)).toEqual([{ type: "text", text: "Acme" }, { type: "tab" }, { type: "text", text: "Austin" }]);
+  });
+});
+
 describe("resumeFromDocx", () => {
   it("returns a version 4 resume with the document and page setup", () => {
     const r = resumeFromDocx(makeDocx(SAMPLE));
@@ -267,5 +413,110 @@ describe("docxToDoc limits", () => {
     const deep = "<w:document><w:body>" + "<w:p>".repeat(5000) + "</w:body></w:document>";
     const zip = zipSync({ "word/document.xml": new TextEncoder().encode(deep) });
     expect(() => docxToDoc(zip)).toThrow(/readable Word/);
+  });
+});
+
+describe("numbered list formats", () => {
+  const firstList = (body: string) => (plain(docxToDoc(makeDocx(body)).doc) as { content: { type: string; attrs?: unknown }[] }).content[0];
+  const item = (numId: number, text: string) =>
+    `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+
+  it("maps a lowercase letter level to type a and an uppercase Roman level to type I", () => {
+    expect(firstList(item(3, "a")).attrs).toEqual({ type: "a" });
+    expect(firstList(item(4, "I")).attrs).toEqual({ type: "I" });
+  });
+
+  it("keeps the start of a level, from its own start or from a num's start override", () => {
+    expect(firstList(item(6, "c")).attrs).toEqual({ type: "a", start: 3 });
+    expect(firstList(item(5, "3")).attrs).toEqual({ start: 3 });
+  });
+
+  it("leaves a decimal list from 1 with no list attributes", () => {
+    expect(firstList(item(2, "one")).attrs).toBeUndefined();
+  });
+
+  it("gives each numbered list its own format when a paragraph separates them", () => {
+    const body = item(3, "a") + para("", "between") + item(4, "I");
+    const content = (plain(docxToDoc(makeDocx(body)).doc) as { content: { type: string; attrs?: unknown }[] }).content;
+    expect(content.map((b) => [b.type, b.attrs])).toEqual([
+      ["orderedList", { type: "a" }],
+      ["paragraph", { lineHeight: 1 }],
+      ["orderedList", { type: "I" }],
+    ]);
+  });
+});
+
+describe("text boxes", () => {
+  const box = (text: string) => `<w:txbxContent><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:txbxContent>`;
+
+  it("imports a text box's paragraph once when the run has a Choice and a Fallback", () => {
+    const run =
+      `<w:r><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wps:wsp><wps:txbx>${box("Sidebar")}</wps:txbx></wps:wsp></w:drawing></mc:Choice>` +
+      `<mc:Fallback><w:pict><v:shape><v:textbox>${box("Sidebar")}</v:textbox></v:shape></w:pict></mc:Fallback></mc:AlternateContent></w:r>`;
+    const { doc } = docxToDoc(makeDocx(`<w:p>${run}<w:r><w:t>Anchor</w:t></w:r></w:p>`));
+    expect(blockTexts(doc)).toEqual(["Anchor", "Sidebar"]);
+    expect(plain(doc)).toEqual({
+      type: "doc",
+      content: [
+        { type: "paragraph", attrs: { lineHeight: 1 }, content: [{ type: "text", text: "Anchor" }] },
+        { type: "paragraph", attrs: { lineHeight: 1 }, content: [{ type: "text", text: "Sidebar" }] },
+      ],
+    });
+  });
+
+  it("puts a text box before its anchoring paragraph when that paragraph is empty", () => {
+    const run = `<w:r><w:pict><v:shape><v:textbox>${box("Contact")}</v:textbox></v:shape></w:pict></w:r>`;
+    const { doc } = docxToDoc(makeDocx(`${TEXT_P("Body")}<w:p>${run}</w:p>`));
+    expect(blockTexts(doc)).toEqual(["Body", "Contact", ""]);
+  });
+});
+
+describe("headers and footers", () => {
+  it("imports the default header's paragraphs at the top of the document", () => {
+    const parts = { "word/header1.xml": PART("hdr", TEXT_P("Ada Lovelace")) };
+    const { doc } = docxToDoc(makeDocx(`${TEXT_P("Body")}${SECT_WITH_PARTS}`, { parts }));
+    expect(blockTexts(doc)).toEqual(["Ada Lovelace", "Body"]);
+  });
+
+  it("uses the first-page header when the section has a different first page", () => {
+    const parts = {
+      "word/header1.xml": PART("hdr", TEXT_P("Default header")),
+      "word/header2.xml": PART("hdr", TEXT_P("First page header")),
+    };
+    const sect = SECT_WITH_PARTS.replace("<w:sectPr>", '<w:sectPr><w:titlePg/>').replace('w:type="default" r:id="rId8"', 'w:type="first" r:id="rId10"');
+    const { doc } = docxToDoc(makeDocx(`${TEXT_P("Body")}${sect}`, { parts }));
+    expect(blockTexts(doc)).toEqual(["First page header", "Body"]);
+  });
+
+  it("reads hyperlinks in a header from the header's own relationships", () => {
+    const parts = {
+      "word/header1.xml": PART("hdr", `<w:p><w:hyperlink r:id="rId1"><w:r><w:t>Portfolio</w:t></w:r></w:hyperlink></w:p>`),
+      "word/_rels/header1.xml.rels":
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/ada" TargetMode="External"/></Relationships>',
+    };
+    const { doc } = docxToDoc(makeDocx(`${TEXT_P("Body")}${SECT_WITH_PARTS}`, { parts }));
+    const header = (plain(doc) as { content: { content: { marks?: unknown[] }[] }[] }).content[0];
+    expect(header.content[0].marks).toEqual([{ type: "link", attrs: { href: "https://example.com/ada" } }]);
+  });
+
+  it("ignores a footer whose only text is a page number", () => {
+    const parts = {
+      "word/footer1.xml": PART("ftr", `<w:p><w:pPr><w:jc w:val="center"/></w:pPr>${PAGE_FIELD_RUNS}</w:p>`),
+    };
+    const { doc } = docxToDoc(makeDocx(`${TEXT_P("Body")}${SECT_WITH_PARTS}`, { parts }));
+    expect(blockTexts(doc)).toEqual(["Body"]);
+  });
+
+  it("keeps a footer with text at the end, without its page number", () => {
+    const footer = `<w:p><w:r><w:t>Confidential</w:t></w:r><w:r><w:t xml:space="preserve"> · </w:t></w:r>${PAGE_FIELD_RUNS}</w:p>`;
+    const parts = { "word/footer1.xml": PART("ftr", footer) };
+    const { doc } = docxToDoc(makeDocx(`${TEXT_P("Body")}${SECT_WITH_PARTS}`, { parts }));
+    expect(blockTexts(doc)).toEqual(["Body", "Confidential · "]);
+  });
+
+  it("ignores a header with no text", () => {
+    const parts = { "word/header1.xml": PART("hdr", "<w:p/>") };
+    const { doc } = docxToDoc(makeDocx(`${TEXT_P("Body")}${SECT_WITH_PARTS}`, { parts }));
+    expect(blockTexts(doc)).toEqual(["Body"]);
   });
 });

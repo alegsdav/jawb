@@ -1,10 +1,11 @@
 /**
  * A .docx (Word, or Google Docs / LibreOffice exports) as the resume document. The file is a zip of XML; this reads
- * the parts that carry the look of the page (document, styles, numbering, theme, links) and maps them to the same
- * DocJSON the PDF importer produces. Runs in the browser and in node: no DOMParser, no network, no AI.
+ * the parts that carry the look of the page (document, styles, numbering, theme, links, the header and footer of the
+ * section, and text boxes) and maps them to the same DocJSON the PDF importer produces. Runs in the browser and in
+ * node: no DOMParser, no network, no AI.
  *
- * Deliberately not read: headers and footers, comments, footnotes and endnotes, images, text boxes and shapes (their
- * text is skipped and the import says so in the docs), deleted tracked changes, and fields other than hyperlinks.
+ * Deliberately not read: page numbers (the editor draws its own), comments, footnotes and endnotes, images, shapes
+ * without text, deleted tracked changes, and fields other than hyperlinks.
  */
 import { unzipSync, strFromU8 } from "fflate";
 import { newId, normalizeDoc, normalizeHref, buildDoc, type FlatEntry } from "@/lib/doc/model";
@@ -14,6 +15,7 @@ import {
   PAGE_DEFAULTS,
   type DocInline,
   type DocJSON,
+  type DocList,
   type DocMark,
   type DocParagraph,
   type PageSetup,
@@ -102,6 +104,13 @@ type PProps = {
   after?: number;
   line?: number;
   borderBottom?: boolean;
+  /** Identity of the bottom rule (style, width, space, colour): Word groups paragraphs that share it. */
+  border?: string;
+  borderBetween?: boolean;
+  indentLeft?: number;
+  indentRight?: number;
+  /** A right or end tab stop applies, so a tab in the paragraph goes to the margin. */
+  rightTab?: boolean;
   numId?: string;
   ilvl?: number;
 };
@@ -152,6 +161,32 @@ const ALIGN: Record<string, PProps["align"]> = {
   justify: "justify",
 };
 
+/** A border Word draws: not nil or none, and not zero width (w:sz="0" draws nothing). */
+function drawnBorder(el: XNode | undefined): boolean {
+  if (!el) return false;
+  const val = attr(el, "val") ?? "none";
+  return !["nil", "none"].includes(val) && num(attr(el, "sz")) !== 0;
+}
+
+const borderId = (el: XNode): string => ["val", "sz", "space", "color", "themeColor"].map((k) => attr(el, k) ?? "").join("|");
+
+/**
+ * The paragraph borders that become a rule under the paragraph: the bottom border, unless a side border is drawn too
+ * (a box or a bracket is not a rule), and a "between" border, which Word draws between the paragraphs of a group.
+ * An element that draws nothing sets the rule off, so it overrides a rule inherited from a style.
+ */
+function readBorders(bdr: XNode | undefined, p: PProps): void {
+  const bottom = kid(bdr, "bottom");
+  const between = kid(bdr, "between");
+  if (!bottom && !between) return;
+  const sides = drawnBorder(kid(bdr, "left")) || drawnBorder(kid(bdr, "right"));
+  const bottomRule = drawnBorder(bottom) && !sides;
+  const betweenOn = drawnBorder(between);
+  p.borderBottom = bottomRule || betweenOn;
+  if (bottom && bottomRule) p.border = borderId(bottom);
+  if (betweenOn) p.borderBetween = true;
+}
+
 function readPPr(el: XNode | undefined): PProps {
   const p: PProps = {};
   if (!el) return p;
@@ -166,8 +201,15 @@ function readPPr(el: XNode | undefined): PProps {
     if (after !== undefined) p.after = after / 20;
     if (line !== undefined && (attr(sp, "lineRule") ?? "auto") === "auto") p.line = line / 240;
   }
-  const bdr = kid(el, "pBdr");
-  if (bdr && kid(bdr, "bottom")) p.borderBottom = attr(kid(bdr, "bottom"), "val") !== "none";
+  const ind = kid(el, "ind");
+  if (ind) {
+    const left = num(attr(ind, "left") ?? attr(ind, "start"));
+    const right = num(attr(ind, "right") ?? attr(ind, "end"));
+    if (left !== undefined) p.indentLeft = left;
+    if (right !== undefined) p.indentRight = right;
+  }
+  readBorders(kid(el, "pBdr"), p);
+  if (kidsOf(kid(el, "tabs"), "tab").some((t) => ["right", "end"].includes(attr(t, "val") ?? ""))) p.rightTab = true;
   const numPr = kid(el, "numPr");
   if (numPr) {
     const numId = attr(kid(numPr, "numId"), "val");
@@ -180,6 +222,9 @@ function readPPr(el: XNode | undefined): PProps {
 
 // ---- Package context ----
 
+/** The list format a paragraph's list needs beyond bullet or number: the HTML type ("a", "I", ...) and the start. */
+type ListFormat = { type?: string; start?: number };
+
 type Ctx = {
   theme: Theme;
   docR: RProps;
@@ -188,10 +233,14 @@ type Ctx = {
   defaultPara?: string;
   /** numId -> abstractNumId */
   nums: Map<string, string>;
-  /** abstractNumId -> ilvl -> numFmt */
-  levels: Map<string, Map<number, string>>;
+  /** numId:ilvl -> start, from a num's level override */
+  starts: Map<string, number>;
+  /** abstractNumId -> ilvl -> the level's number format and start */
+  levels: Map<string, Map<number, { fmt: string; start?: number }>>;
   /** Relationship id -> external target (hyperlinks). */
   rels: Map<string, string>;
+  /** Relationship id -> package path of a header or footer part of the document. */
+  parts: Map<string, string>;
 };
 
 /** Limits on what a .docx may inflate to (a long resume's document.xml is well under 1 MB). */
@@ -207,9 +256,35 @@ const KEEP = new Set([
   "word/theme/theme1.xml",
   "word/_rels/document.xml.rels",
 ]);
+/** Header and footer parts, and their relationships (hyperlinks in a header). */
+const PART_KEPT = /^word\/(?:_rels\/)?(?:header|footer)\d+\.xml(?:\.rels)?$/;
+
+/** The parsed part at a package path, or undefined when the file is not there. */
+function partOf(files: Record<string, Uint8Array>, name: string): XNode | undefined {
+  return files[name] ? parseXml(strFromU8(files[name])).kids[0] : undefined;
+}
+
+type Rels = { links: Map<string, string>; parts: Map<string, string> };
+
+/**
+ * The relationships of a part: external links by id, and the header and footer parts by id (as package paths).
+ * `base` is the folder the part lives in, which the relative targets of its relationships are read from.
+ */
+function readRels(el: XNode | undefined, base: string): Rels {
+  const links = new Map<string, string>();
+  const parts = new Map<string, string>();
+  for (const r of kidsOf(el, "Relationship")) {
+    const id = attr(r, "Id");
+    const target = attr(r, "Target");
+    if (!id || !target) continue;
+    if (attr(r, "TargetMode") === "External") links.set(id, target);
+    else if (/\/(header|footer)$/.test(attr(r, "Type") ?? "")) parts.set(id, target.startsWith("/") ? target.slice(1) : `${base}${target}`);
+  }
+  return { links, parts };
+}
 
 function readContext(files: Record<string, Uint8Array>): { ctx: Ctx; body: XNode } {
-  const part = (name: string): XNode | undefined => (files[name] ? parseXml(strFromU8(files[name])).kids[0] : undefined);
+  const part = (name: string) => partOf(files, name);
   const docEl = part("word/document.xml");
   const body = kid(docEl, "body");
   if (!body) throw new DocxError("That file isn't a Word document.");
@@ -225,39 +300,41 @@ function readContext(files: Record<string, Uint8Array>): { ctx: Ctx; body: XNode
   for (const s of kidsOf(stylesEl, "style")) {
     const id = attr(s, "styleId");
     if (!id) continue;
-    if (attr(s, "type") === "paragraph" && ["1", "true", "on"].includes(attr(s, "default") ?? "")) defaultPara = id;
+    const isParagraph = attr(s, "type") === "paragraph";
+    if (isParagraph && ["1", "true", "on"].includes(attr(s, "default") ?? "")) defaultPara = id;
     styles.set(id, {
       basedOn: attr(kid(s, "basedOn"), "val"),
-      p: readPPr(kid(s, "pPr")),
+      // Table and character styles carry no paragraph rules or tab stops for the paragraphs that use them.
+      p: isParagraph ? readPPr(kid(s, "pPr")) : {},
       r: readRPr(kid(s, "rPr"), theme),
     });
   }
 
   const numberingEl = part("word/numbering.xml");
   const nums = new Map<string, string>();
-  const levels = new Map<string, Map<number, string>>();
+  const starts = new Map<string, number>();
+  const levels = new Map<string, Map<number, { fmt: string; start?: number }>>();
   for (const a of kidsOf(numberingEl, "abstractNum")) {
     const abs = attr(a, "abstractNumId") ?? "";
-    const byLevel = new Map<number, string>();
+    const byLevel = new Map<number, { fmt: string; start?: number }>();
     for (const lvl of kidsOf(a, "lvl")) {
       const ilvl = num(attr(lvl, "ilvl")) ?? 0;
-      byLevel.set(ilvl, attr(kid(lvl, "numFmt"), "val") ?? "decimal");
+      byLevel.set(ilvl, { fmt: attr(kid(lvl, "numFmt"), "val") ?? "decimal", start: num(attr(kid(lvl, "start"), "val")) });
     }
     levels.set(abs, byLevel);
   }
   for (const n of kidsOf(numberingEl, "num")) {
     const id = attr(n, "numId");
     const abs = attr(kid(n, "abstractNumId"), "val");
-    if (id && abs !== undefined) nums.set(id, abs);
+    if (!id || abs === undefined) continue;
+    nums.set(id, abs);
+    for (const o of kidsOf(n, "lvlOverride")) {
+      const start = num(attr(kid(o, "startOverride"), "val"));
+      if (start !== undefined) starts.set(`${id}:${num(attr(o, "ilvl")) ?? 0}`, start);
+    }
   }
 
-  const rels = new Map<string, string>();
-  for (const r of kidsOf(part("word/_rels/document.xml.rels"), "Relationship")) {
-    const id = attr(r, "Id");
-    const target = attr(r, "Target");
-    if (id && target && attr(r, "TargetMode") === "External") rels.set(id, target);
-  }
-
+  const rels = readRels(part("word/_rels/document.xml.rels"), "word/");
   const ctx: Ctx = {
     theme,
     docR: readRPr(kid(kid(defaults, "rPrDefault"), "rPr"), theme),
@@ -265,8 +342,10 @@ function readContext(files: Record<string, Uint8Array>): { ctx: Ctx; body: XNode
     styles,
     defaultPara,
     nums,
+    starts,
     levels,
-    rels,
+    rels: rels.links,
+    parts: rels.parts,
   };
   return { ctx, body };
 }
@@ -345,17 +424,42 @@ function runInline(run: XNode, rp: RProps, href: string | undefined): DocInline[
   return out;
 }
 
+/** A complex field (w:fldChar begin ... end) open at some point of a paragraph. */
+type OpenField = { instr: string; sep: boolean; page: boolean };
+const PAGE_FIELD = /^\s*(PAGE|NUMPAGES)\b/i;
+
+/**
+ * Follows the field characters of a run. A page-number field's result is what Word fills in for each page, so its
+ * runs are left out of the paragraph: the editor has no page number to show there.
+ */
+function trackFields(run: XNode, fields: OpenField[]): void {
+  for (const c of run.kids) {
+    if (c.tag === "fldChar") {
+      const type = attr(c, "fldCharType");
+      if (type === "begin") fields.push({ instr: "", sep: false, page: false });
+      else if (type === "separate" && fields.length) {
+        const top = fields[fields.length - 1];
+        top.sep = true;
+        top.page = PAGE_FIELD.test(top.instr);
+      } else if (type === "end") fields.pop();
+    } else if (c.tag === "instrText" && fields.length && !fields[fields.length - 1].sep) {
+      fields[fields.length - 1].instr += c.text;
+    }
+  }
+}
+
 /** Runs of a paragraph (and its hyperlinks, insertions and content controls), in order. */
-function collectRuns(node: XNode, base: RProps, href: string | undefined, ctx: Ctx, out: DocInline[]): void {
+function collectRuns(node: XNode, base: RProps, href: string | undefined, ctx: Ctx, out: DocInline[], fields: OpenField[] = []): void {
   for (const k of node.kids) {
     switch (k.tag) {
       case "r":
-        out.push(...runInline(k, merged(base, styleRunProps(k, ctx), readRPr(kid(k, "rPr"), ctx.theme)), href));
+        trackFields(k, fields);
+        if (!fields.some((f) => f.page)) out.push(...runInline(k, merged(base, styleRunProps(k, ctx), readRPr(kid(k, "rPr"), ctx.theme)), href));
         break;
       case "hyperlink": {
         const target = ctx.rels.get(attr(k, "id") ?? "");
         const link = target ? normalizeHref(target) ?? undefined : undefined;
-        collectRuns(k, base, link ?? href, ctx, out);
+        collectRuns(k, base, link ?? href, ctx, out, fields);
         break;
       }
       case "ins":
@@ -363,19 +467,34 @@ function collectRuns(node: XNode, base: RProps, href: string | undefined, ctx: C
       case "sdt":
       case "sdtContent":
       case "customXml":
-        collectRuns(k, base, href, ctx, out);
+        collectRuns(k, base, href, ctx, out, fields);
         break;
       default:
-        // pPr, bookmarks, deleted text, drawings and text boxes, fields: no text of the page.
+        // pPr, bookmarks, deleted text, drawings and text boxes (see textBoxesIn), other fields: not the page's text.
         break;
     }
   }
 }
 
-/** The character style a run names (w:rStyle), as run properties. */
+/** The style a run names (w:rStyle), as run properties. */
 function styleRunProps(run: XNode, ctx: Ctx): RProps {
   const id = attr(kid(kid(run, "rPr"), "rStyle"), "val");
   return merged(...styleChain(id, ctx).map((s) => s.r));
+}
+
+/**
+ * The text boxes a paragraph anchors, in order. A text box is in a run's drawing or shape, and an mc:AlternateContent
+ * holds the same box twice: its Choice is read, its Fallback only when there is no Choice, so no text comes in twice.
+ */
+function textBoxesIn(node: XNode, out: XNode[] = []): XNode[] {
+  for (const k of node.kids) {
+    if (k.tag === "txbxContent") out.push(k);
+    else if (k.tag === "AlternateContent") {
+      const pick = kid(k, "Choice") ?? kid(k, "Fallback");
+      if (pick) textBoxesIn(pick, out);
+    } else if (k.tag !== "pPr") textBoxesIn(k, out);
+  }
+  return out;
 }
 
 function mergeText(nodes: DocInline[]): DocInline[] {
@@ -415,14 +534,39 @@ function paragraphAttrs(pp: PProps): ParagraphAttrs {
   return attrs;
 }
 
-/** The list a paragraph belongs to (bullet or numbered, by the numbering level's format), or null. */
-function listOf(pp: PProps, ctx: Ctx): { listType: "bulletList" | "orderedList"; depth: number } | null {
+/** The HTML list type of a numbered level ("a", "A", "i", "I"; decimal is the default and has none) and its start. */
+const ORDERED_TYPES = new Map([
+  ["lowerLetter", "a"],
+  ["upperLetter", "A"],
+  ["lowerRoman", "i"],
+  ["upperRoman", "I"],
+]);
+
+/** The format of a numbered level, leaving out what the default (decimal, from 1) already says. */
+function orderedFormat(fmt: string, start: number | undefined): ListFormat {
+  const format: ListFormat = {};
+  const type = ORDERED_TYPES.get(fmt);
+  if (type) format.type = type;
+  if (start !== undefined && Number.isInteger(start) && start > 1) format.start = start;
+  return format;
+}
+
+/**
+ * The list a paragraph belongs to (bullet or numbered, by the numbering level's format), with the format a numbered
+ * list needs, or null when the paragraph is not in a list.
+ */
+function listOf(pp: PProps, ctx: Ctx): { listType: "bulletList" | "orderedList"; depth: number; format: ListFormat } | null {
   if (!pp.numId || pp.numId === "0") return null;
   const ilvl = pp.ilvl ?? 0;
   const abs = ctx.nums.get(pp.numId);
-  const fmt = abs !== undefined ? ctx.levels.get(abs)?.get(ilvl) : undefined;
-  const ordered = fmt !== undefined && fmt !== "bullet" && fmt !== "none";
-  return { listType: ordered ? "orderedList" : "bulletList", depth: clamp(ilvl + 1, 1, 9) };
+  const level = abs !== undefined ? ctx.levels.get(abs)?.get(ilvl) : undefined;
+  const ordered = level !== undefined && level.fmt !== "bullet" && level.fmt !== "none";
+  const start = ctx.starts.get(`${pp.numId}:${ilvl}`) ?? level?.start;
+  return {
+    listType: ordered ? "orderedList" : "bulletList",
+    depth: clamp(ilvl + 1, 1, 9),
+    format: ordered ? orderedFormat(level.fmt, start) : {},
+  };
 }
 
 /** Every paragraph in a table cell, including paragraphs of nested tables and content controls. */
@@ -464,31 +608,90 @@ function rowParts(tr: XNode, ctx: Ctx): Parts | null {
   return { inline: mergeText(inline), pp };
 }
 
-function walkBody(nodes: XNode[], ctx: Ctx, out: FlatEntry[]): void {
+/**
+ * The key Word groups paragraphs by: paragraphs with the same rule and the same left and right indent form one
+ * bordered group. Undefined when the paragraph has no rule to group (none, or a between border, which stays on each).
+ */
+function ruleGroupKey(pp: PProps): string | undefined {
+  if (!pp.borderBottom || !pp.border || pp.borderBetween) return undefined;
+  return `${pp.border}|${pp.indentLeft ?? 0}|${pp.indentRight ?? 0}`;
+}
+
+/**
+ * A tab with no right-aligned stop only lines text up in a column, so it becomes spaces, as the PDF importer does for
+ * left-aligned columns. Four spaces stand in for a tab: the editor cannot know Word's stop positions.
+ */
+function columnTabs(inline: DocInline[], rightStop: boolean): DocInline[] {
+  if (rightStop) return inline;
+  return mergeText(inline.map((n): DocInline => (n.type === "tab" ? { type: "text", text: "    " } : n)));
+}
+
+/** A list entry or a paragraph, with the list format a numbered list needs (see ListFormat). */
+type ImportEntry = FlatEntry & { format?: ListFormat };
+
+function walkBody(nodes: XNode[], ctx: Ctx, out: ImportEntry[]): void {
+  // The last paragraph of the open bordered group, whose rule is the only one Word draws for the group.
+  let group: { entry: ImportEntry; key: string } | undefined;
   for (const n of nodes) {
     if (n.tag === "p") {
       const { inline, pp } = paragraphParts(n, ctx);
-      out.push(entryOf(inline, pp, ctx));
+      const entry = entryOf(columnTabs(inline, pp.rightTab === true), pp, ctx);
+      const key = ruleGroupKey(pp);
+      if (key !== undefined && group?.key === key) delete group.entry.node.attrs?.borderBottom;
+      group = key === undefined ? undefined : { entry, key };
+      const boxes = textBoxEntries(n, ctx);
+      // A text box sits at its anchor: its text follows the anchoring paragraph, or comes before it when that is empty.
+      if (inline.length) out.push(entry, ...boxes);
+      else out.push(...boxes, entry);
     } else if (n.tag === "tbl") {
+      group = undefined;
       for (const tr of kidsOf(n, "tr")) {
         const row = rowParts(tr, ctx);
-        // Table rows are never list items, even when their first cell is a list paragraph.
-        if (row) out.push(entryOf(row.inline, { ...row.pp, numId: undefined }, ctx));
+        // Table rows are never list items, and a border of a cell is not a rule under the whole row.
+        if (row) out.push(entryOf(row.inline, { ...row.pp, numId: undefined, borderBottom: undefined }, ctx));
       }
     } else if (n.tag === "sdt" || n.tag === "sdtContent" || n.tag === "customXml") {
+      group = undefined;
       walkBody(n.kids, ctx, out);
     }
   }
 }
 
-function entryOf(inline: DocInline[], pp: PProps, ctx: Ctx): FlatEntry {
+/** The paragraphs of the text boxes a paragraph anchors, read as body content. */
+function textBoxEntries(p: XNode, ctx: Ctx): ImportEntry[] {
+  const out: ImportEntry[] = [];
+  for (const box of textBoxesIn(p)) walkBody(box.kids, ctx, out);
+  return out;
+}
+
+function entryOf(inline: DocInline[], pp: PProps, ctx: Ctx): ImportEntry {
   const node: DocParagraph = inline.length
     ? { type: "paragraph", attrs: paragraphAttrs(pp), content: inline }
     : { type: "paragraph", attrs: paragraphAttrs(pp) };
   const list = listOf(pp, ctx);
   return list
-    ? { node, listType: list.listType, depth: list.depth, bullet: true }
+    ? { node, listType: list.listType, depth: list.depth, bullet: true, format: list.format }
     : { node, listType: null, depth: 0, bullet: false };
+}
+
+/**
+ * The paragraphs of the section's header or footer: the first-page part when the section has a different first page
+ * (w:titlePg), else the default part. A part with no text gives nothing. A footer whose only text is a page number
+ * is dropped as well, since the editor draws its own page numbers.
+ */
+function sectionEntries(kind: "header" | "footer", sect: XNode | undefined, ctx: Ctx, files: Record<string, Uint8Array>): ImportEntry[] {
+  const type = onOff(kid(sect, "titlePg")) ? "first" : "default";
+  const ref = kidsOf(sect, `${kind}Reference`).find((r) => attr(r, "type") === type);
+  const target = ref ? ctx.parts.get(attr(ref, "id") ?? "") : undefined;
+  const el = target ? partOf(files, target) : undefined;
+  if (!target || !el) return [];
+  const slash = target.lastIndexOf("/");
+  const relsName = `${target.slice(0, slash + 1)}_rels/${target.slice(slash + 1)}.rels`;
+  const partCtx: Ctx = { ...ctx, rels: readRels(partOf(files, relsName), "").links };
+  const out: ImportEntry[] = [];
+  walkBody(el.kids, partCtx, out);
+  const hasText = out.some((e) => e.node.content?.some((n) => n.type === "text" && n.text.trim() !== ""));
+  return hasText ? out : [];
 }
 
 /** Page margins from the body's last section, in inches (Word stores twips: 1440 per inch). */
@@ -507,9 +710,38 @@ function pageOf(body: XNode): PageSetup {
 }
 
 /**
+ * Sets the type and start of each numbered list. buildDoc does not carry them, so a list takes the format of the
+ * first paragraph it holds at its own level (the paragraph of its first item that is not inside a nested list).
+ */
+function applyListFormats(doc: DocJSON, entries: ImportEntry[]): void {
+  const formats = new Map<string, ListFormat>();
+  for (const e of entries) {
+    if (e.format && Object.keys(e.format).length) formats.set(e.node.attrs.id, e.format);
+  }
+  const firstOwnId = (list: DocList): string | undefined => {
+    for (const item of list.content) {
+      for (const child of item.content) if (child.type === "paragraph") return child.attrs.id;
+    }
+    return undefined;
+  };
+  const visit = (list: DocList): void => {
+    if (list.type === "orderedList") {
+      const id = firstOwnId(list);
+      const format = id !== undefined ? formats.get(id) : undefined;
+      if (format) list.attrs = { ...format };
+    }
+    for (const item of list.content) {
+      for (const child of item.content) if (child.type !== "paragraph") visit(child);
+    }
+  };
+  for (const b of doc.content) if (b.type !== "paragraph") visit(b);
+}
+
+/**
  * A .docx as a version 4 document and its page setup. Throws DocxError when the file is not a readable .docx.
- * Every w:tab becomes a tab node: the editor shows a tab as the space to the next stop, so a right-aligned stop
- * (the usual "Company ⇥ City" row) lands the text on the right margin.
+ * A tab becomes a tab node only where the paragraph has a right-aligned stop (the "Company ⇥ City" line): the editor
+ * sends the text after a tab to the right margin. Other tabs are columns and become spaces. Table rows keep their tabs.
+ * The header comes first, the footer last; text boxes sit at their anchoring paragraph.
  */
 export function docxToDoc(data: Uint8Array): { doc: DocJSON; page: PageSetup } {
   let files: Record<string, Uint8Array>;
@@ -517,7 +749,7 @@ export function docxToDoc(data: Uint8Array): { doc: DocJSON; page: PageSetup } {
     let unpacked = 0;
     files = unzipSync(data, {
       filter: (f) => {
-        if (!KEEP.has(f.name)) return false;
+        if (!KEEP.has(f.name) && !PART_KEPT.test(f.name)) return false;
         // Sizes come from the zip header, before inflating: refuse a "zip bomb" instead of filling memory.
         unpacked += f.originalSize;
         if (f.originalSize > MAX_PART_BYTES || unpacked > MAX_UNPACKED_BYTES) throw new DocxError(TOO_BIG);
@@ -529,7 +761,11 @@ export function docxToDoc(data: Uint8Array): { doc: DocJSON; page: PageSetup } {
     throw new DocxError("That file isn't a readable Word (.docx) document.");
   }
   const { ctx, body } = readContext(files);
-  const entries: FlatEntry[] = [];
+  const sect = kid(body, "sectPr");
+  const entries: ImportEntry[] = sectionEntries("header", sect, ctx, files);
   walkBody(body.kids, ctx, entries);
-  return { doc: normalizeDoc(buildDoc(entries)), page: pageOf(body) };
+  entries.push(...sectionEntries("footer", sect, ctx, files));
+  const doc = normalizeDoc(buildDoc(entries));
+  applyListFormats(doc, entries);
+  return { doc, page: pageOf(body) };
 }
