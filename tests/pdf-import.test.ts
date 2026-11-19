@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { flattenDoc, paragraphText } from "@/lib/doc/model";
 import { isValidDoc } from "@/lib/doc/extensions";
-import type { DocJSON, DocMark, DocParagraph } from "@/lib/doc/types";
+import type { DocJSON, DocMark, DocParagraph, DocText } from "@/lib/doc/types";
 import { NO_TEXT_MESSAGE, NoTextError, fontInfo, pdfToDoc } from "@/lib/import/pdfToDoc";
 import { PAD_SIDES, PAD_TOP_BOTTOM, harvardPdf, helveticaPdf, imageOnlyPdf, ruledPdf } from "./import-fixtures";
 
@@ -16,7 +16,7 @@ function paraNamed(doc: DocJSON, prefix: string): DocParagraph {
 }
 
 const marksOfText = (p: DocParagraph, text: string): DocMark[] =>
-  (p.content ?? []).find((n) => n.type === "text" && n.text === text && n.marks)?.marks ?? [];
+  (p.content ?? []).find((n): n is DocText => n.type === "text" && n.text === text)?.marks ?? [];
 
 const hasMark = (marks: DocMark[], type: "bold" | "italic") => marks.some((m) => m.type === type);
 const textStyle = (marks: DocMark[]) => marks.find((m) => m.type === "textStyle")?.attrs ?? {};

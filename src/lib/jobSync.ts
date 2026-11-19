@@ -328,8 +328,10 @@ export function baseFromBaseline(copy: Resume, master: Resume): Resume {
 }
 
 /**
- * Runs of consecutive master paragraphs in `ids`, one removal each. Their kind comes from the master's outline: a
- * heading is a section, a plain line starts an entry, a list line is a bullet. `where` is the heading above the run.
+ * Runs of consecutive master paragraphs in `ids`, one removal each. A run starts at a line or heading and takes the
+ * list lines right after it (an entry and its bullets); a section run takes everything removed after its heading.
+ * Kind comes from the master's outline: a heading is a section, a plain line starts an entry, a list line is a bullet.
+ * `where` is the heading above the run.
  */
 function masterRemovals(masterParas: FlatParagraph[], ids: Set<string>): MasterRemoval[] {
   const out: MasterRemoval[] = [];
@@ -339,16 +341,17 @@ function masterRemovals(masterParas: FlatParagraph[], ids: Set<string>): MasterR
   for (const p of masterParas) {
     if (isHeading(p)) section = p.text.trim();
     const removed = ids.has(p.id);
-    if (removed && prevRemoved && run) {
-      run.ids.push(p.id);
+    const continues = run !== undefined && (run.kind === "section" || p.listType !== null);
+    if (removed && prevRemoved && continues) {
+      run!.ids.push(p.id);
     } else if (removed) {
       const kind = isHeading(p) ? "section" : p.listType === null ? "item" : "bullet";
-      const fallback = `Untitled ${kind}`;
+      const text = p.text.replace(/\t+/g, " — ").trim();
       run = {
         kind,
         id: p.id,
         ids: [p.id],
-        label: shortLabel(p.text.trim()) || fallback,
+        label: shortLabel(text) || `Untitled ${kind}`,
         where: kind === "section" ? "" : section,
       };
       out.push(run);

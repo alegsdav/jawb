@@ -1,43 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { flattenDoc } from "@/lib/doc/model";
+import { NO_TEXT_MESSAGE } from "@/lib/import/pdfToDoc";
+import { harvardPdf, imageOnlyPdf } from "./import-fixtures";
 
-const h = vi.hoisted(() => ({
-  reply: null as unknown,
-  prompts: [] as string[],
-}));
+const h = vi.hoisted(() => ({ gemini: vi.fn() }));
 
 vi.mock("@/lib/supabase/server", () => ({
   requireUser: async () => ({ supabase: {}, user: { id: "u1" } }),
 }));
-vi.mock("@/lib/gemini", () => ({
-  geminiJSON: async (prompt: string) => ((h.prompts.push(prompt)), h.reply),
-}));
-vi.mock("@/lib/aiBudget", () => ({
-  withAiBudget: async (_supabase: unknown, _opts: unknown, fn: (meter: { add: () => void }) => unknown) => fn({ add() {} }),
-  budgetErrorResponse: () => null,
-}));
+vi.mock("@/lib/gemini", () => ({ geminiJSON: h.gemini }));
 
 import { POST } from "@/app/api/parse-resume/route";
-
-/** What the AI returns: the v2 field layout (title = organization, subtitle = role). */
-const aiResume = {
-  header: { name: "Ada Lovelace", contact: "ada@example.com" },
-  sections: [
-    {
-      id: "s1",
-      title: "Experience",
-      items: [
-        {
-          id: "i1",
-          title: "Acme",
-          subtitle: "Engineer",
-          location: "Boston",
-          dates: "2025",
-          bullets: [{ id: "b1", text: "Built a dashboard" }],
-        },
-      ],
-    },
-  ],
-};
 
 const textRequest = (text: string) =>
   new Request("http://localhost/api/parse-resume", {
@@ -46,44 +19,78 @@ const textRequest = (text: string) =>
     body: JSON.stringify({ text }),
   });
 
-const fileRequest = (name: string, type: string, body: string) => {
+const fileRequest = (name: string, type: string, body: BlobPart) => {
   const form = new FormData();
   form.append("file", new File([body], name, { type }));
   return new Request("http://localhost/api/parse-resume", { method: "POST", body: form });
 };
 
-describe("POST /api/parse-resume: template only for text imports", () => {
+describe("POST /api/parse-resume: the import keeps the document as it is", () => {
   beforeEach(() => {
-    h.reply = structuredClone(aiResume);
-    h.prompts.length = 0;
+    h.gemini.mockReset();
   });
 
-  it("pasted text gets the Harvard template as explicit formatting", async () => {
-    const res = await POST(textRequest("Ada Lovelace\nAcme, Engineer"));
+  it("a PDF becomes a version 4 resume: its document, its page setup and the sections derived from it", async () => {
+    const res = await POST(fileRequest("cv.pdf", "application/pdf", new Uint8Array(await harvardPdf())));
     expect(res.status).toBe(200);
     const { resume } = await res.json();
-    expect(resume.version).toBe(3);
-    expect(resume.header.marks.name).toEqual([{ from: 0, to: "Ada Lovelace".length, bold: true, size: 16 }]);
-    expect(resume.header.para.name).toEqual({ align: "center" });
-    expect(resume.sections[0].para).toEqual({ rule: true, caps: true, spaceBefore: 6 });
+    expect(resume.version).toBe(4);
+    expect(resume.doc.type).toBe("doc");
+    expect(flattenDoc(resume.doc)[0].text).toBe("Ada Lovelace");
+    expect(resume.page.marginLeft).toBeCloseTo(0.6, 1);
+    expect(resume.header.name).toBe("Ada Lovelace");
+    expect(resume.sections.map((s: { title: string }) => s.title)).toEqual(
+      expect.arrayContaining(["EDUCATION", "EXPERIENCE"]),
+    );
+    expect(h.gemini).not.toHaveBeenCalled();
   });
 
-  it("a .txt upload gets the template too", async () => {
+  it("pasted text becomes a version 4 resume with the text as its paragraphs", async () => {
+    const res = await POST(textRequest("Ada Lovelace\nAcme\t Boston\n• Built a dashboard"));
+    expect(res.status).toBe(200);
+    const { resume } = await res.json();
+    expect(resume.version).toBe(4);
+    expect(flattenDoc(resume.doc).map((p: { text: string }) => p.text)).toEqual([
+      "Ada Lovelace",
+      "Acme\t Boston",
+      "Built a dashboard",
+    ]);
+    expect(resume.page).toBeUndefined();
+    expect(h.gemini).not.toHaveBeenCalled();
+  });
+
+  it("a .txt upload is imported the same way as pasted text", async () => {
     const res = await POST(fileRequest("cv.txt", "text/plain", "Ada Lovelace"));
     expect(res.status).toBe(200);
     const { resume } = await res.json();
-    expect(resume.header.marks.name).toEqual([{ from: 0, to: "Ada Lovelace".length, bold: true, size: 16 }]);
+    expect(flattenDoc(resume.doc)[0].text).toBe("Ada Lovelace");
   });
 
-  it("an uploaded PDF gets no formatting, and keeps the fields as the AI returned them", async () => {
-    const res = await POST(fileRequest("cv.pdf", "application/pdf", "%PDF-1.4"));
-    expect(res.status).toBe(200);
-    const { resume } = await res.json();
-    expect(resume.version).toBe(3);
-    expect(JSON.stringify(resume)).not.toMatch(/"(marks|para|styles?)"/);
-    expect(resume.header).toEqual({ name: "Ada Lovelace", contact: "ada@example.com" });
-    // v2 layout kept: the organization is the title, the role the subtitle (no swap).
-    expect(resume.sections[0].items[0]).toMatchObject({ title: "Acme", subtitle: "Engineer" });
-    expect(h.prompts).toHaveLength(1);
+  it("a PDF with no text (a scan) is refused with the export hint", async () => {
+    const res = await POST(fileRequest("scan.pdf", "application/pdf", new Uint8Array(await imageOnlyPdf())));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe(NO_TEXT_MESSAGE);
+  });
+
+  it("a file that is not a PDF is refused without a server error", async () => {
+    const res = await POST(fileRequest("cv.pdf", "application/pdf", "%PDF-1.4 garbage"));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBeTruthy();
+  });
+
+  it("a text file with only spaces has no text to import", async () => {
+    const res = await POST(fileRequest("blank.txt", "text/plain", "   \n  "));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("Couldn't find any text in that file.");
+  });
+
+  it("other file types are refused", async () => {
+    const res = await POST(fileRequest("cv.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "x"));
+    expect(res.status).toBe(415);
+  });
+
+  it("empty pasted text is refused", async () => {
+    const res = await POST(textRequest("   "));
+    expect(res.status).toBe(400);
   });
 });

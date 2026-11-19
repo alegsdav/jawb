@@ -91,7 +91,6 @@ export async function pdfToDoc(data: Uint8Array): Promise<{ doc: DocJSON; page: 
   const task = pdfjs.getDocument({
     data,
     useWorkerFetch: false,
-    isEvalSupported: false,
     disableFontFace: true,
     verbosity: pdfjs.VerbosityLevel.ERRORS,
   });
