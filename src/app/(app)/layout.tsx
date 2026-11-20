@@ -3,7 +3,9 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { NavLinks } from "@/components/NavLinks";
+import { cookies } from "next/headers";
 import { Sidebar } from "@/components/Sidebar";
+import { SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { Logo } from "@/components/icons";
 import { signOut } from "../login/actions";
 
@@ -12,11 +14,12 @@ import { signOut } from "../login/actions";
  * <main> is one white inset panel that scrolls on its own (the window itself never scrolls). Below lg:
  * a slim header and the bottom tab bar, with main as plain full-width white.
  */
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  const collapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === "1";
   return (
     <div className="min-h-dvh lg:flex lg:h-dvh lg:overflow-hidden">
       <aside className="hidden lg:block lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh">
-        <Sidebar />
+        <Sidebar initialCollapsed={collapsed} />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col pb-16 lg:pb-0">
         <header className="lg:hidden border-b border-border bg-surface sticky top-0 z-20">

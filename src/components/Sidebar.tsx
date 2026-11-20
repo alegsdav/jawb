@@ -7,11 +7,11 @@ import { createClient } from "@/lib/supabase/client";
 import { signOut } from "@/app/login/actions";
 import { STATUSES, type JobStatus } from "@/lib/types";
 import { NAV_JOB_COLS, navJob, recentJobs, searchJobs, type NavJob } from "@/lib/jobNav";
+import { SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { UsageMeter } from "./UsageMeter";
 import { DocIcon, HomeIcon, LineIcon, Logo, LogoutIcon, PlusIcon, SearchIcon, SidebarIcon, UserIcon } from "./icons";
 
 const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label])) as Record<JobStatus, string>;
-const COLLAPSED_KEY = "jawb.sidebarCollapsed";
 
 /** One row of the sidebar: 28px tall, 13px text, muted until it is the current page. */
 const ROW = "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-[13px] leading-none";
@@ -22,20 +22,15 @@ const ICON = "h-[15px] w-[15px] shrink-0";
 const RAIL_CTRL = "flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg";
 const RAIL_ACTIVE = "bg-fg/[0.05] text-fg";
 
-/** Read the saved state; storage can be blocked or missing, so failure just means expanded. */
-function readCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
+/**
+ * Save the choice in a cookie (a year), so the server renders the sidebar at the right width from the
+ * first paint: no flash of the expanded sidebar on reload. Blocked cookies just mean it lasts this page view.
+ */
 function saveCollapsed(collapsed: boolean) {
   try {
-    window.localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
+    document.cookie = `${SIDEBAR_COOKIE}=${collapsed ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`;
   } catch {
-    /* private window or blocked storage: the choice just lasts this page view */
+    /* blocked cookies */
   }
 }
 
@@ -112,22 +107,17 @@ function JobBadge({ j, active }: { j: NavJob; active: boolean }) {
 /**
  * Desktop (lg and up) navigation, drawn on the grey window chrome: Dashboard, the master resume and
  * Add job; a search and the recent (or matching) jobs; then the usage meter (only when running low),
- * Account and Sign out. It collapses to a 56px icon rail (remembered in localStorage).
+ * Account and Sign out. It collapses to a 56px icon rail (remembered in a cookie the layout reads, so reloads don't flash).
  * Phones and tablets keep the header and bottom tab bar instead.
  */
-export function Sidebar() {
+export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boolean }) {
   const supabase = useMemo(() => createClient(), []);
   const path = usePathname();
   const [jobs, setJobs] = useState<NavJob[]>([]);
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const searchRef = useRef<HTMLInputElement>(null);
   const focusSearchOnOpen = useRef(false);
-
-  // Read the saved choice once mounted (the server render is always expanded).
-  useEffect(() => {
-    setCollapsed(readCollapsed());
-  }, []);
 
   const setCollapsedAndSave = (next: boolean) => {
     setCollapsed(next);
