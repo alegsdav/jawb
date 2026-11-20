@@ -108,6 +108,11 @@ export const BriefcaseIcon = ({ className }: P) => (
   <svg {...base} className={className}><rect x="3.5" y="7" width="17" height="12" rx="2.5" /><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" /></svg>
 );
 
+/** A panel with a column line on the left: toggles the desktop sidebar. */
+export const SidebarIcon = ({ className }: P) => (
+  <svg {...base} className={className}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M9.5 4.5v15" /></svg>
+);
+
 /** The app mark: a small black glyph next to the wordmark, as in the reference. */
 export function Logo({ size = 26 }: { size?: number }) {
   return (

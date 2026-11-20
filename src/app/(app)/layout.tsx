@@ -15,7 +15,7 @@ import { signOut } from "../login/actions";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-dvh lg:flex lg:h-dvh lg:overflow-hidden">
-      <aside className="hidden lg:block lg:w-[232px] lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh">
+      <aside className="hidden lg:block lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh">
         <Sidebar />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col pb-16 lg:pb-0">
