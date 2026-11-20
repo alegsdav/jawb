@@ -19,7 +19,7 @@ import { OutcomeStats } from "@/components/OutcomeStats";
 import { deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
-import { StatStrip } from "@/components/dashboard/Overview";
+import { Greeting, StatStrip } from "@/components/dashboard/Overview";
 import { CompanyMark } from "@/components/CompanyMark";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
@@ -358,7 +358,7 @@ export default function TrackerPage() {
   return (
     <div className="space-y-6 px-4 sm:px-6 lg:px-10 py-5 sm:py-6">
       {migrationBanner}
-      <h1 className="sr-only">Dashboard</h1>
+      <Greeting />
       {!noJobs && <StatStrip jobs={jobs} attention={due.length + closing.length} />}
       <NeedsAttention followUps={due} closing={closing} today={today} onFollowedUp={followedUp} />
 
