@@ -10,7 +10,40 @@ Hard rules:
   Any other number is replaced with a placeholder automatically.
 - Keep bullets to one line where possible (~25 words max), starting with a strong past-tense verb (present tense only for current roles).
 - Be honest and specific. A weak bullet should be called weak.
-- Tailoring means rewording, reordering and emphasizing what is already there. Never suggest adding a section the resume doesn't have.`;
+- Tailoring means rewording, reordering and emphasizing what is already there. Never suggest adding content or sections the resume doesn't have.`;
+
+/**
+ * Applied on top of the job match in analyzePrompt. Sales-document advice for student resumes.
+ * Its first line makes the number-honesty rules win any conflict.
+ */
+const REVIEW_RUBRIC = `
+Resume review rubric (apply it on top of the job match; the number-honesty rules above win any conflict with it):
+1. Section order sends signals (student resumes):
+- Education goes at the top: recruiters look for the graduation date and current-student status first.
+- Technical Skills goes near the bottom: it mainly helps ATS keyword matching and doesn't prove depth.
+- Leadership and extracurriculars matter: they show soft skills and teamwork.
+- If the order is off, add a gap (severity "medium", or "low" if only minor).
+- If there is no leadership or activities section, add a "low" gap phrased as "if you have any…". This is the ONE exception
+  to the "never suggest adding content or sections" rule above. It never invents content.
+2. Less experience, more impact. A resume is a sales document, not a timeline.
+- Prefer fewer roles with strong, specific bullets.
+- If an entry is weak and irrelevant to this job, a gap's fix may say to cut or condense it so stronger entries get the space.
+3. Outcomes, not responsibilities.
+- Rate a bullet "weak" when it describes duties or teamwork without a result ("Collaborated with engineers, designers, and PMs").
+- Rewrites use Google's XYZ formula: "Accomplished X as measured by Y, by doing Z". Result first, then the measure, then how.
+4. Specific, not fluffy.
+- Vague metrics ("improved productivity by 20%") rate "ok" at best.
+- The note says what is unclear: what was measured, how, and what changed.
+- The question asks for the concrete definition.
+5. Questions help the student find what matters for this role: how success was measured, what changed because of their work,
+   and scale (users, revenue, time saved). They are still subject to the never-invent rules.`;
+
+/** Shared by the coaching and builder prompts: what a strong bullet is made of. */
+const BULLET_CRAFT = `BULLET CRAFT:
+- Outcomes over duties: say what changed because of the student's work, not just what they were responsible for.
+- XYZ shape: "Accomplished X as measured by Y, by doing Z". Lead with the result, then the measure, then how.
+- Specific over vague: name what was measured and what changed. Any number the student didn't give is left as the blank
+  this prompt specifies, never estimated.`;
 
 /** Master-resume facts as a bulleted list for prompts ("" when there are none). */
 export function formatFacts(facts: string[] | undefined): string {
@@ -51,6 +84,7 @@ CANDIDATE'S ANSWERS TO YOUR EARLIER QUESTIONS (true; may be empty):
 ${args.answers || "(none)"}
 """
 ${RULES}
+${REVIEW_RUBRIC}
 
 Return ONLY JSON with exactly this shape:
 {
@@ -189,6 +223,8 @@ ${c.job ? `\nJOB POSTING:\n"""\n${c.job.slice(0, 8000)}\n"""\n` : ""}${RULES}
 export function coachExamplesPrompt(c: CoachContext & { round: number }) {
   return `${coachHeader(c, `Show the student up to 3 example bullets for ${c.bullet ? "the selected bullet" : "this entry"}, so they can see what a strong version looks like.`)}
 
+${BULLET_CRAFT}
+
 How to write the examples:
 - Build each example only from what the entry, the selected bullet and the facts say the student did. Same employer,
   same tools, same kind of work. You may suggest a stronger verb, clearer scope, and WHERE a result or metric would go.
@@ -236,6 +272,8 @@ ${RULES}
 - Every number you keep must appear in that experience's own answer, with the same unit; any other number becomes a
   placeholder automatically.
 - Start each bullet with a strong past-tense verb (present tense if it's ongoing). One line each.
+
+${BULLET_CRAFT}
 
 EXPERIENCES (JSON):
 ${JSON.stringify(experiences.map((x) => ({ id: x.id, type: x.type, organization: x.org, role: x.role, what_they_did: x.what })), null, 1).slice(0, 14000)}
