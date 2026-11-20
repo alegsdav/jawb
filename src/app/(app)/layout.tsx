@@ -21,7 +21,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col pb-16 lg:pb-0">
         <header className="lg:hidden border-b border-border bg-surface sticky top-0 z-20">
           <div className="mx-auto max-w-7xl px-4 h-12 sm:h-14 flex items-center gap-6">
-            <Link href="/" className="flex items-center gap-2 font-semibold"><Logo size={22} />Job Pipeline</Link>
+            <Link href="/" className="flex items-center gap-2 font-semibold"><Logo size={22} />Jawb</Link>
             <div className="ml-auto flex items-center gap-4 text-sm">
               <form action={signOut}>
                 <button className="text-muted hover:text-fg">Sign out</button>

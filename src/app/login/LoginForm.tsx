@@ -16,7 +16,7 @@ export function LoginForm({ notice }: { notice?: string }) {
       <div className="card w-full max-w-sm p-7 space-y-5">
         <div className="space-y-3">
           <Logo size={28} />
-          <h1 className="text-2xl font-semibold tracking-tight">Job Pipeline</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Jawb</h1>
           <p className="text-sm text-muted">
             {mode === "password" ? "Sign in to your account." : "Get a one-time sign-in link by email."}
           </p>

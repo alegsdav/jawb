@@ -79,7 +79,7 @@ export function Sidebar() {
     <nav aria-label="Workspace" className="flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px]">
       <Link href="/" className="flex h-8 items-center gap-2 px-2 text-[13px] font-semibold text-fg">
         <Logo size={18} />
-        Job Pipeline
+        Jawb
       </Link>
 
       <div className="space-y-px">

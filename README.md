@@ -1,4 +1,4 @@
-# Job Pipeline
+# Jawb
 
 A web app for college students applying to internships and jobs: keep one master resume, tailor a copy for each posting with AI suggestions you accept or reject, and track every application through to an offer. It's invite-only: you create invite codes and send them to the students you want to let in.
 

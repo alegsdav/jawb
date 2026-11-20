@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/supabase/server";
 import { PasswordForm } from "@/components/PasswordForm";
 import { UsageCard } from "@/components/UsageMeter";
 
-export const metadata: Metadata = { title: "Account · Job Pipeline" };
+export const metadata: Metadata = { title: "Account · Jawb" };
 
 export default async function AccountPage() {
   const { user } = await requireUser();

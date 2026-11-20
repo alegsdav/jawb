@@ -6,7 +6,7 @@ import "./fonts.css";
 const ui = Inter({ variable: "--font-ui", subsets: ["latin"], weight: ["400", "500", "600"] });
 
 export const metadata: Metadata = {
-  title: "Job Pipeline",
+  title: "Jawb",
   description: "Tailor your resume to every job and track applications.",
 };
 

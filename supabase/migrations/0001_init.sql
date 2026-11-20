@@ -1,4 +1,4 @@
--- Job Pipeline schema. Every row belongs to the signed-in user; RLS enforces it.
+-- Jawb schema. Every row belongs to the signed-in user; RLS enforces it.
 
 create table public.resumes (
   id uuid primary key default gen_random_uuid(),

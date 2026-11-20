@@ -59,7 +59,7 @@ export function Bookmarklet() {
             className="btn btn-sm border-dashed border-accent text-accent cursor-grab"
             title="Drag me to your bookmarks bar"
           >
-            ＋ Save to Job Pipeline
+            ＋ Save to Jawb
           </a>
           <button className="btn btn-sm" onClick={copy} disabled={!code}>
             {copied === "ok" ? "Copied" : "Copy code"}

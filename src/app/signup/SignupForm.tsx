@@ -16,7 +16,7 @@ export function SignupForm({ initialCode = "" }: { initialCode?: string }) {
         <div className="space-y-3">
           <Logo size={28} />
           <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
-          <p className="text-sm text-muted">Job Pipeline is invite-only. Use the code you were given.</p>
+          <p className="text-sm text-muted">Jawb is invite-only. Use the code you were given.</p>
         </div>
         <form action={action} className="space-y-3" noValidate>
           <div className="space-y-1">

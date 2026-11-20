@@ -35,7 +35,7 @@ export async function GET() {
     facts: facts.error ? [] : (facts.data ?? []),
     legacy_bullets: bullets.error ? [] : (bullets.data ?? []),
   };
-  const filename = `job-pipeline-export-${now.toISOString().slice(0, 10)}.json`;
+  const filename = `jawb-export-${now.toISOString().slice(0, 10)}.json`;
   return new NextResponse(JSON.stringify(body, null, 2), {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
