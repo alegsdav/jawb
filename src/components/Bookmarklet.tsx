@@ -42,11 +42,9 @@ export function Bookmarklet() {
       <summary className="cursor-pointer select-none text-muted hover:text-fg">
         Save jobs from LinkedIn, Handshake &amp; more
       </summary>
-      <div className="mt-2 space-y-2 rounded-lg border border-border p-3">
+      <div className="mt-2 space-y-2">
         <p className="text-muted">
-          Sites that need a login can&apos;t be read by a link. This button copies the posting you&apos;re looking at
-          into the form here — you review it, then click Add job. Tip: select just the description first for a cleaner
-          capture.
+          Saves the posting you&apos;re viewing on LinkedIn, Handshake and other sites that need a login.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <a
@@ -67,8 +65,7 @@ export function Bookmarklet() {
         </div>
         {hint && <p className="text-ok">Drag that button to your bookmarks bar, then click it on a job posting.</p>}
         <p className="text-xs text-muted">
-          Computer: drag the button to your bookmarks bar. iPhone: tap Copy code, bookmark any page (Share → Add
-          Bookmark), then edit that bookmark and replace its address with the copied code.
+          Drag it to your bookmarks bar, or on iPhone tap Copy code and save it as a bookmark&apos;s address.
         </p>
         {copied === "fail" && (
           <textarea

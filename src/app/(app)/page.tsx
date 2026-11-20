@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { STATUSES, type Job, type JobStatus, type Resume } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { isEmptyResume, normalizeResume } from "@/lib/resume";
-import { shouldSnapshot, SUBMITTED_STATUSES } from "@/lib/outcomes";
+import { shouldSnapshot } from "@/lib/outcomes";
 import { dbErrorMessage, isMissingColumn, MIGRATION_0006_COLUMNS, MIGRATION_HINT, OPTIONAL_JOB_COLUMNS } from "@/lib/db";
 import { addDays, localToday, shortDate } from "@/lib/dates";
 import { applyStatusChange } from "@/lib/status";
@@ -16,12 +16,10 @@ import { SaveErrorToast } from "@/lib/useAutosave";
 import { FitBadge, StatusSelect } from "@/components/StatusSelect";
 import { AddJobForm, stashCapture } from "@/components/AddJobForm";
 import { OutcomeStats } from "@/components/OutcomeStats";
-import { DeadlineField, deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
+import { deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
-import { InboxCard, RecommendedCard } from "@/components/dashboard/ComingSoon";
 import { Greeting, StatStrip } from "@/components/dashboard/Overview";
-import { useIsDesktop } from "@/lib/useMedia";
 import { CompanyMark } from "@/components/CompanyMark";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
@@ -111,10 +109,16 @@ function UndoToast({ message, onUndo, onClose, raised }: { message: string; onUn
   );
 }
 
+/** A date as plain text, or "–" when there isn't one. */
+const dateText = (d: string | null) => (d ? shortDate(d) : "–");
+/** Colour for a deadline: overdue red, closing soon green, otherwise the body colour. */
+const dateTone = (urgency: ReturnType<typeof deadlineUrgency>) =>
+  urgency === "overdue" ? "text-bad font-medium" : urgency === "soon" ? "text-ok font-medium" : "";
+
 const RESUME_LOAD_ERROR =
   "Couldn't load your resume to save a copy of what you sent. Check your connection and try again.";
 
-/** The dashboard: needs attention, in progress, all applications, add a job, and what's coming. */
+/** The dashboard: needs attention, add a job, in progress, and all applications. */
 export default function TrackerPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -135,7 +139,6 @@ export default function TrackerPage() {
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
   const slow = useSlow(!ready || loading);
-  const desktop = useIsDesktop();
 
   const markMissing = useCallback((cols: readonly string[]) => {
     let added = false;
@@ -334,11 +337,13 @@ export default function TrackerPage() {
   if (!ready) return <p role="status" className="text-muted">{loadingText}</p>;
 
   const noJobs = !loading && !loadError && jobs.length === 0;
-  const chips: { value: Filter; label: string }[] = [
+  const allChips: { value: Filter; label: string }[] = [
     { value: "all", label: "All" },
     ...(needsMigration ? [] : [{ value: "closing" as const, label: "Closing soon" }]),
     ...STATUSES,
   ];
+  // Only the filters that have something behind them (and the one in use, so it can be switched off).
+  const chips = allChips.filter((c) => c.value === "all" || c.value === filter || (counts[c.value] ?? 0) > 0);
   const anyFailing = writes.states.size > 0;
   const closing = needsMigration
     ? []
@@ -352,35 +357,20 @@ export default function TrackerPage() {
     </div>
   );
 
-  const appliedCell = (j: Job) =>
-    SUBMITTED_STATUSES.has(j.status) ? (
-      <input
-        type="date"
-        aria-label="Date applied"
-        className="ghost-input text-xs"
-        value={j.date_applied ?? ""}
-        onChange={(e) => setField(j, { date_applied: e.target.value || null })}
-      />
-    ) : j.date_applied ? (
-      <span className="text-xs text-muted">{shortDate(j.date_applied)}</span>
-    ) : (
-      <span className="text-muted">–</span>
-    );
-
   return (
     <div className="space-y-6 px-4 sm:px-6 lg:px-10 py-5 sm:py-6">
       {migrationBanner}
-      <Greeting jobs={jobs} due={due.length} closing={closing.length} />
+      <Greeting />
       {!noJobs && <StatStrip jobs={jobs} attention={due.length + closing.length} />}
       <NeedsAttention followUps={due} closing={closing} today={today} onFollowedUp={followedUp} />
 
       <div className="grid gap-6 lg:gap-10 lg:grid-cols-12 lg:items-start">
         {/* Phones: Add a job comes first (a one-line button once there are jobs). Desktop: the right column. */}
         <div id="add-job" className="scroll-mt-4 lg:col-span-4 lg:col-start-9 lg:row-start-1">
-          <AddJobForm collapsible={!desktop && !noJobs} existing={jobs} />
+          <AddJobForm existing={jobs} />
         </div>
 
-        <div className="min-w-0 space-y-6 lg:col-span-8 lg:col-start-1 lg:row-start-1 lg:row-span-3">
+        <div className="min-w-0 space-y-6 lg:col-span-8 lg:col-start-1 lg:row-start-1">
           <InProgress jobs={jobs} today={today} loading={loading} />
 
           <section aria-labelledby="all-apps-heading" className="space-y-3">
@@ -453,14 +443,10 @@ export default function TrackerPage() {
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                         <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
                         {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
-                        {!needsMigration && (
-                          <DeadlineField
-                            compact
-                            value={j.deadline}
-                            status={j.status}
-                            today={today}
-                            onChange={(deadline) => setField(j, { deadline })}
-                          />
+                        {!needsMigration && j.deadline && (
+                          <span className={`text-xs ${urgency === "overdue" ? "text-bad font-medium" : urgency === "soon" ? "text-ok font-medium" : "text-muted"}`}>
+                            Deadline {shortDate(j.deadline)}
+                          </span>
                         )}
                         {j.date_applied && <span className="text-xs text-muted">Applied {shortDate(j.date_applied)}</span>}
                         {j.follow_up_date && j.status === "applied" && (
@@ -526,25 +512,10 @@ export default function TrackerPage() {
                             </div>
                           </td>
                           {!needsMigration && (
-                            <td className="py-2.5 pr-4">
-                              <DeadlineField
-                                value={j.deadline}
-                                status={j.status}
-                                today={today}
-                                onChange={(deadline) => setField(j, { deadline })}
-                              />
-                            </td>
+                            <td className={`py-2.5 pr-4 ${dateTone(deadlineUrgency(j.deadline, j.status, today))}`}>{dateText(j.deadline)}</td>
                           )}
-                          <td className="py-2.5 pr-4">{appliedCell(j)}</td>
-                          <td className="py-2.5 pr-4 hidden md:table-cell">
-                            <input
-                              type="date"
-                              aria-label="Follow-up date"
-                              className={`ghost-input text-xs ${isDue ? "text-ok font-medium" : ""}`}
-                              value={j.follow_up_date ?? ""}
-                              onChange={(e) => setField(j, { follow_up_date: e.target.value || null })}
-                            />
-                          </td>
+                          <td className="py-2.5 pr-4 text-muted">{dateText(j.date_applied)}</td>
+                          <td className={`py-2.5 pr-4 hidden md:table-cell ${isDue ? "text-ok font-medium" : "text-muted"}`}>{dateText(j.follow_up_date)}</td>
                         </tr>
                       );
                     })
@@ -556,12 +527,6 @@ export default function TrackerPage() {
           </section>
         </div>
 
-        <div className="lg:col-span-4 lg:col-start-9 lg:row-start-2">
-          <RecommendedCard />
-        </div>
-        <div className="lg:col-span-4 lg:col-start-9 lg:row-start-3">
-          <InboxCard />
-        </div>
       </div>
 
       {undo && <UndoToast message={undo.message} onUndo={undoFollowUp} onClose={() => setUndo(null)} raised={anyFailing} />}

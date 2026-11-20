@@ -78,16 +78,13 @@ function addedOn(createdAt: string): string {
 /**
  * "Add a job": one box for a link or a pasted description. For sites the server can't read
  * (LinkedIn, Handshake, Workday…) it switches to two fields: the link plus the pasted description.
- * With `collapsible` (the job list once it has jobs) it starts as a one-line "+ Add job" button so
- * the job list starts on the first screen of a phone; a bookmarklet capture opens it.
  *
  * Adding a job that's already on the list (same link, or same company and title as the server reads
  * them) asks "You already added this job (added Nov 13). Open it instead?" with Open it / Add anyway.
  * `existing` lets a same-link duplicate be caught before anything is fetched.
  */
-export function AddJobForm({ collapsible = false, existing = [] }: { collapsible?: boolean; existing?: readonly ExistingJob[] }) {
+export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[] }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"one" | "paste">("one");
   const [input, setInput] = useState("");
   const [link, setLink] = useState("");
@@ -103,7 +100,6 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
   useEffect(() => {
     const c = takeCapture();
     if (!c) return;
-    setOpen(true);
     setMode("paste");
     setLink(c.url ?? "");
     setDesc(c.text ?? "");
@@ -210,18 +206,6 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
             ? "Reads the posting from the link."
             : "Uses the pasted description.";
 
-  if (collapsible && !open) {
-    return (
-      <div className="flex items-center gap-3">
-        <h2 className="text-[15px] font-semibold">Jobs</h2>
-        <p className="hidden md:block text-[13px] text-muted truncate">Paste a link or a description, or use the bookmarklet.</p>
-        <button className="btn btn-primary btn-sm ml-auto min-h-10 sm:min-h-0 px-3" aria-expanded={false} onClick={() => setOpen(true)}>
-          ＋ Add job
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div
       onDragOver={(e) => {
@@ -235,26 +219,8 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
       <div>
         <div className="flex items-center gap-2">
           <h2 className="text-[15px] font-semibold">Add a job</h2>
-          {collapsible && (
-            <button
-              className="btn btn-sm ml-auto min-h-9"
-              aria-expanded
-              onClick={() => {
-                setOpen(false);
-                setError("");
-                setDup(null);
-              }}
-              disabled={busy}
-            >
-              Close
-            </button>
-          )}
         </div>
-        {mode === "one" ? (
-          <p className="text-[13px] text-muted">
-            Paste a job link (Greenhouse, Lever, Ashby and most company pages work) or the full description.
-          </p>
-        ) : reason?.captured ? (
+        {mode === "one" ? null : reason?.captured ? (
           <p className="text-[13px] text-good">
             Captured from <strong className="break-words">{reason.captured}</strong> — review and click Add job.
           </p>
@@ -275,8 +241,7 @@ export function AddJobForm({ collapsible = false, existing = [] }: { collapsible
         <textarea
           className="input w-full h-24 sm:h-28"
           aria-label="Job link or description"
-          autoFocus={collapsible}
-          placeholder="https://job-boards.greenhouse.io/… or paste the description"
+          placeholder="Job link or description"
           value={input}
           onChange={(e) => {
             setInput(e.target.value);
