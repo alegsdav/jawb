@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { API_CALLED_EVENT, getApi } from "@/lib/api";
 import { MIGRATION_HINT } from "@/lib/db";
+import { Loader } from "@/components/Loader";
 
 type Bucket = { used: number; limit: number; remaining: number; resetAt: string | null };
 export type Usage = { available: true; heavy: Bucket; light: Bucket } | { available: false };
@@ -74,7 +75,7 @@ export function UsageCard() {
     <section className="space-y-2" aria-labelledby="usage-heading">
       <h2 id="usage-heading" className="font-semibold">AI usage</h2>
       {!usage ? (
-        <p className="text-sm text-muted">Loading…</p>
+        <Loader size={16} className="justify-start" />
       ) : !usage.available ? (
         <p className="text-sm text-muted">{MIGRATION_HINT} Until then there are no AI limits.</p>
       ) : (

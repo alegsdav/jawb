@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Loader } from "@/components/Loader";
 import type { Fact } from "@/lib/types";
 import { FACT_SOURCE_LABEL } from "@/lib/facts";
 import { FACTS_MIGRATION_HINT } from "@/lib/factStore";
@@ -49,7 +50,7 @@ export function FactsPanel({
       <p className="text-[13px] text-muted">True things about you the AI uses. Never printed.</p>
 
       {status === "missing" && <p role="status" className="text-[13px]">{FACTS_MIGRATION_HINT}</p>}
-      {status === "loading" && <p className="text-[13px] text-muted">Loading…</p>}
+      {status === "loading" && <Loader size={16} className="justify-start" />}
       {error && status !== "missing" && <p role="alert" className="text-[13px] text-bad">{error}</p>}
 
       {shown.length > 0 && (

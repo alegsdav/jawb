@@ -219,3 +219,18 @@ body {
   .doc-ph { background: transparent !important; box-shadow: none !important; }
   ::placeholder { color: transparent !important; }
 }
+
+/* Page loader: a flipping square in the app's blue (Loader.tsx). Reduced motion gets a soft pulse instead. */
+.flipping-square-loader {
+  width: 40px; height: 40px; background-color: var(--dot-blue); border-radius: 4px;
+  animation: square-flip 1.2s infinite ease-in-out;
+}
+@keyframes square-flip {
+  0% { transform: perspective(120px) rotateX(0deg) rotateY(0deg); }
+  50% { transform: perspective(120px) rotateX(-180.1deg) rotateY(0deg); }
+  100% { transform: perspective(120px) rotateX(-180deg) rotateY(-179.9deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flipping-square-loader { animation: square-pulse 1.6s infinite ease-in-out; }
+}
+@keyframes square-pulse { 50% { opacity: 0.35; } }

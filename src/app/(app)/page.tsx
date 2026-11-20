@@ -21,6 +21,7 @@ import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
 import { Greeting, StatStrip } from "@/components/dashboard/Overview";
 import { CompanyMark } from "@/components/CompanyMark";
+import { Loader } from "@/components/Loader";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
@@ -32,7 +33,7 @@ const COLS_0006 = "suggestions_total, suggestions_pending";
 
 /** "Followed up" moves the next follow-up this many days out (with Undo). */
 const FOLLOW_UP_AGAIN_DAYS = 7;
-/** After this long, "Loading…" says "Still loading…" so a slow phone connection doesn't look stuck. */
+/** After this long, a muted "Still loading…" line appears under the loader so a slow phone connection doesn't look stuck. */
 const SLOW_MS = 3000;
 
 type Filter = JobStatus | "all" | "closing";
@@ -331,8 +332,14 @@ export default function TrackerPage() {
   const showFollowUp = shown.some((j) => j.follow_up_date);
   const tableCols = 4 + [showDeadline, showApplied, showFollowUp].filter(Boolean).length;
 
-  const loadingText = slow ? "Still loading…" : "Loading…";
-  if (!ready) return <p role="status" className="text-muted">{loadingText}</p>;
+  // The loader, plus a muted "Still loading…" line once the wait is slow (see useSlow).
+  const loadingMark = (
+    <div className="flex flex-col items-start gap-2">
+      <Loader size={20} />
+      {slow && <p className="text-[13px] text-muted">Still loading…</p>}
+    </div>
+  );
+  if (!ready) return loadingMark;
 
   const noJobs = !loading && !loadError && jobs.length === 0;
   const allChips: { value: Filter; label: string }[] = [
@@ -403,9 +410,7 @@ export default function TrackerPage() {
 
             {/* Phones: one card per job */}
             <div className="sm:hidden space-y-2">
-              {loading ? (
-                <p role="status" className="text-[13px] text-muted">{loadingText}</p>
-              ) : shown.length === 0 ? (
+              {loading ? loadingMark : shown.length === 0 ? (
                 <p className="text-[13px] text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
               ) : (
                 shown.map((j) => {
@@ -465,7 +470,7 @@ export default function TrackerPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {loading ? (
-                    <tr><td role="status" className="p-3 text-muted" colSpan={tableCols}>{loadingText}</td></tr>
+                    <tr><td className="p-3" colSpan={tableCols}>{loadingMark}</td></tr>
                   ) : shown.length === 0 ? (
                     <tr>
                       <td className="py-2.5 pr-4 text-muted" colSpan={tableCols}>{jobs.length ? "No jobs match this filter." : ""}</td>

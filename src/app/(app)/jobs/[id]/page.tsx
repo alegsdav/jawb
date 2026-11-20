@@ -1,6 +1,7 @@
 "use client";
 
 import { DownloadIcon } from "@/components/icons";
+import { Loader, PageLoader } from "@/components/Loader";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -922,7 +923,7 @@ export default function JobPage() {
       </div>
     );
   }
-  if (!job) return <p className="text-muted">Loading…</p>;
+  if (!job) return <PageLoader />;
   const showHighlights = showFeedback && !quiet;
 
   const panel = (
@@ -1210,7 +1211,7 @@ export default function JobPage() {
                 <Link href="/resume" className="btn btn-primary">Import your resume</Link>
               </div>
             ) : !resume ? (
-              <p className="px-4 pt-4 text-sm text-muted sm:px-8">Loading your tailored copy…</p>
+              <Loader center label="Loading your tailored copy…" />
             ) : (
               <>
                 <EditorCanvas zoom={zoom} className="min-w-0 flex-1 lg:overflow-auto">
