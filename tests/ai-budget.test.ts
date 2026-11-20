@@ -61,6 +61,7 @@ function fakeDb(clock: { now: number }, opts: { missing?: boolean; lock?: boolea
         gt: (_k: string, v: string) => ((f.since = v), q),
         eq: (_k: string, v: string) => ((f.weight = v), q),
         order: () => q,
+        maybeSingle: () => Promise.resolve({ data: null, error: null }), // ai_quotas: no per-user row
         then: (res: (v: unknown) => unknown) => {
           if (opts.missing) return Promise.resolve({ data: null, error: { code: "42P01", message: "relation does not exist" } }).then(res);
           const data = rows

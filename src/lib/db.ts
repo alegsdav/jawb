@@ -25,7 +25,7 @@ export const isMissingRelation = (e: { code?: string; message?: string } | null 
 export const isUniqueViolation = (e: { code?: string } | null | undefined) => e?.code === "23505";
 
 export const MIGRATION_HINT =
-  "Database update needed: run the files in supabase/migrations/ you haven't run yet (0002 to 0006) in your Supabase SQL editor.";
+  "Database update needed: run the files in supabase/migrations/ you haven't run yet (0002 to 0007) in your Supabase SQL editor.";
 
 /** Columns added by migration 0002; strip them from writes when the migration is missing. */
 export const MIGRATION_0002_COLUMNS = ["deadline", "submitted_resume", "submitted_at", "submitted_tailored"] as const;

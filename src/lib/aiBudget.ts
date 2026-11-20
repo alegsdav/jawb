@@ -33,6 +33,7 @@ export const AI_WEIGHTS = {
 export type AiAction = keyof typeof AI_WEIGHTS;
 
 export type AiLimit = {
+  /** Calls allowed in the window. 0 = this user's AI is turned off (per-user override, migration 0007). */
   limit: number;
   windowMs: number;
   /** The same window as a Postgres interval, for reserve_ai_call. */
@@ -52,6 +53,34 @@ export function aiLimits(env: Record<string, string | undefined> = process.env):
     heavy: { limit: positiveInt(env.AI_HEAVY_PER_DAY, 10), windowMs: 24 * HOUR, interval: "24 hours" },
     light: { limit: positiveInt(env.AI_LIGHT_PER_HOUR, 120), windowMs: HOUR, interval: "60 minutes" },
   };
+}
+
+/**
+ * The signed-in user's limits: their ai_quotas override per weight (migration 0007), else the env limit.
+ * RLS returns only their own row. Never throws: any read problem falls back to the env limits.
+ */
+export async function userLimits(
+  supabase: SupabaseClient,
+  env: Record<string, string | undefined> = process.env,
+): Promise<Record<AiWeight, AiLimit>> {
+  const base = aiLimits(env);
+  try {
+    const { data, error } = await supabase.from("ai_quotas").select("heavy_limit, light_limit").maybeSingle();
+    if (error) {
+      // Before migration 0007 there's no table: the env limits apply, quietly.
+      if (!isMissingRelation(error)) console.warn("ai_quotas read failed:", error.message);
+      return base;
+    }
+    const row = data as { heavy_limit: number | null; light_limit: number | null } | null;
+    if (!row) return base;
+    return {
+      heavy: { ...base.heavy, limit: row.heavy_limit ?? base.heavy.limit },
+      light: { ...base.light, limit: row.light_limit ?? base.light.limit },
+    };
+  } catch (e) {
+    console.warn("ai_quotas read failed:", e);
+    return base;
+  }
 }
 
 /** Thrown by withAiBudget when the student is at their limit (429) or usage can't be checked (503). */
@@ -83,6 +112,11 @@ export function roughlyIn(ms: number): string {
  * quota message (AI_LIMIT_MESSAGE), so a student can tell "my limit" from "the AI is down".
  */
 export function limitMessage(weight: AiWeight, lim: AiLimit, resetAt: string | null, now = new Date()): string {
+  if (lim.limit === 0) {
+    return weight === "heavy"
+      ? "AI analyses are turned off for your account."
+      : "Quick AI actions are turned off for your account.";
+  }
   const when = resetAt ? roughlyIn(Date.parse(resetAt) - now.getTime()) : "later";
   return weight === "heavy"
     ? `You've used all ${lim.limit} of your analyses for the last 24 hours (job analyses, resume imports and resume drafts count). The next one opens up ${when}.`
@@ -156,9 +190,10 @@ export async function withAiBudget<T>(
   }
   if (!id) {
     const now = opts.now?.() ?? new Date();
-    const { rows } = await countedSince(supabase, new Date(now.getTime() - lim.windowMs), weight);
-    const resetAt = resetTime(rows.map((r) => r.created_at), lim);
-    throw new AiBudgetError(limitMessage(weight, lim, resetAt, now), 429, weight, resetAt);
+    const shown = (await userLimits(supabase, opts.env))[weight];
+    const { rows } = await countedSince(supabase, new Date(now.getTime() - shown.windowMs), weight);
+    const resetAt = resetTime(rows.map((r) => r.created_at), shown);
+    throw new AiBudgetError(limitMessage(weight, shown, resetAt, now), 429, weight, resetAt);
   }
   let ok = false;
   try {
@@ -201,7 +236,7 @@ export async function usageSummary(
   now = new Date(),
   env: Record<string, string | undefined> = process.env,
 ): Promise<UsageSummary> {
-  const limits = aiLimits(env);
+  const limits = await userLimits(supabase, env);
   const longest = Math.max(limits.heavy.windowMs, limits.light.windowMs);
   const { rows, error } = await countedSince(supabase, new Date(now.getTime() - longest));
   if (error) {
