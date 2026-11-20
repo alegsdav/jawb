@@ -41,10 +41,10 @@ function useUsage(): Usage | null {
   return usage;
 }
 
-/** Quiet one-line meter for the sidebar footer: text and a thin bar, no card. Renders nothing until loaded or without migration 0004. */
+/** Quiet one-line meter for the sidebar footer: text and a thin bar, no card. Shows only when 2 or fewer analyses are left. Renders nothing until loaded or without migration 0004. */
 export function UsageMeter() {
   const usage = useUsage();
-  if (!usage?.available) return null;
+  if (!usage?.available || usage.heavy.remaining > 2) return null;
   const { heavy } = usage;
   const pct = heavy.limit ? Math.round((heavy.remaining / heavy.limit) * 100) : 0;
   return (
@@ -71,7 +71,7 @@ export function UsageMeter() {
 export function UsageCard() {
   const usage = useUsage();
   return (
-    <section className="card p-4 space-y-2" aria-labelledby="usage-heading">
+    <section className="space-y-2" aria-labelledby="usage-heading">
       <h2 id="usage-heading" className="font-semibold">AI usage</h2>
       {!usage ? (
         <p className="text-sm text-muted">Loading…</p>
@@ -83,14 +83,10 @@ export function UsageCard() {
             <strong>{heavyLine(usage.heavy)}</strong>
             {!usage.heavy.remaining && usage.heavy.resetAt && <> · next one at {clock(usage.heavy.resetAt)}</>}
           </p>
-          <p className="text-xs text-muted">
-            Job analyses, re-analyses, resume imports and resume drafts count toward this, over a rolling 24 hours.
-          </p>
           <p className="text-sm">
             {usage.light.remaining} of {usage.light.limit} quick AI actions left this hour
             {!usage.light.remaining && usage.light.resetAt && <> · more at {clock(usage.light.resetAt)}</>}
           </p>
-          <p className="text-xs text-muted">Coaching, cover letters and reading job details, over a rolling 60 minutes.</p>
         </>
       )}
     </section>

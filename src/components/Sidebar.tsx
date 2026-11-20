@@ -38,7 +38,8 @@ function JobRow({ j, active }: { j: NavJob; active: boolean }) {
 
 /**
  * Desktop (lg and up) navigation, drawn on the grey window chrome: Dashboard, the master resume and
- * Add job; a search and the recent (or matching) jobs; then the usage meter, Account and Sign out.
+ * Add job; a search and the recent (or matching) jobs; then the usage meter (only when running low),
+ * Account and Sign out.
  * Phones and tablets keep the header and bottom tab bar instead.
  */
 export function Sidebar() {

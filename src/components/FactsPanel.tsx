@@ -45,16 +45,8 @@ export function FactsPanel({
   };
 
   return (
-    <section id="facts" className="space-y-3 scroll-mt-16" aria-labelledby="facts-heading">
-      <div>
-        <h2 id="facts-heading" className="text-[13px] font-semibold">
-          Facts <span className="text-[13px] font-normal text-muted">· {facts.length}</span>
-        </h2>
-        <p className="text-[13px] text-muted">
-          True things about you the AI uses when tailoring and coaching, so it doesn&apos;t ask again. They&apos;re never
-          printed.
-        </p>
-      </div>
+    <section id="facts" className="space-y-3 scroll-mt-16" aria-label="Facts">
+      <p className="text-[13px] text-muted">True things about you the AI uses. Never printed.</p>
 
       {status === "missing" && <p role="status" className="text-[13px]">{FACTS_MIGRATION_HINT}</p>}
       {status === "loading" && <p className="text-[13px] text-muted">Loading…</p>}
@@ -113,9 +105,9 @@ export function FactsPanel({
 
       {status !== "missing" && (
         <div className="space-y-2">
-          <label htmlFor="fact-new" className="text-[13px] font-medium">Add facts</label>
           <textarea
             id="fact-new"
+            aria-label="Add facts"
             className="input w-full min-h-20"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
