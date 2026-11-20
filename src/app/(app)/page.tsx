@@ -19,7 +19,7 @@ import { OutcomeStats } from "@/components/OutcomeStats";
 import { deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
-import { Greeting, StatStrip } from "@/components/dashboard/Overview";
+import { StatStrip } from "@/components/dashboard/Overview";
 import { CompanyMark } from "@/components/CompanyMark";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
@@ -36,7 +36,6 @@ const FOLLOW_UP_AGAIN_DAYS = 7;
 const SLOW_MS = 3000;
 
 type Filter = JobStatus | "all" | "closing";
-type Sort = "newest" | "deadline";
 
 /** A follow-up is due: applied, and the follow-up date is today or past. */
 const followUpDue = (j: Job, today: string) => j.status === "applied" && !!j.follow_up_date && j.follow_up_date <= today;
@@ -131,7 +130,6 @@ export default function TrackerPage() {
   const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [sort, setSort] = useState<Sort>("newest");
   /** Job whose status change is loading its resume (for the snapshot). */
   const [busyId, setBusyId] = useState<string | null>(null);
   /** "Followed up" just moved a follow-up date: Undo puts the old one back. */
@@ -317,21 +315,21 @@ export default function TrackerPage() {
     return c;
   }, [jobs, today]);
   const due = jobs.filter((j) => followUpDue(j, today));
-  const shown = useMemo(() => {
-    const list =
+  // Newest added first (the order the jobs load in).
+  const shown = useMemo(
+    () =>
       filter === "all"
         ? jobs
         : filter === "closing"
           ? jobs.filter((j) => isClosingSoon(j.deadline, j.status, today))
-          : jobs.filter((j) => j.status === filter);
-    if (sort === "newest") return list;
-    // Soonest deadline first; jobs without one go last, newest first among themselves.
-    return [...list].sort((a, b) =>
-      a.deadline && b.deadline
-        ? a.deadline.localeCompare(b.deadline)
-        : a.deadline ? -1 : b.deadline ? 1 : b.created_at.localeCompare(a.created_at),
-    );
-  }, [jobs, filter, sort, today]);
+          : jobs.filter((j) => j.status === filter),
+    [jobs, filter, today],
+  );
+  // A date column shows only when a job in the current list has that date.
+  const showDeadline = !needsMigration && shown.some((j) => j.deadline);
+  const showApplied = shown.some((j) => j.date_applied);
+  const showFollowUp = shown.some((j) => j.follow_up_date);
+  const tableCols = 4 + [showDeadline, showApplied, showFollowUp].filter(Boolean).length;
 
   const loadingText = slow ? "Still loading…" : "Loading…";
   if (!ready) return <p role="status" className="text-muted">{loadingText}</p>;
@@ -360,7 +358,7 @@ export default function TrackerPage() {
   return (
     <div className="space-y-6 px-4 sm:px-6 lg:px-10 py-5 sm:py-6">
       {migrationBanner}
-      <Greeting />
+      <h1 className="sr-only">Dashboard</h1>
       {!noJobs && <StatStrip jobs={jobs} attention={due.length + closing.length} />}
       <NeedsAttention followUps={due} closing={closing} today={today} onFollowedUp={followedUp} />
 
@@ -386,32 +384,21 @@ export default function TrackerPage() {
             {error && <p role="alert" className="text-[13px] text-bad">{error}</p>}
             {noJobs && <p className="text-[13px] text-muted px-1">Jobs you add show up here, with their status, deadline and follow-ups.</p>}
 
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <div className="flex sm:flex-1 min-w-0 items-center gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap pb-1">
-                {chips.map((s) => (
-                  <button
-                    key={s.value}
-                    onClick={() => setFilter(s.value)}
-                    aria-pressed={filter === s.value}
-                    className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-0.5 ${
-                      filter === s.value
-                        ? "bg-surface-2 border-transparent text-fg font-medium"
-                        : "text-muted hover:text-fg"
-                    }`}
-                  >
-                    {s.label} {counts[s.value] ?? 0}
-                  </button>
-                ))}
-              </div>
-              {!needsMigration && (
-                <label className="shrink-0 pb-1 flex items-center gap-2 self-end sm:self-auto">
-                  <span className="text-xs text-muted">Sort</span>
-                  <select className="input rounded-full py-1 text-xs min-h-10 sm:min-h-0" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-                    <option value="newest">Newest added</option>
-                    <option value="deadline">Deadline soonest</option>
-                  </select>
-                </label>
-              )}
+            <div className="flex min-w-0 items-center gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap pb-1">
+              {chips.map((s) => (
+                <button
+                  key={s.value}
+                  onClick={() => setFilter(s.value)}
+                  aria-pressed={filter === s.value}
+                  className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-0.5 ${
+                    filter === s.value
+                      ? "bg-surface-2 border-transparent text-fg font-medium"
+                      : "text-muted hover:text-fg"
+                  }`}
+                >
+                  {s.label} {counts[s.value] ?? 0}
+                </button>
+              ))}
             </div>
 
             {/* Phones: one card per job */}
@@ -471,17 +458,17 @@ export default function TrackerPage() {
                     <th className="py-2 pr-4 font-medium hidden 2xl:table-cell">Location</th>
                     <th className="py-2 pr-4 font-medium">Fit</th>
                     <th className="py-2 pr-4 font-medium">Status</th>
-                    {!needsMigration && <th className="py-2 pr-4 font-medium">Deadline</th>}
-                    <th className="py-2 pr-4 font-medium">Applied</th>
-                    <th className="py-2 pr-4 font-medium hidden md:table-cell">Follow up</th>
+                    {showDeadline && <th className="py-2 pr-4 font-medium">Deadline</th>}
+                    {showApplied && <th className="py-2 pr-4 font-medium">Applied</th>}
+                    {showFollowUp && <th className="py-2 pr-4 font-medium hidden md:table-cell">Follow up</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {loading ? (
-                    <tr><td role="status" className="p-3 text-muted" colSpan={7}>{loadingText}</td></tr>
+                    <tr><td role="status" className="p-3 text-muted" colSpan={tableCols}>{loadingText}</td></tr>
                   ) : shown.length === 0 ? (
                     <tr>
-                      <td className="py-2.5 pr-4 text-muted" colSpan={7}>{jobs.length ? "No jobs match this filter." : ""}</td>
+                      <td className="py-2.5 pr-4 text-muted" colSpan={tableCols}>{jobs.length ? "No jobs match this filter." : ""}</td>
                     </tr>
                   ) : (
                     shown.map((j) => {
@@ -511,11 +498,15 @@ export default function TrackerPage() {
                               <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
                             </div>
                           </td>
-                          {!needsMigration && (
-                            <td className={`py-2.5 pr-4 ${dateTone(deadlineUrgency(j.deadline, j.status, today))}`}>{dateText(j.deadline)}</td>
+                          {showDeadline && (
+                            <td className={`py-2.5 pr-4 ${j.deadline ? dateTone(deadlineUrgency(j.deadline, j.status, today)) : "text-muted"}`}>
+                              {dateText(j.deadline)}
+                            </td>
                           )}
-                          <td className="py-2.5 pr-4 text-muted">{dateText(j.date_applied)}</td>
-                          <td className={`py-2.5 pr-4 hidden md:table-cell ${isDue ? "text-ok font-medium" : "text-muted"}`}>{dateText(j.follow_up_date)}</td>
+                          {showApplied && <td className="py-2.5 pr-4 text-muted">{dateText(j.date_applied)}</td>}
+                          {showFollowUp && (
+                            <td className={`py-2.5 pr-4 hidden md:table-cell ${isDue ? "text-ok font-medium" : "text-muted"}`}>{dateText(j.follow_up_date)}</td>
+                          )}
                         </tr>
                       );
                     })
