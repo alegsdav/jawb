@@ -58,35 +58,34 @@ const doc = docOf(
   para("e1", ""),                                // 3 (empty paragraph)
 );
 
-describe("rating tint and dot", () => {
-  it("a rated paragraph gets the rating tint over its text and a dot at its end", () => {
+describe("rating tint", () => {
+  it("a rated paragraph gets the rating tint over its text and no dot", () => {
     const d = docOf(para("b2", "Designed the notation"));
     const set = decos(d, { feedback: { b2: fb("weak") } });
     const from = 1;
     const to = from + "Designed the notation".length;
-    const tint = set.find((x) => cls(x) === "bg-[#fdecec]");
+    const tint = set.find((x) => cls(x) === "bg-[#c530301f]");
     expect([tint?.from, tint?.to]).toEqual([from, to]);
-    const dot = set.find((x) => key(x)?.startsWith("dot:b2:"));
-    expect(dot).toBeDefined();
-    expect([dot!.from, dot!.to]).toEqual([to, to]);
-    expect(key(dot!)).toBe("dot:b2:current:weak:n");
+    expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
   });
 
-  it("the dot key changes with the rating", () => {
-    const a = decos(doc, { feedback: { b2: fb("weak") } }).find((x) => key(x)?.startsWith("dot:"));
-    const b = decos(doc, { feedback: { b2: fb("strong") } }).find((x) => key(x)?.startsWith("dot:"));
-    expect(key(a!)).not.toBe(key(b!));
+  it("each rating has its own tint", () => {
+    const tints = (r: BulletFeedback["rating"]) =>
+      ratingTints(decos(doc, { feedback: { b2: fb(r) } })).map((x) => cls(x));
+    expect(tints("strong")).toEqual([RATING.strong.tint]);
+    expect(tints("ok")).toEqual([RATING.ok.tint]);
+    expect(tints("weak")).toEqual([RATING.weak.tint]);
   });
 
-  it("a suggestion is part of the dot key", () => {
+  it("a suggestion adds no decoration", () => {
     const set = decos(doc, { feedback: { b2: fb("ok", { suggestion: "better" }) } });
-    expect(set.find((x) => key(x)?.startsWith("dot:"))).toBeDefined();
-    expect(key(set.find((x) => key(x)?.startsWith("dot:"))!)).toBe("dot:b2:current:ok:s");
+    expect(ratingTints(set).map((x) => cls(x))).toEqual([RATING.ok.tint]);
+    expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
   });
 
   it("nothing when showHighlights is false", () => {
     const set = decos(doc, { feedback: { b2: fb("weak") }, showHighlights: false });
-    expect(set.filter((x) => cls(x) === "bg-[#fdecec]")).toEqual([]);
+    expect(set.filter((x) => cls(x) === "bg-[#c530301f]")).toEqual([]);
     expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
   });
 
@@ -96,10 +95,10 @@ describe("rating tint and dot", () => {
     expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
   });
 
-  it("updated feedback keeps the grey dot but no rating tint", () => {
+  it("updated feedback gets no rating tint and no dot", () => {
     const set = decos(doc, { feedback: { b2: fb("strong", { state: "updated" }) } });
     expect(ratingTints(set)).toEqual([]);
-    expect(key(set.find((x) => key(x)?.startsWith("dot:"))!)).toBe("dot:b2:updated:-:n");
+    expect(set.filter((x) => key(x)?.startsWith("dot:"))).toEqual([]);
   });
 
   it("a paragraph without feedback gets nothing", () => {
@@ -121,13 +120,13 @@ describe("placeholders", () => {
     const start = paraStart(doc, 1);
     const node = set.find((x) => cls(x) === "bg-[#fff6d6]");
     expect([node?.from, node?.to]).toEqual([start, start + doc.child(1).nodeSize]);
-    expect(set.filter((x) => cls(x) === "bg-[#fdecec]")).toEqual([]);
+    expect(set.filter((x) => cls(x) === "bg-[#c530301f]")).toEqual([]);
   });
 
   it("quiet removes the placeholder tint and marks, and the rating tint shows again", () => {
     const set = decos(doc, { feedback: { b1: fb("weak") }, quiet: true });
     expect(set.filter((x) => cls(x) === "doc-ph" || cls(x) === "bg-[#fff6d6]")).toEqual([]);
-    expect(set.filter((x) => cls(x) === "bg-[#fdecec]")).toHaveLength(1);
+    expect(set.filter((x) => cls(x) === "bg-[#c530301f]")).toHaveLength(1);
   });
 
   it("placeholders in any paragraph count, not only bullets", () => {

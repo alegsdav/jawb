@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Resume } from "@/lib/types";
 import { Menu, Popover } from "./Menu";
 import { RedoIcon, UndoIcon } from "./icons";
+import { RATING } from "./docDecorations";
 
 /**
  * Editable document targets: the legacy field inputs, and the resume editor's contentEditable root
@@ -315,19 +316,20 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
 /** "Feedback: On" / "Feedback: Off": the same words on the toolbar toggle and in the phone's More menu. */
 const toggleLabel = (label: string, on: boolean) => `${label}: ${on ? "On" : "Off"}`;
 
-const Dot = ({ color }: { color: string }) => <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />;
 
 /** "?" next to the document: what the dots, bars and highlights mean (kept off the page itself to save room). */
+/** A tint swatch: the same class the page uses, so the legend matches the text. */
+const Swatch = ({ tint }: { tint: string }) => <span className={`inline-block h-3 w-5 shrink-0 rounded-sm border border-border ${tint}`} />;
+
 export function FeedbackLegend({ analyzed, changedCount }: { analyzed: boolean; changedCount: number }) {
   return (
     <Popover label="?" title="What the colors mean" buttonClassName="btn btn-sm w-9 border-transparent bg-transparent sm:w-auto" panelClassName="w-72">
       <ul className="space-y-1.5 text-xs">
         {analyzed && (
           <>
-            <li className="flex items-center gap-2"><Dot color="#1f8a4c" /> Strong bullet for this job</li>
-            <li className="flex items-center gap-2"><Dot color="#c98a12" /> Okay: could be stronger</li>
-            <li className="flex items-center gap-2"><Dot color="#c53030" /> Weak: worth rewriting</li>
-            <li className="flex items-center gap-2"><Dot color="#9a9a95" /> Updated since the analysis</li>
+            <li className="flex items-center gap-2"><Swatch tint={RATING.strong.tint} /> Strong bullet for this job</li>
+            <li className="flex items-center gap-2"><Swatch tint={RATING.ok.tint} /> Okay: could be stronger</li>
+            <li className="flex items-center gap-2"><Swatch tint={RATING.weak.tint} /> Weak: worth rewriting</li>
           </>
         )}
         <li className="flex items-center gap-2">

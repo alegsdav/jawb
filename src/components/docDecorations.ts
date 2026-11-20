@@ -7,10 +7,11 @@ import { PLACEHOLDER_RE } from "@/lib/facts";
  * Pure: runs in Node.
  */
 
-export const RATING: Record<Rating, { label: string; tint: string; dot: string; text: string; light: string }> = {
-  strong: { label: "Strong", tint: "bg-[#e9f6ee]", dot: "bg-[#1f8a4c]", text: "text-[#5fd08a]", light: "text-[#188038]" },
-  ok: { label: "Okay", tint: "bg-[#fdf5e2]", dot: "bg-[#c98a12]", text: "text-[#f0b84a]", light: "text-[#b06000]" },
-  weak: { label: "Weak", tint: "bg-[#fdecec]", dot: "bg-[#c53030]", text: "text-[#ff8a8a]", light: "text-[#d93025]" },
+/** Rating colours. Tints are the rating colour at 12% alpha, so they read on the white page in light and dark mode. */
+export const RATING: Record<Rating, { label: string; tint: string; text: string; light: string }> = {
+  strong: { label: "Strong", tint: "bg-[#1f8a4c1f]", text: "text-[#5fd08a]", light: "text-[#188038]" },
+  ok: { label: "Okay", tint: "bg-[#c98a121f]", text: "text-[#f0b84a]", light: "text-[#b06000]" },
+  weak: { label: "Weak", tint: "bg-[#c530301f]", text: "text-[#ff8a8a]", light: "text-[#d93025]" },
 };
 
 export type BulletInfo = {

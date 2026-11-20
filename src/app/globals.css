@@ -184,10 +184,7 @@ body {
 .doc-content a { color: #1155cc; text-decoration: underline; cursor: pointer; }
 .doc-placeholder { color: #b0b0aa; pointer-events: none; user-select: none; -webkit-user-select: none; }
 .doc-ph { background: #ffd84d; border-radius: 2px; box-shadow: 0 0 0 1px #d9a800; }
-/* The rating dot and the change bar sit in the page margin, beside the paragraph. */
-.doc-dot { left: -12px; }
-/* In a list the bullet sits where the dot would go, so the dot moves out past it. */
-.doc-content li .doc-dot { left: -30px; }
+/* The change bar sits in the page margin, beside the paragraph. */
 .doc-changed::before { content: ""; position: absolute; top: 2px; bottom: 2px; right: -16px; width: 3px; border-radius: 3px; background: #2f5bd3; }
 @media (max-width: 900px) {
   .doc-pagebreak { display: none; }

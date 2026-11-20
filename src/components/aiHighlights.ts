@@ -2,12 +2,12 @@ import { Extension } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { BulletFeedback, Rating } from "@/lib/analysis";
+import type { BulletFeedback } from "@/lib/analysis";
 import { RATING, bulletInfo } from "./docDecorations";
 
 /**
  * The AI's highlights drawn over the resume document, as ProseMirror decorations (never document data):
- * the rating tint and dot for each rated paragraph, the [placeholder] marks, and the "changed vs master" bar.
+ * the rating tint for each rated paragraph, the [placeholder] marks, and the "changed vs master" bar.
  */
 
 export type HighlightOptions = {
@@ -53,22 +53,6 @@ function changeKind(id: string, text: string, baseline: Map<string, string>): "n
   return original !== text ? "changed" : null;
 }
 
-/** The small dot at the end of a rated paragraph. Grey "Updated" when the rating no longer applies. */
-function ratingDot(rating: Rating | null, suggested: boolean): () => HTMLElement {
-  const className =
-    `doc-ui doc-dot absolute top-[7px] h-2 w-2 rounded-full ${rating ? RATING[rating].dot : "bg-[#9a9a95]"}` +
-    (suggested ? " ring-2 ring-offset-1 ring-[#2f5bd3]/50" : "");
-  const title = rating ? RATING[rating].label : "Updated";
-  return () => {
-    const el = document.createElement("span");
-    el.className = className;
-    el.title = title;
-    el.setAttribute("aria-hidden", "true");
-    el.setAttribute("contenteditable", "false");
-    return el;
-  };
-}
-
 /** The decorations for one paragraph; `pos` is its position in the document. */
 function paragraphDecorations(node: PMNode, pos: number, opts: HighlightOptions): Decoration[] {
   const out: Decoration[] = [];
@@ -87,18 +71,6 @@ function paragraphDecorations(node: PMNode, pos: number, opts: HighlightOptions)
     }
   } else if (opts.showHighlights && info.fb && from < to) {
     out.push(Decoration.inline(from, to, { class: RATING[info.fb.rating].tint }));
-  }
-
-  if (opts.showHighlights && info.view && info.view.state !== "stale") {
-    const rating = info.fb?.rating ?? null;
-    const suggested = info.suggestion !== "";
-    out.push(
-      Decoration.widget(to, ratingDot(rating, suggested), {
-        side: 1,
-        ignoreSelection: true,
-        key: `dot:${id}:${info.view.state}:${rating ?? "-"}:${suggested ? "s" : "n"}`,
-      }),
-    );
   }
 
   const change = opts.showChanges && opts.baseline ? changeKind(id, text, opts.baseline) : null;
