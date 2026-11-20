@@ -175,6 +175,8 @@ export default function MasterResumePage() {
   const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
   const [coachStart, setCoachStart] = useState<"questions" | undefined>(undefined);
   const [sideTab, setSideTab] = useState<"coach" | "facts">("coach");
+  /** Phones and tablets (below lg): which half is shown. Both stay mounted; the other is only hidden with CSS. */
+  const [phoneView, setPhoneView] = useState<"resume" | "coach">("resume");
   // Print and save shortcuts, and the File/toolbar actions. Hooks run before the early returns below.
   useEditorShortcuts({ onPrint: () => window.print(), onSave: () => {} });
   const actions = useResumeActions(resume ?? emptyResume(), `${resume?.header.name ?? ""} Resume`);
@@ -296,6 +298,8 @@ export default function MasterResumePage() {
   if (!resume) return <p className="text-muted">Loading…</p>;
 
   const empty = isEmptyResume(resume);
+  /** Onboarding (an empty master) has no switcher: the document view always shows. */
+  const view = empty ? "resume" : phoneView;
   const factCount = facts.facts.length;
   /** Puts an import (or a rebuild) on the master, merged so bullets keep their ids; returns the new master. */
   const takeImport = (r: Resume): Resume => {
@@ -364,6 +368,7 @@ export default function MasterResumePage() {
     setCoachTarget({ sectionId, entryId, bulletId: null });
     setCoachStart("questions");
     setSideTab("coach");
+    setPhoneView("coach");
     document.getElementById("side-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   const deleteFact = async (f: Fact) => {
@@ -448,7 +453,10 @@ export default function MasterResumePage() {
           <a
             href="#side-panel"
             className="hidden rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg sm:inline-flex lg:hidden"
-            onClick={() => setSideTab("facts")}
+            onClick={() => {
+              setSideTab("facts");
+              setPhoneView("coach");
+            }}
           >
             Facts ({factCount})
           </a>
@@ -467,9 +475,29 @@ export default function MasterResumePage() {
         </div>
       )}
 
+      {/* Phones and tablets: switch between the document and the Coach and Facts panel. Hidden on lg+. */}
+      {!empty && (
+        <div role="tablist" aria-label="Resume sections" className="flex items-stretch gap-3 border-b border-border px-4 pt-1 lg:hidden">
+          {(["resume", "coach"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={view === v}
+              onClick={() => setPhoneView(v)}
+              className={`-mb-px flex shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0.5 py-1.5 text-[13px] transition-colors ${
+                view === v ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"
+              }`}
+            >
+              {v === "resume" ? "Resume" : "Coach"}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         {/* Document column: grey Docs canvas (scrolls on lg+), status bar pinned at its bottom. */}
-        <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+        <div className={`min-w-0 flex-1 flex-col lg:flex lg:min-h-0 ${view === "coach" ? "hidden" : "flex"}`}>
           {onboarding ? (
             <div className="mx-auto w-full max-w-[860px] space-y-3 px-4 pb-6 pt-4 sm:px-8">
               {building ? (
@@ -509,53 +537,58 @@ export default function MasterResumePage() {
         {/* Side panel: hairline divider on lg+, its own scroll. Phones: stacked below the document. */}
         <div
           id="side-panel"
-          className="scroll-mt-16 space-y-4 border-t border-border p-4 lg:relative lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-t-0"
+          className={`scroll-mt-16 border-border lg:relative lg:w-[340px] lg:shrink-0 lg:space-y-4 lg:overflow-y-auto lg:border-l lg:p-4 ${
+            view === "coach" ? "space-y-4 border-t p-4 lg:border-t-0" : ""
+          }`}
         >
-          {/* The selected bullet's comment card. Takes no room in flow: a bottom sheet on phones, an overlay on the panel on lg+. */}
+          {/* The selected bullet's comment card. Takes no room in flow: a bottom sheet on phones, an overlay on the panel on lg+.
+              Outside the hidden part below, so it still shows over the document on phones. */}
           <div
             ref={setCommentEl}
             className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto lg:absolute lg:inset-x-4 lg:bottom-auto lg:top-4 lg:z-20 lg:max-h-[70%]"
           />
-          <SideTabs
-            label="Panel"
-            value={sideTab}
-            onChange={setSideTab}
-            tabs={[
-              { key: "coach", label: "Coach" },
-              { key: "facts", label: `Facts (${factCount})` },
-            ]}
-          />
-          {sideTab === "coach" &&
-            (coachTarget ? (
-              <CoachPanel
-                key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}:${coachStart ?? ""}`}
-                resume={resume}
-                resumeId={id}
-                target={coachTarget}
-                facts={facts}
-                startWith={coachStart}
-                onBack={() => setCoachTarget(null)}
-                onInsert={insertBullet}
-              />
-            ) : (
-              <section aria-label="Coach">
-                <p className="text-sm text-muted">Select a bullet to improve it.</p>
-              </section>
-            ))}
-          {sideTab === "facts" && (
-            <FactsPanel
-              facts={facts.facts}
-              status={facts.status}
-              error={facts.error}
-              onAdd={async (lines) => {
-                const added = await facts.add(lines.map((text) => ({ text, source: "manual" })));
-                if (added?.length) setNotice(`Saved ${plural(added.length, "fact")}.`);
-                else if (added) setNotice("You already have that fact.");
-              }}
-              onEdit={facts.edit}
-              onDelete={deleteFact}
+          <div className={`space-y-4 ${view === "resume" ? "hidden lg:block" : ""}`}>
+            <SideTabs
+              label="Panel"
+              value={sideTab}
+              onChange={setSideTab}
+              tabs={[
+                { key: "coach", label: "Coach" },
+                { key: "facts", label: `Facts (${factCount})` },
+              ]}
             />
-          )}
+            {sideTab === "coach" &&
+              (coachTarget ? (
+                <CoachPanel
+                  key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}:${coachStart ?? ""}`}
+                  resume={resume}
+                  resumeId={id}
+                  target={coachTarget}
+                  facts={facts}
+                  startWith={coachStart}
+                  onBack={() => setCoachTarget(null)}
+                  onInsert={insertBullet}
+                />
+              ) : (
+                <section aria-label="Coach">
+                  <p className="text-sm text-muted">Select a bullet to improve it.</p>
+                </section>
+              ))}
+            {sideTab === "facts" && (
+              <FactsPanel
+                facts={facts.facts}
+                status={facts.status}
+                error={facts.error}
+                onAdd={async (lines) => {
+                  const added = await facts.add(lines.map((text) => ({ text, source: "manual" })));
+                  if (added?.length) setNotice(`Saved ${plural(added.length, "fact")}.`);
+                  else if (added) setNotice("You already have that fact.");
+                }}
+                onEdit={facts.edit}
+                onDelete={deleteFact}
+              />
+            )}
+          </div>
         </div>
       </div>
 

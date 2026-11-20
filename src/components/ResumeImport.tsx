@@ -131,12 +131,7 @@ export function ResumeImport({
 
   return (
     <div className="space-y-3">
-      {replaceWarning && (
-        <p className="text-sm">
-          <strong>Re-importing replaces the current master.</strong>{" "}
-          <span className="text-muted">Your facts are kept.</span>
-        </p>
-      )}
+      {replaceWarning && <p className="text-sm">Re-importing replaces the current master. Your facts are kept.</p>}
       {mode !== "text" && (
       <label
         onDragOver={(e) => {
@@ -150,6 +145,7 @@ export function ResumeImport({
           const f = e.dataTransfer.files?.[0];
           if (f) run(f);
         }}
+        title="A PDF or Word file opens exactly as it is: the same fonts, sizes, bold, lines and spacing, as text you can edit. A .docx is the most accurate. From Google Docs: File → Download → Microsoft Word (.docx) or PDF."
         className={`flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-4 py-7 text-center cursor-pointer transition ${
           dragging ? "border-accent bg-accent/5" : "border-border hover:border-fg/40"
         } ${busy ? "pointer-events-none opacity-60" : ""}`}
@@ -157,13 +153,9 @@ export function ResumeImport({
         <span className="text-sm font-medium">
           {busy
             ? busyKind === "docx" ? "Opening your document…" : busyKind === "pdf" ? "Opening your PDF…" : "Laying out your resume…"
-            : "Drop your resume here (PDF or Word .docx) or tap to choose"}
+            : "Drop your resume here or tap to choose"}
         </span>
-        <span className="text-xs text-muted">
-          A PDF or Word (.docx) file opens exactly as it is: the same fonts, sizes, bold, lines and spacing, as text you can
-          edit. No AI, no template. A .docx is the most accurate. From Google Docs: File → Download → Microsoft Word (.docx)
-          or PDF. Up to 20 MB. A .txt file is treated as pasted text.
-        </span>
+        <span className="text-xs text-muted">PDF or .docx, up to 20 MB</span>
         <input
           type="file"
           accept={`application/pdf,.pdf,${DOCX_TYPE},.docx,application/msword,.doc,text/plain,.txt`}
@@ -183,14 +175,9 @@ export function ResumeImport({
         </div>
       )}
       {mode !== "file" && (
-        <p className="text-xs text-muted">
-          Pasted text has no formatting to keep, so the AI lays it out in the Harvard template. That uses one of your daily AI analyses.
-          To keep your own layout, upload the PDF instead.
-        </p>
-      )}
-      {mode !== "file" && (
         <textarea
           id={PASTE_BOX_ID}
+          title="Pasted text has no formatting to keep, so the AI lays it out in the Harvard template. That uses one of your daily AI analyses. To keep your own layout, upload the PDF instead."
           className="input w-full h-36 font-mono text-xs"
           value={text}
           onChange={(e) => setText(e.target.value)}
