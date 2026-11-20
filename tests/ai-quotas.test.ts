@@ -1,11 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { aiLimits, limitMessage, userLimits } from "@/lib/aiBudget";
-import { adminEmails, isAdminEmail } from "@/lib/admin";
+import { readQuota, usageSummary, withAiBudget } from "@/lib/aiBudget";
 
 type Read = { data?: unknown; error?: unknown } | "throw";
 
-/** A Supabase stand-in whose ai_quotas read returns `read` (or throws). */
+const NOW = Date.parse("2026-11-20T12:00:00Z");
+const now = new Date(NOW);
+const inTwoHours = new Date(NOW + 2 * 3600000).toISOString();
+const past = new Date(NOW - 60000).toISOString();
+
+const row = (over: Record<string, unknown> = {}) => ({
+  heavy_limit: 10, heavy_remaining: 7, heavy_resets_at: null,
+  light_limit: 120, light_remaining: 120, light_resets_at: null,
+  ...over,
+});
+
+/** A Supabase stand-in: the ai_quotas read returns `read` (or throws); reserve_ai_call finds no room. */
 function quotaDb(read: Read) {
   return {
     from: (table: string) => {
@@ -19,6 +30,10 @@ function quotaDb(read: Read) {
         }),
       };
     },
+    rpc: async (name: string) => {
+      if (name !== "reserve_ai_call") throw new Error(`unexpected rpc ${name}`);
+      return { data: null, error: null };
+    },
   } as unknown as SupabaseClient;
 }
 
@@ -26,74 +41,130 @@ const env = { AI_HEAVY_PER_DAY: "10", AI_LIGHT_PER_HOUR: "50" };
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("userLimits", () => {
-  it("an override replaces the env limit for that weight only", async () => {
-    const lim = await userLimits(quotaDb({ data: { heavy_limit: 2, light_limit: null } }), env);
-    expect(lim.heavy).toEqual({ limit: 2, windowMs: 86400000, interval: "24 hours" });
-    expect(lim.light).toEqual({ limit: 50, windowMs: 3600000, interval: "60 minutes" });
+describe("readQuota", () => {
+  it("returns the user's own limits and calls left, per weight", async () => {
+    const q = await readQuota(quotaDb({ data: row() }), now);
+    expect(q).toEqual({
+      heavy: { limit: 10, remaining: 7, resetAt: null },
+      light: { limit: 120, remaining: 120, resetAt: null },
+    });
   });
 
-  it("null overrides and no row both mean the env limits", async () => {
-    const env0 = aiLimits(env);
-    expect(await userLimits(quotaDb({ data: { heavy_limit: null, light_limit: null } }), env)).toEqual(env0);
-    expect(await userLimits(quotaDb({ data: null }), env)).toEqual(env0);
+  it("keeps a running window: remaining 0 with its reset time", async () => {
+    const q = await readQuota(quotaDb({ data: row({ heavy_remaining: 0, heavy_resets_at: inTwoHours }) }), now);
+    expect(q?.heavy).toEqual({ limit: 10, remaining: 0, resetAt: inTwoHours });
   });
 
-  it("a missing table (migration 0007 not run) gives the env limits, without a warning", async () => {
+  it("a window that has passed reads as full (the next call refills it)", async () => {
+    const q = await readQuota(quotaDb({ data: row({ heavy_remaining: 0, heavy_resets_at: past }) }), now);
+    expect(q?.heavy).toEqual({ limit: 10, remaining: 10, resetAt: null });
+  });
+
+  it("a limit of 0 is returned as 0", async () => {
+    const q = await readQuota(quotaDb({ data: row({ light_limit: 0, light_remaining: 0 }) }), now);
+    expect(q?.light).toEqual({ limit: 0, remaining: 0, resetAt: null });
+  });
+
+  it("no row gives null", async () => {
+    expect(await readQuota(quotaDb({ data: null }), now)).toBeNull();
+  });
+
+  it("a missing table (migration 0008 not run) gives null, without a warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const lim = await userLimits(quotaDb({ error: { code: "PGRST205", message: "Could not find the table 'public.ai_quotas' in the schema cache" } }), env);
-    expect(lim).toEqual(aiLimits(env));
+    const err = { code: "PGRST205", message: "Could not find the table 'public.ai_quotas' in the schema cache" };
+    expect(await readQuota(quotaDb({ error: err }), now)).toBeNull();
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("another read error gives the env limits and logs a warning", async () => {
+  it("a missing column (42703) gives null, without a warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const lim = await userLimits(quotaDb({ error: { code: "42501", message: "permission denied" } }), env);
-    expect(lim).toEqual(aiLimits(env));
+    const err = { code: "42703", message: 'column "heavy_remaining" does not exist' };
+    expect(await readQuota(quotaDb({ error: err }), now)).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("another read error gives null and logs a warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await readQuota(quotaDb({ error: { code: "42501", message: "permission denied" } }), now)).toBeNull();
     expect(warn).toHaveBeenCalled();
   });
 
-  it("never throws: a thrown read gives the env limits", async () => {
+  it("never throws: a thrown read gives null", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    await expect(userLimits(quotaDb("throw"), env)).resolves.toEqual(aiLimits(env));
-  });
-
-  it("a limit of 0 is kept: that user is turned off for the weight", async () => {
-    const lim = await userLimits(quotaDb({ data: { heavy_limit: 0, light_limit: 0 } }), env);
-    expect(lim.heavy.limit).toBe(0);
-    expect(lim.light.limit).toBe(0);
-    expect(lim.heavy.windowMs).toBe(86400000);
+    await expect(readQuota(quotaDb("throw"), now)).resolves.toBeNull();
   });
 });
 
-describe("limitMessage with a limit of 0", () => {
-  it("says the account's AI is off, for each weight", () => {
-    expect(limitMessage("heavy", { limit: 0, windowMs: 86400000, interval: "24 hours" }, null)).toBe(
-      "AI analyses are turned off for your account.",
-    );
-    expect(limitMessage("light", { limit: 0, windowMs: 3600000, interval: "60 minutes" }, "2026-11-20T10:00:00.000Z")).toBe(
-      "Quick AI actions are turned off for your account.",
+describe("usageSummary with a quota row", () => {
+  it("normal: used, limit and left come from the row", async () => {
+    expect(await usageSummary(quotaDb({ data: row() }), now, env)).toEqual({
+      available: true,
+      heavy: { used: 3, limit: 10, remaining: 7, resetAt: null },
+      light: { used: 0, limit: 120, remaining: 120, resetAt: null },
+    });
+  });
+
+  it("remaining 0 shows when it frees up", async () => {
+    const s = await usageSummary(quotaDb({ data: row({ heavy_remaining: 0, heavy_resets_at: inTwoHours }) }), now, env);
+    expect(s).toMatchObject({ heavy: { used: 10, remaining: 0, resetAt: inTwoHours } });
+  });
+
+  it("a past reset time shows the bucket refilled", async () => {
+    const s = await usageSummary(quotaDb({ data: row({ heavy_remaining: 0, heavy_resets_at: past }) }), now, env);
+    expect(s).toMatchObject({ heavy: { used: 0, remaining: 10, resetAt: null } });
+  });
+
+  it("limit 0 shows no calls at all", async () => {
+    const s = await usageSummary(quotaDb({ data: row({ light_limit: 0, light_remaining: 0 }) }), now, env);
+    expect(s).toMatchObject({ light: { used: 0, limit: 0, remaining: 0, resetAt: null } });
+  });
+});
+
+describe("the 429 message with a quota row", () => {
+  it("uses the quota's limit and reset time, not the env limit", async () => {
+    const client = quotaDb({ data: row({ heavy_limit: 4, heavy_remaining: 0, heavy_resets_at: inTwoHours }) });
+    const err = await withAiBudget(client, { action: "analyze", env, now: () => now }, async () => "ok").catch((e) => e);
+    expect(err).toMatchObject({ status: 429, weight: "heavy", resetAt: inTwoHours });
+    expect(err.message).toBe(
+      "You've used all 4 of your analyses for the last 24 hours (job analyses, resume imports and resume drafts count). The next one opens up in about 2 hours.",
     );
   });
 });
 
-describe("admin emails", () => {
-  const raw = " Owner@Example.com , second@example.org ";
+describe("migration 0008_ai_quota_counters.sql", () => {
+  const sql = readFileSync("supabase/migrations/0008_ai_quota_counters.sql", "utf8");
 
-  it("parses a trimmed, lowercased list", () => {
-    expect(adminEmails(raw)).toEqual(["owner@example.com", "second@example.org"]);
-    expect(adminEmails("")).toEqual([]);
+  it("a limit of 0 blocks calls even with some remaining, and lowering a limit caps remaining", () => {
+    expect(sql).toContain("if q.heavy_limit <= 0 or q.heavy_remaining <= 0 then");
+    expect(sql).toContain("if q.light_limit <= 0 or q.light_remaining <= 0 then");
+    expect(sql).toContain("new.heavy_remaining := least(new.heavy_remaining, new.heavy_limit);");
+    expect(sql).toContain("new.light_remaining := least(new.light_remaining, new.light_limit);");
   });
 
-  it("matches listed emails case-insensitively and nobody else", () => {
-    expect(isAdminEmail("owner@example.com", raw)).toBe(true);
-    expect(isAdminEmail("  SECOND@example.org ", raw)).toBe(true);
-    expect(isAdminEmail("someone@example.com", raw)).toBe(false);
-    expect(isAdminEmail(null, raw)).toBe(false);
-    expect(isAdminEmail(undefined, raw)).toBe(false);
+  it("an edit to remaining after the window passed restarts it; refunds happen only inside a running window", () => {
+    expect(sql).toMatch(/new\.heavy_resets_at <= now\(\) then\s+new\.heavy_resets_at := null;/);
+    expect(sql).toMatch(/new\.light_resets_at <= now\(\) then\s+new\.light_resets_at := null;/);
+    expect(sql).toContain("(heavy_resets_at is null or heavy_resets_at > now())");
+    expect(sql).toContain("(light_resets_at is null or light_resets_at > now())");
   });
 
-  it("an empty list means nobody is an admin", () => {
-    expect(isAdminEmail("owner@example.com", "")).toBe(false);
+  it("defines reserve_ai_call and finish_ai_call with the same signatures as 0004", () => {
+    expect(sql).toMatch(/create or replace function public\.reserve_ai_call\(p_action text, p_weight text, p_limit int, p_window interval\)/);
+    expect(sql).toMatch(
+      /create or replace function public\.finish_ai_call\(\s*p_id uuid, p_status text, p_prompt int, p_output int, p_total int, p_model text default ''\s*\)/,
+    );
+  });
+
+  it("locks the user's quota row while reserving a call", () => {
+    expect(sql).toMatch(/from public\.ai_quotas where user_id = v_uid for update/);
+  });
+
+  it("drops both admin functions from 0007", () => {
+    expect(sql).toMatch(/drop function if exists public\.admin_set_ai_quota\(/);
+    expect(sql).toMatch(/drop function if exists public\.admin_ai_quota_status\(/);
+  });
+
+  it("creates the trigger that gives every new account a quota row", () => {
+    expect(sql).toMatch(/create trigger ai_quotas_new_user after insert on auth\.users/);
   });
 });

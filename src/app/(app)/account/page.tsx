@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { requireUser } from "@/lib/supabase/server";
-import { isAdminEmail } from "@/lib/admin";
 import { PasswordForm } from "@/components/PasswordForm";
 import { UsageCard } from "@/components/UsageMeter";
 
@@ -24,11 +22,6 @@ export default async function AccountPage() {
 
       <div className="space-y-3 border-t border-border pt-4">
         <UsageCard />
-        {isAdminEmail(user?.email) && (
-          <Link href="/admin" className="block text-sm font-medium">
-            Manage AI limits →
-          </Link>
-        )}
       </div>
 
       <section className="space-y-2 border-t border-border pt-4">

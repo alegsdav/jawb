@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import type { TokenUsage } from "./gemini";
-import { isMissingRelation } from "./db";
+import { isMissingColumn, isMissingRelation } from "./db";
 
 /**
  * Per-student AI limits (migration 0004). Every AI route wraps its model call in `withAiBudget`:
@@ -33,7 +33,7 @@ export const AI_WEIGHTS = {
 export type AiAction = keyof typeof AI_WEIGHTS;
 
 export type AiLimit = {
-  /** Calls allowed in the window. 0 = this user's AI is turned off (per-user override, migration 0007). */
+  /** Calls allowed in the window. 0 = this user's AI is turned off. */
   limit: number;
   windowMs: number;
   /** The same window as a Postgres interval, for reserve_ai_call. */
@@ -47,7 +47,11 @@ const positiveInt = (raw: string | undefined, fallback: number) => {
   return Number.isInteger(n) && n > 0 ? n : fallback;
 };
 
-/** Limits from env: AI_HEAVY_PER_DAY (default 10, rolling 24h) and AI_LIGHT_PER_HOUR (default 120, rolling 60 min). */
+/**
+ * Limits from env: AI_HEAVY_PER_DAY (default 10, rolling 24h) and AI_LIGHT_PER_HOUR (default 120, rolling 60 min).
+ * After migration 0008 the limits live in `ai_quotas` per user; these are the fallback before 0008 and are
+ * still passed to reserve_ai_call as p_limit / p_window.
+ */
 export function aiLimits(env: Record<string, string | undefined> = process.env): Record<AiWeight, AiLimit> {
   return {
     heavy: { limit: positiveInt(env.AI_HEAVY_PER_DAY, 10), windowMs: 24 * HOUR, interval: "24 hours" },
@@ -55,31 +59,43 @@ export function aiLimits(env: Record<string, string | undefined> = process.env):
   };
 }
 
+export type QuotaBucket = { limit: number; remaining: number; resetAt: string | null };
+export type Quota = { heavy: QuotaBucket; light: QuotaBucket };
+
 /**
- * The signed-in user's limits: their ai_quotas override per weight (migration 0007), else the env limit.
- * RLS returns only their own row. Never throws: any read problem falls back to the env limits.
+ * The signed-in user's row in `ai_quotas` (migration 0008): their limit, calls left and window reset per weight.
+ * RLS returns only their own row. A window that has passed reads as full (the next call refills it).
+ * Returns null, without throwing, when the table or columns are missing (before 0008), there's no row, or the
+ * read fails; the caller then uses the env limits.
  */
-export async function userLimits(
-  supabase: SupabaseClient,
-  env: Record<string, string | undefined> = process.env,
-): Promise<Record<AiWeight, AiLimit>> {
-  const base = aiLimits(env);
+export async function readQuota(supabase: SupabaseClient, now = new Date()): Promise<Quota | null> {
   try {
-    const { data, error } = await supabase.from("ai_quotas").select("heavy_limit, light_limit").maybeSingle();
+    const { data, error } = await supabase
+      .from("ai_quotas")
+      .select("heavy_limit, heavy_remaining, heavy_resets_at, light_limit, light_remaining, light_resets_at")
+      .maybeSingle();
     if (error) {
-      // Before migration 0007 there's no table: the env limits apply, quietly.
-      if (!isMissingRelation(error)) console.warn("ai_quotas read failed:", error.message);
-      return base;
+      if (!isMissingRelation(error) && !isMissingColumn(error)) console.warn("ai_quotas read failed:", error.message);
+      return null;
     }
-    const row = data as { heavy_limit: number | null; light_limit: number | null } | null;
-    if (!row) return base;
+    const row = data as {
+      heavy_limit: number; heavy_remaining: number; heavy_resets_at: string | null;
+      light_limit: number; light_remaining: number; light_resets_at: string | null;
+    } | null;
+    if (!row) return null;
+    const counts = [row.heavy_limit, row.heavy_remaining, row.light_limit, row.light_remaining];
+    if (!counts.every((n) => typeof n === "number" && Number.isFinite(n))) return null; // not a quota row
+    const bucket = (limit: number, remaining: number, resetAt: string | null): QuotaBucket =>
+      resetAt && Date.parse(resetAt) <= now.getTime()
+        ? { limit, remaining: limit, resetAt: null }
+        : { limit, remaining, resetAt };
     return {
-      heavy: { ...base.heavy, limit: row.heavy_limit ?? base.heavy.limit },
-      light: { ...base.light, limit: row.light_limit ?? base.light.limit },
+      heavy: bucket(row.heavy_limit, row.heavy_remaining, row.heavy_resets_at),
+      light: bucket(row.light_limit, row.light_remaining, row.light_resets_at),
     };
   } catch (e) {
     console.warn("ai_quotas read failed:", e);
-    return base;
+    return null;
   }
 }
 
@@ -190,10 +206,15 @@ export async function withAiBudget<T>(
   }
   if (!id) {
     const now = opts.now?.() ?? new Date();
-    const shown = (await userLimits(supabase, opts.env))[weight];
-    const { rows } = await countedSince(supabase, new Date(now.getTime() - shown.windowMs), weight);
-    const resetAt = resetTime(rows.map((r) => r.created_at), shown);
-    throw new AiBudgetError(limitMessage(weight, shown, resetAt, now), 429, weight, resetAt);
+    const quota = await readQuota(supabase, now);
+    if (quota) {
+      const b = quota[weight];
+      const shown = { ...lim, limit: b.limit };
+      throw new AiBudgetError(limitMessage(weight, shown, b.resetAt, now), 429, weight, b.resetAt);
+    }
+    const { rows } = await countedSince(supabase, new Date(now.getTime() - lim.windowMs), weight);
+    const resetAt = resetTime(rows.map((r) => r.created_at), lim);
+    throw new AiBudgetError(limitMessage(weight, lim, resetAt, now), 429, weight, resetAt);
   }
   let ok = false;
   try {
@@ -230,13 +251,24 @@ export function budgetErrorResponse(e: unknown): NextResponse | null {
 export type UsageBucket = { used: number; limit: number; remaining: number; resetAt: string | null };
 export type UsageSummary = { available: true; heavy: UsageBucket; light: UsageBucket } | { available: false };
 
-/** What GET /api/usage returns: counted calls per weight in each rolling window. */
+/** What GET /api/usage returns: calls used, limit and left per weight, plus when a full bucket frees up. */
 export async function usageSummary(
   supabase: SupabaseClient,
   now = new Date(),
   env: Record<string, string | undefined> = process.env,
 ): Promise<UsageSummary> {
-  const limits = await userLimits(supabase, env);
+  const quota = await readQuota(supabase, now);
+  if (quota) {
+    const bucket = (b: QuotaBucket): UsageBucket => ({
+      used: Math.max(0, b.limit - b.remaining),
+      limit: b.limit,
+      remaining: b.remaining,
+      resetAt: b.remaining === 0 ? b.resetAt : null,
+    });
+    return { available: true, heavy: bucket(quota.heavy), light: bucket(quota.light) };
+  }
+  // Before migration 0008: count the rolling windows in ai_usage.
+  const limits = aiLimits(env);
   const longest = Math.max(limits.heavy.windowMs, limits.light.windowMs);
   const { rows, error } = await countedSince(supabase, new Date(now.getTime() - longest));
   if (error) {
