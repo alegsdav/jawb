@@ -1,5 +1,6 @@
 "use client";
 
+import { DownloadIcon } from "@/components/icons";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,7 +33,7 @@ import {
 } from "@/lib/jobSync";
 import { ResumeDocument } from "@/components/ResumeDocument";
 import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
-import { EditMenu, FormatMenu } from "@/components/FormatMenus";
+import { FormatMenu } from "@/components/FormatMenus";
 import { JobHeader } from "@/components/job/JobHeader";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
@@ -46,11 +47,10 @@ import { progressFields } from "@/lib/progress";
 import { AnalysisPanel } from "@/components/AnalysisPanel";
 import { StatusSelect, FitBadge } from "@/components/StatusSelect";
 import {
-  countWords, DocToolbar, EDIT_SHORTCUTS, EditorToolbar, FeedbackLegend, IconButton, MenuBar, MenuBarMenu, PageCount,
-  PlaceholderCount, StatusBar, Toggle, ToolbarSep, useEditorShortcuts, useZoom, ZoomSelect,
+  countWords, DocToolbar, EditorToolbar, FeedbackLegend, IconButton, MenuBar, MenuBarMenu, PageCount,
+  PlaceholderCount, StatusBar, Toggle, ToolbarSep, useEditorShortcuts, useZoom,
 } from "@/components/DocToolbar";
 import { EditorCanvas } from "@/components/ZoomFrame";
-import { BriefcaseIcon, ChevronRightIcon } from "@/components/icons";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
 import { PageSetupDialog } from "@/components/PageSetupDialog";
 import { SubmittedView } from "@/components/SubmittedView";
@@ -64,37 +64,16 @@ type Question = Analysis["questions"][number];
 type Flash = { message: string; action?: { label: string; onClick: () => void } | null };
 type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConflict[] };
 
-/** [key, phone label, desktop label] */
-const TABS: [Tab, string, string][] = [
-  ["resume", "Resume", "Tailored resume"],
-  ["analysis", "Analysis", "Analysis"], // phones/tablets only; desktop shows it in the sidebar
-  ["job", "Posting", "Job posting"],
-  ["cover", "Letter", "Cover letter"],
+/** [key, label] */
+const TABS: [Tab, string][] = [
+  ["resume", "Resume"],
+  ["analysis", "Analysis"], // phones/tablets only; desktop shows it in the sidebar
+  ["job", "Posting"],
+  ["cover", "Letter"],
 ];
 
 /** Don't re-read the rows again when `focus` and `visibilitychange` fire together. */
 const REFRESH_GAP_MS = 1500;
-
-/** View > Zoom choices, in the order of the zoom picker (0 = Fit). */
-const ZOOM_CHOICES: [number, string][] = [[0, "Fit"], [0.5, "50%"], [0.75, "75%"], [0.9, "90%"], [1, "100%"], [1.25, "125%"], [1.5, "150%"]];
-
-/** A check mark in a fixed-width cell, so the labels of ticked and unticked menu items line up. */
-/** Help > Editing tips: how the document edits, and how the coaching panel follows the caret. */
-const EDITING_TIPS =
-  "Click a bullet to see its feedback and suggested edits. Type anywhere, like a normal document: Enter starts a new " +
-  "paragraph, Backspace joins. Select text and use the toolbar or Format menu for bold, italic, underline, size, " +
-  "alignment and lists. The AI reads your bullets from the document's lists and bold section headings. Undo with Ctrl/⌘+Z.";
-
-const tick = (on: boolean) => <span className="inline-block w-3 shrink-0 text-center">{on ? "✓" : ""}</span>;
-
-const PrintIcon = ({ className }: { className?: string }) => (
-  <svg
-    width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
-    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}
-  >
-    <path d="M7 9V3h10v6" /><rect x="4" y="9" width="16" height="8" rx="2" /><path d="M7 14h10v7H7z" />
-  </svg>
-);
 
 export default function JobPage() {
   const { id } = useParams<{ id: string }>();
@@ -972,7 +951,6 @@ export default function JobPage() {
               selectTab("resume");
               setReveal({ id: bid, n: Date.now() });
             }}
-            onAcceptAll={acceptAll}
           />
         ) : null
       }
@@ -1022,32 +1000,11 @@ export default function JobPage() {
     </div>
   );
 
-  const followUp = (
-    <label className="flex items-center gap-1.5 text-[13px] text-muted">
-      Follow up
-      <input
-        type="date"
-        className="ghost-input text-[13px] border-border sm:border-transparent"
-        value={job.follow_up_date ?? ""}
-        onChange={(e) => patch({ follow_up_date: e.target.value || null })}
-      />
-    </label>
-  );
-  /** The same follow-up date as two grid cells (label, input) for the details list in JobHeader. */
-  const followUpRow = (
-    <>
-      <span className="text-muted">Follow up</span>
-      <input
-        type="date"
-        className="ghost-input justify-self-start text-[13px] border-border sm:border-transparent sm:-ml-[5px]"
-        value={job.follow_up_date ?? ""}
-        onChange={(e) => patch({ follow_up_date: e.target.value || null })}
-      />
-    </>
-  );
   const statusSelect = <StatusSelect value={job.status} onChange={changeStatus} />;
   /** Resume-only controls: on the Tailored resume tab (and on the Analysis tab beside it on lg+). */
   const resumeBar = (tab === "resume" || tab === "analysis") && !!resume && !needsMaster;
+  /** The menu bar (File, Format) and the formatting row are the Tailored resume tab's only. */
+  const resumeTab = tab === "resume";
   /** The Tailored resume (or Analysis on lg+) tab: the canvas column; the other tabs scroll as a plain column. */
   const docTab = tab === "resume" || tab === "analysis";
   const quietText = "whitespace-nowrap rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg";
@@ -1073,7 +1030,6 @@ export default function JobPage() {
             <AppliedNotice
               job={job}
               applied={applied}
-              followUp={followUp}
               statusSelect={statusSelect}
               reapply={reapply}
               onReapply={setReapply}
@@ -1092,21 +1048,13 @@ export default function JobPage() {
                 onReset={resetToMaster}
               />
             )}
-            {resumeBar && !applied && (
-              // Always offered (not only when the banner shows): the banner only sees text changes, not formatting.
-              <div className="flex justify-end">
-                <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={resetToMaster} disabled={analyzing}>
-                  Reset to master resume
-                </button>
-              </div>
-            )}
     </>
   );
 
   /** The document tabs. Desktop: inside the top bar. Phones: their own row under it (the menus keep the whole bar). */
   const tabList = (className: string) => (
     <div role="tablist" aria-label="Job sections" className={className}>
-      {TABS.map(([key, short, full]) => (
+      {TABS.map(([key, label]) => (
         <button
           key={key}
           type="button"
@@ -1117,12 +1065,10 @@ export default function JobPage() {
             key === "analysis" ? "lg:hidden" : ""
           } ${tab === key ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}
         >
-          <span className="sm:hidden">{short}</span>
-          <span className="hidden sm:inline">{full}</span>
+          {label}
           {/* No room for the chip at phone width; the Analysis tab itself shows it. */}
           {key === "analysis" && fit && <span className="hidden sm:inline-flex"><FitBadge fit={fit} /></span>}
           {key === "analysis" && analyzeError && !quiet && <span className="text-bad" aria-label="Analysis failed">!</span>}
-          {key === "resume" && pending.length > 0 && <span className="text-xs text-muted">({pending.length})</span>}
         </button>
       ))}
     </div>
@@ -1136,82 +1082,44 @@ export default function JobPage() {
 
   const topBar = (
     <DocToolbar>
-      <Link
-        href="/"
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-2 py-1 text-xs font-normal text-muted hover:text-fg sm:px-2.5"
-      >
-        <BriefcaseIcon className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Jobs</span>
-        <span className="sr-only sm:hidden">Jobs</span>
+      <Link href="/" className="shrink-0 rounded-md px-1.5 py-1 text-xs text-muted hover:text-fg">
+        <span aria-hidden="true">← </span>Jobs
       </Link>
-      <span className="hidden shrink-0 items-center gap-1 sm:flex">
-        <ChevronRightIcon className="h-3.5 w-3.5 text-muted" aria-hidden="true" />
-        <span className="max-w-[220px] truncate text-xs text-muted" title={job.title}>
-          {job.title || "Untitled job"}
-        </span>
-      </span>
-      <span className="mx-2 hidden h-4 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
 
       {/* Phones: the top bar is nowrap, and the menus would inherit that and stretch to fit their hints off-screen.
           Wrapping them at phone width keeps each popup about 224px wide, inside the screen. */}
-      <div className="whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-44 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
-      <MenuBar>
-        <MenuBarMenu label="File">
-          <MenuItem onSelect={downloadPdf} disabled={pdfBusy}>
-            {pdfBusy ? "Building PDF…" : "Download PDF"}
-          </MenuItem>
-          <MenuItem onSelect={copyText}>Copy as text</MenuItem>
-          <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
-          <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume} hint="Margins of this tailored copy">
-            Page setup…
-          </MenuItem>
-          <MenuSeparator />
-          <MenuItem
-            onSelect={makeMaster}
-            hint="Adds this copy's edits to your master resume. Nothing is removed unless you choose."
-          >
-            Save this tailored copy as my master resume…
-          </MenuItem>
-          <MenuItem
-            onSelect={resetToMaster}
-            disabled={applied || analyzing}
-            hint={applied ? "Locked: this job is marked Applied" : "Copies your master resume here and re-analyzes it"}
-            danger
-          >
-            Reset to master resume…
-          </MenuItem>
-        </MenuBarMenu>
-        <EditMenu commandsRef={commandsRef} fmt={formatState} />
-        <MenuBarMenu label="View">
-          {!quiet && (
-            <MenuItem onSelect={() => setShowFeedback((v) => !v)}>
-              <span className="flex items-center gap-1.5">{tick(showFeedback)}Feedback</span>
-            </MenuItem>
-          )}
-          {!quiet && <MenuSeparator />}
-          {ZOOM_CHOICES.map(([value, label]) => (
-            <MenuItem key={value} onSelect={() => setZoom(value)}>
-              <span className="flex items-center gap-1.5">{tick(zoom === value)}{label}</span>
-            </MenuItem>
-          ))}
-        </MenuBarMenu>
-        <FormatMenu commandsRef={commandsRef} fmt={formatState} />
-        <MenuBarMenu label="Help">
-          <MenuItem onSelect={() => {}} hint={EDITING_TIPS}>
-            Editing tips
-          </MenuItem>
-          <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS}>
-            Keyboard shortcuts
-          </MenuItem>
-          <MenuItem
-            onSelect={() => {}}
-            hint="Green strong, amber could be stronger, red weak. Blue bar: changed from your master resume. Yellow [N]: a placeholder to fill in."
-          >
-            What the colours mean
-          </MenuItem>
-        </MenuBarMenu>
-      </MenuBar>
-      </div>
+      {resumeTab && (
+        <div className="ml-2 whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-44 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
+          <MenuBar>
+            <MenuBarMenu label="File">
+              <MenuItem onSelect={downloadPdf} disabled={pdfBusy}>
+                {pdfBusy ? "Building PDF…" : "Download PDF"}
+              </MenuItem>
+              <MenuItem onSelect={copyText}>Copy as text</MenuItem>
+              <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
+              <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume} hint="Margins of this tailored copy">
+                Page setup…
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem
+                onSelect={makeMaster}
+                hint="Adds this copy's edits to your master resume. Nothing is removed unless you choose."
+              >
+                Save this tailored copy as my master resume…
+              </MenuItem>
+              <MenuItem
+                onSelect={resetToMaster}
+                disabled={applied || analyzing}
+                hint={applied ? "Locked: this job is marked Applied" : "Copies your master resume here and re-analyzes it"}
+                danger
+              >
+                Reset to master resume…
+              </MenuItem>
+            </MenuBarMenu>
+            <FormatMenu commandsRef={commandsRef} fmt={formatState} />
+          </MenuBar>
+        </div>
+      )}
 
       {tabList("ml-2 hidden h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto sm:flex [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
       {saveBox("ml-auto hidden pl-2 sm:flex")}
@@ -1231,28 +1139,17 @@ export default function JobPage() {
       </div>
 
       {/* Formatting-style row under the top bar: fixed height, scrolls sideways on phones. Resume tab only. */}
-      {resumeBar && (
-        <div className={`shrink-0 ${tab === "analysis" ? "hidden lg:block" : ""}`}>
+      {resumeBar && resumeTab && (
+        <div className="shrink-0">
           <EditorToolbar>
-            <IconButton label="Print (Ctrl+P)" onClick={() => window.print()}>
-              <PrintIcon />
-            </IconButton>
-            <ZoomSelect value={zoom} onChange={setZoom} />
+            {/* Document actions (add, move, delete) and the formatting controls portal in here: one fixed group. */}
+            <div ref={setSlot} className="flex shrink-0 items-center" />
             <ToolbarSep />
-            {/* Document actions (add, move, delete) portal in here: one fixed group, so the row never changes width. */}
-            <div ref={setSlot} className="flex items-center" />
-            <ToolbarSep />
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto flex shrink-0 items-center gap-1">
               {quiet ? null : pending.length > 0 ? (
-                <>
-                  <span className="hidden text-xs text-muted sm:inline">{plural(pending.length, "suggestion")}</span>
-                  <button type="button" className={quietText} onClick={reviewNext}>
-                    <span>Review<span className="sm:hidden"> {pending.length}</span></span>
-                  </button>
-                  <button type="button" className={quietText} onClick={acceptAll}>
-                    Accept all
-                  </button>
-                </>
+                <button type="button" className={quietText} onClick={reviewNext}>
+                  <span>Review<span className="sm:hidden"> {pending.length}</span></span>
+                </button>
               ) : analyzing ? (
                 <span className="px-1 text-xs whitespace-nowrap text-muted">
                   Analyzing<span className="hidden sm:inline"> against the job</span>…
@@ -1264,7 +1161,10 @@ export default function JobPage() {
               ) : null}
               {!quiet && <PlaceholderCount count={placeholderCount} onClick={goToPlaceholder} />}
               <span className="hidden md:inline-flex"><PageCount {...measure} /></span>
-              {!quiet && <Toggle on={showFeedback} onChange={setShowFeedback} label="Feedback" />}
+              {!quiet && <Toggle on={showFeedback} onChange={setShowFeedback} label="Highlights" />}
+              <IconButton label={pdfBusy ? "Building PDF…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy}>
+                <DownloadIcon />
+              </IconButton>
             </div>
           </EditorToolbar>
         </div>
@@ -1351,30 +1251,26 @@ export default function JobPage() {
               job={job}
               applied={applied}
               statusSelect={statusSelect}
-              followUp={followUpRow}
-              saveState={saveState}
               detailsOpen={detailsOpen}
               onToggleDetails={() => setDetailsOpen((o) => !o)}
               onPatch={patch}
               onDelete={deleteJob}
             />
-            {resumeBar && showHighlights && (analysis || changedCount > 0) && (
-              // Phones: behind the "Details" toggle. The legend's bordered "?" button is flattened to a plain glyph.
-              <div
-                className={`${detailsOpen ? "flex" : "hidden"} mt-3 items-center justify-between gap-3 text-xs text-muted sm:flex lg:mt-4`}
-              >
-                <span>Colours in the document</span>
-                <div className="[&_button]:border-0 [&_button]:bg-transparent [&_button]:px-1 [&_button]:text-muted">
-                  <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
-                </div>
-              </div>
-            )}
             <div
               ref={setCommentEl}
               className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:absolute lg:inset-x-0 lg:top-full lg:mt-3 lg:bottom-auto lg:z-20 lg:max-h-none lg:overflow-visible"
             />
           </div>
           <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>{side}</div>
+          {/* Collapsed by default: the "?" opens what the colours mean. */}
+          {resumeBar && showHighlights && (analysis || changedCount > 0) && (
+            <div className="flex items-center justify-between gap-3 border-t border-border pt-3 text-xs text-muted">
+              <span>Colours in the document</span>
+              <div className="[&_button]:border-0 [&_button]:bg-transparent [&_button]:px-1 [&_button]:text-muted">
+                <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+              </div>
+            </div>
+          )}
         </aside>
       </div>
 

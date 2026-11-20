@@ -97,10 +97,10 @@ export function MenuBarMenu({ label, children }: { label: React.ReactNode; child
   );
 }
 
-/** Formatting-style toolbar row under the top bar. Fixed height, never changes width when content changes. */
+/** Formatting-style toolbar row under the top bar. One row: phones scroll it sideways instead of wrapping. */
 export function EditorToolbar({ children }: { children: React.ReactNode }) {
   return (
-    <div data-doc-keep-selection className="flex min-h-10 flex-wrap items-center gap-1 border-b border-border bg-surface px-2 py-1">
+    <div data-doc-keep-selection className="flex min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1">
       {children}
     </div>
   );

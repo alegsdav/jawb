@@ -1,7 +1,9 @@
 "use client";
 
 import type { Job } from "@/lib/types";
+import { SUBMITTED_STATUSES } from "@/lib/outcomes";
 import { DeadlineField } from "../DeadlineField";
+import { Menu, MenuItem } from "../Menu";
 import { ChevronDownIcon } from "../icons";
 
 /** Borderless input that's exactly as wide as its text: the hidden sizing text sets the width, the input sits over it. */
@@ -25,21 +27,47 @@ function FitInput({
   );
 }
 
+const TITLE_TEXT = "text-lg font-semibold leading-snug tracking-tight";
+
 /**
- * The job's details block at the top of the side panel. The title always shows; on phones everything
- * else (company and location, status, save state, follow-up, deadline, delete) sits behind a "Details"
- * toggle so the document isn't pushed down. On desktop it's all shown as a compact definition list.
+ * The job title, in the side panel's h1. A long title wraps onto as many lines as it needs: a hidden copy
+ * sets the height and the textarea sits over it (the same trick as FitInput). Enter doesn't add a line.
+ */
+function TitleField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <h1 className="relative -mx-[5px] min-w-0 flex-1">
+      <span aria-hidden className={`invisible block whitespace-pre-wrap break-words rounded-lg border border-transparent px-1 py-0.5 ${TITLE_TEXT}`}>
+        {value || "Job title"}{" "}
+      </span>
+      <textarea
+        rows={1}
+        className={`ghost-input absolute inset-0 h-full w-full resize-none overflow-hidden ${TITLE_TEXT}`}
+        value={value}
+        placeholder="Job title"
+        aria-label="Job title"
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.preventDefault();
+        }}
+        onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
+      />
+    </h1>
+  );
+}
+
+/** Status, Follow up and Deadline share one control size, so the column lines up. */
+const CONTROL = "flex h-8 w-44 items-center [&>*]:h-full [&>*]:w-full [&_input]:w-full [&_select]:w-full";
+
+/**
+ * The job's details block at the top of the side panel. The title always shows, with a "⋯" menu for
+ * Delete job; on phones the rest (company and location, status, deadline, follow-up) sits behind a
+ * "Details" toggle so the document isn't pushed down. On desktop it's all shown as a compact list.
  */
 export function JobHeader({
-  job, applied, statusSelect, followUp, detailsOpen, onToggleDetails, onPatch, onDelete,
+  job, applied, statusSelect, detailsOpen, onToggleDetails, onPatch, onDelete,
 }: {
   job: Job;
   applied: boolean;
   statusSelect: React.ReactNode;
-  /** The follow-up date as a grid row (label + input). */
-  followUp: React.ReactNode;
-  /** Kept for compatibility: save status now lives only in the page's top bar. */
-  saveState?: string;
   detailsOpen: boolean;
   onToggleDetails: () => void;
   onPatch: (p: Partial<Job>) => void;
@@ -47,13 +75,18 @@ export function JobHeader({
 }) {
   return (
     <div className="space-y-2">
-      <input
-        className="ghost-input -mx-[5px] w-full text-lg font-semibold tracking-tight"
-        value={job.title}
-        placeholder="Job title"
-        aria-label="Job title"
-        onChange={(e) => onPatch({ title: e.target.value })}
-      />
+      <div className="flex items-start gap-2">
+        <TitleField value={job.title} onChange={(v) => onPatch({ title: v })} />
+        <Menu
+          label="⋯"
+          title="More actions"
+          buttonClassName="shrink-0 rounded-md px-2 py-0.5 text-lg leading-none text-muted hover:bg-surface-2 hover:text-fg"
+        >
+          <MenuItem onSelect={onDelete} danger>
+            Delete job
+          </MenuItem>
+        </Menu>
+      </div>
 
       <button
         type="button"
@@ -87,19 +120,28 @@ export function JobHeader({
             <>
               <span className="text-muted">Status</span>
               {/* The select's dot sits 10px in; pull the wrapper back so the dot lines up with the other values. */}
-              <div className="justify-self-start -ml-2.5">{statusSelect}</div>
+              <div className={`${CONTROL} -ml-2.5`}>{statusSelect}</div>
             </>
           )}
-          {!applied && followUp}
           {/* DeadlineField's own label sits in the same 84px column as the other labels. */}
-          <div className="col-span-2 [&_label]:gap-3 [&_label>span]:w-[84px] [&_label>span]:shrink-0 [&_label>span]:text-[13px] [&_input]:text-[13px] [&_input]:sm:-ml-[5px]">
+          <div className="col-span-2 [&_label]:gap-3 [&_label>span]:w-[84px] [&_label>span]:shrink-0 [&_label>span]:text-[13px] [&_input]:h-8 [&_input]:w-44 [&_input]:text-[13px] [&_input]:sm:-ml-[5px]">
             <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => onPatch({ deadline: v })} />
           </div>
+          {SUBMITTED_STATUSES.has(job.status) && (
+            <>
+              <span className="text-muted">Follow up</span>
+              <div className={`${CONTROL} sm:-ml-[5px]`}>
+                <input
+                  type="date"
+                  aria-label="Follow-up date"
+                  className="ghost-input text-[13px] border-border sm:border-transparent"
+                  value={job.follow_up_date ?? ""}
+                  onChange={(e) => onPatch({ follow_up_date: e.target.value || null })}
+                />
+              </div>
+            </>
+          )}
         </div>
-
-        <button type="button" className="block text-[13px] text-muted hover:text-bad" onClick={onDelete}>
-          Delete job
-        </button>
       </div>
     </div>
   );

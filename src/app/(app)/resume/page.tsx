@@ -538,12 +538,8 @@ export default function MasterResumePage() {
                 onInsert={insertBullet}
               />
             ) : (
-              <section className="space-y-2" aria-labelledby="coach-intro">
-                <h2 id="coach-intro" className="text-sm font-medium">Coach</h2>
-                <p className="text-sm text-muted">
-                  Select any entry or bullet on your resume to see examples of strong bullets, or answer a few questions
-                  that help you find your real numbers. Nothing goes on your resume until you choose it.
-                </p>
+              <section aria-label="Coach">
+                <p className="text-sm text-muted">Select a bullet to improve it.</p>
               </section>
             ))}
           {sideTab === "facts" && (

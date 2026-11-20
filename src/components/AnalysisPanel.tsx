@@ -168,12 +168,16 @@ export function AnalysisPanel(p: Props) {
   return (
     <div className="space-y-4">
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h2 className="text-[13px] font-semibold">Analysis</h2>
+        <div className="flex flex-nowrap items-center gap-2">
           {fit && <FitBadge fit={fit} />}
           {!p.quiet && (
-            <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50 ml-auto" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
+            <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50 whitespace-nowrap" onClick={p.onAnalyze} disabled={p.analyzing || !!p.disabledReason}>
               {p.analyzing ? "Analyzing…" : a ? "Re-analyze" : "Analyze fit"}
+            </button>
+          )}
+          {!p.quiet && p.pendingCount > 0 && (
+            <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50 ml-auto whitespace-nowrap" onClick={p.onAcceptAll}>
+              Accept all
             </button>
           )}
         </div>
@@ -212,7 +216,6 @@ export function AnalysisPanel(p: Props) {
             </p>
             <div className="flex flex-wrap gap-1.5">
               <button className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={p.onReview}>Review one by one</button>
-              <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" onClick={p.onAcceptAll}>Accept all</button>
             </div>
           </div>
         )}

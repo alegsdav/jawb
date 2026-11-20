@@ -6,15 +6,14 @@ import { formatSubmitted } from "../SubmittedView";
 
 /**
  * After applying: "You applied on Nov 13. Edits here don't change what you sent." with View what you
- * sent, follow-up, status and "Keep editing (for a re-apply)". Once the job moves back out of a sent
+ * sent, status and "Keep editing (for a re-apply)". Once the job moves back out of a sent
  * status, a one-line "Applied Nov 13 · View what you sent". Nothing when it was never submitted.
  */
 export function AppliedNotice({
-  job, applied, followUp, statusSelect, reapply, onReapply, onViewSubmitted,
+  job, applied, statusSelect, reapply, onReapply, onViewSubmitted,
 }: {
   job: Job;
   applied: boolean;
-  followUp: React.ReactNode;
   statusSelect: React.ReactNode;
   reapply: boolean;
   onReapply: (v: boolean) => void;
@@ -37,7 +36,6 @@ export function AppliedNotice({
                 View what you sent
               </button>
             )}
-            {followUp}
             <label className="text-[13px] text-muted flex items-center gap-1.5">
               Status {statusSelect}
             </label>

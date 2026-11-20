@@ -311,13 +311,6 @@ export function CoachPanel({
 
           {stage.kind === "choose" && (
             <div className="space-y-2">
-              {!bullet && (
-                <p className="text-[13px]">
-                  {jobId
-                    ? "Make this stronger for this posting. Pick how you'd like to start:"
-                    : "Make this stronger for any recruiter. Pick how you'd like to start:"}
-                </p>
-              )}
               <div className="flex flex-col gap-2">
                 <button type="button" className="w-full rounded-lg border border-border px-3 py-2 text-left text-[13px] font-medium hover:bg-surface-2 disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(1, true)}>
                   {busy === "examples" ? "Writing examples…" : "Show me examples"}

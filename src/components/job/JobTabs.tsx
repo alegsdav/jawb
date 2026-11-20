@@ -51,9 +51,7 @@ export function CoverLetterTab({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-[13px] text-muted flex-1 min-w-48">
-          {quiet ? "The letter as you last saved it here." : "Only send one if the application asks. Replace every [placeholder] first."}
-        </p>
+        {quiet && <p className="text-[13px] text-muted flex-1 min-w-48">The letter as you last saved it here.</p>}
         {coverPlaceholders > 0 && !quiet && (
           <span className="chip border-[#e0b100] bg-[#fff6d6] text-[#5c4300]">
             {plural(coverPlaceholders, "placeholder")} left
