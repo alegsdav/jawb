@@ -101,7 +101,8 @@ Fit (judge the candidate as shown by the resume plus the facts and answers above
 - "strong": meets the core requirements; a recruiter would likely move them forward.
 - "possible": meets some core requirements, with gaps a tailored resume could reasonably cover.
 - "stretch": missing several core requirements (level, degree, key skills); apply only if very interested.
-Rate EVERY resume bullet. Ask 2-6 questions. Never ask anything the CANDIDATE FACTS or earlier answers already cover; use that information in the rewrites instead. Order gaps by severity.`;
+Rate EVERY resume bullet. Ask 2-6 questions. Never ask anything the CANDIDATE FACTS or earlier answers already cover; use that information in the rewrites instead. Order gaps by severity.
+Never mention bullet ids ([b:…] or b:…) in any text field; refer to a bullet by its words instead.`;
 }
 
 export function coverLetterPrompt(args: { resume: string; job: string; facts: string; answers: string }) {

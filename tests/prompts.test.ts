@@ -55,6 +55,10 @@ describe("analyzePrompt: resume review rubric", () => {
     expect(builderDraftPrompt([], "")).not.toContain("review rubric");
   });
 
+  it("tells the model never to mention bullet ids in text", () => {
+    expect(analysis).toContain("Never mention bullet ids ([b:…] or b:…) in any text field");
+  });
+
   it("keeps the exact JSON output block", () => {
     expect(analysis).toContain(`Return ONLY JSON with exactly this shape:
 {

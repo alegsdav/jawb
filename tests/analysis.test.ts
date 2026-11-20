@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeAnalysis, normalizeAnalysis } from "@/lib/analysis";
+import { mergeAnalysis, normalizeAnalysis, stripBulletIds } from "@/lib/analysis";
 import { formatAnswers } from "@/lib/answers";
 import type { Analysis } from "@/lib/types";
 
@@ -112,5 +112,58 @@ describe("mergeAnalysis", () => {
     const snapshot = JSON.stringify(prev);
     mergeAnalysis(prev, fresh(), new Date());
     expect(JSON.stringify(prev)).toBe(snapshot);
+  });
+});
+
+describe("stripBulletIds", () => {
+  it("removes a bullet id and its 'in bullet' lead-in, then tidies the punctuation", () => {
+    expect(stripBulletIds("replace [X%] in bullet b:u2ze00dz.")).toBe("replace [X%].");
+  });
+
+  it("removes a bracketed id at the start and trims the result", () => {
+    expect(stripBulletIds("[b:abc] is weak")).toBe("is weak");
+  });
+
+  it("removes 'bullet' and 'for bullet' lead-ins and bracketed ids", () => {
+    expect(stripBulletIds("Tighten the verb for bullet [b:abc_1-2], then add a number.")).toBe("Tighten the verb, then add a number.");
+    expect(stripBulletIds("Bullet [b:xyz] needs a metric")).toBe("needs a metric");
+  });
+
+  it("leaves a sentence without an id unchanged", () => {
+    const plain = "Lead with the dashboard  you built  in Excel.";
+    expect(stripBulletIds(plain)).toBe(plain);
+    expect(stripBulletIds("Web:app and mob:tile are fine, and so is sub-b:x.")).toBe("Web:app and mob:tile are fine, and so is sub-b:x.");
+  });
+
+  it("never touches other words", () => {
+    expect(stripBulletIds("Bullets in your bullet list")).toBe("Bullets in your bullet list");
+  });
+});
+
+describe("normalizeAnalysis: no bullet ids in user-facing text", () => {
+  const leaky = {
+    verdict: "Strong fit. Fix bullet b:u2ze00dz first.",
+    strengths: ["Owns the [b:abc] dashboard work"],
+    gaps: [{ issue: "No metric in b:xyz1", severity: "high", fix: "Add a number in bullet b:xyz1." }],
+    bullets: [{ bullet_id: "b:u2ze00dz", rating: "weak", note: "Weak, see [b:u2ze00dz]", rewrite: "Built the [b:keep] dashboard" }],
+    questions: [{ id: "q1", question: "How many users for bullet b:u2ze00dz?", why: "Metric for b:u2ze00dz", bullet_id: "b:u2ze00dz", placeholder: "[X%]" }],
+  };
+
+  it("strips ids from verdict, strengths, gaps, bullet notes and questions", () => {
+    const a = normalizeAnalysis(leaky);
+    expect(a.verdict).toBe("Strong fit. Fix first.");
+    expect(a.strengths).toEqual(["Owns the dashboard work"]);
+    expect(a.gaps[0]).toEqual({ issue: "No metric in", severity: "high", fix: "Add a number." });
+    expect(a.bullets[0].note).toBe("Weak, see");
+    expect(a.questions[0].question).toBe("How many users?");
+    expect(a.questions[0].why).toBe("Metric for");
+  });
+
+  it("keeps bullet_id, rewrite and placeholder links intact", () => {
+    const a = normalizeAnalysis(leaky);
+    expect(a.bullets[0].bullet_id).toBe("u2ze00dz");
+    expect(a.bullets[0].rewrite).toBe("Built the [b:keep] dashboard");
+    expect(a.questions[0].bullet_id).toBe("u2ze00dz");
+    expect(a.questions[0].placeholder).toBe("[X%]");
   });
 });

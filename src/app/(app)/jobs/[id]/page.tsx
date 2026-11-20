@@ -508,6 +508,12 @@ export default function JobPage() {
     };
   }, [refresh]);
 
+  // Browser tab title: the job's name once it has loaded (the layout's "Jawb" until then).
+  useEffect(() => {
+    if (!job) return;
+    document.title = `${job.title.trim() || job.company.trim() || "Job"} · Jawb`;
+  }, [job]);
+
   // ---------- derived ----------
 
   const analysis = job?.analysis ?? null;
@@ -940,7 +946,6 @@ export default function JobPage() {
         priority.length || analysis?.keywords.missing.length ? (
           <PriorityList
             items={priority}
-            missingKeywords={analysis?.keywords.missing ?? []}
             onAccept={(bid, rewrite) => {
               if (!resume) return;
               setResume(replaceBullet(resume, bid, rewrite));
@@ -1000,7 +1005,7 @@ export default function JobPage() {
     </div>
   );
 
-  const statusSelect = <StatusSelect value={job.status} onChange={changeStatus} />;
+  const statusSelect = <StatusSelect value={job.status} onChange={changeStatus} form />;
   /** Resume-only controls: on the Tailored resume tab (and on the Analysis tab beside it on lg+). */
   const resumeBar = (tab === "resume" || tab === "analysis") && !!resume && !needsMaster;
   /** The menu bar (File, Format) and the formatting row are the Tailored resume tab's only. */
@@ -1097,20 +1102,17 @@ export default function JobPage() {
               </MenuItem>
               <MenuItem onSelect={copyText}>Copy as text</MenuItem>
               <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
-              <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume} hint="Margins of this tailored copy">
+              <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume}>
                 Page setup…
               </MenuItem>
               <MenuSeparator />
-              <MenuItem
-                onSelect={makeMaster}
-                hint="Adds this copy's edits to your master resume. Nothing is removed unless you choose."
-              >
+              <MenuItem onSelect={makeMaster}>
                 Save this tailored copy as my master resume…
               </MenuItem>
               <MenuItem
                 onSelect={resetToMaster}
                 disabled={applied || analyzing}
-                hint={applied ? "Locked: this job is marked Applied" : "Copies your master resume here and re-analyzes it"}
+                hint={applied ? "Locked: this job is marked Applied" : undefined}
                 danger
               >
                 Reset to master resume…
@@ -1261,16 +1263,18 @@ export default function JobPage() {
               className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:absolute lg:inset-x-0 lg:top-full lg:mt-3 lg:bottom-auto lg:z-20 lg:max-h-none lg:overflow-visible"
             />
           </div>
-          <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>{side}</div>
-          {/* Collapsed by default: the "?" opens what the colours mean. */}
-          {resumeBar && showHighlights && (analysis || changedCount > 0) && (
-            <div className="flex items-center justify-between gap-3 border-t border-border pt-3 text-xs text-muted">
-              <span>Colours in the document</span>
-              <div className="[&_button]:border-0 [&_button]:bg-transparent [&_button]:px-1 [&_button]:text-muted">
-                <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+          <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>
+            {side}
+            {/* Collapsed by default: the "?" opens what the colours mean. Inside the panel only: on phones, the Analysis tab's bottom. */}
+            {resumeBar && showHighlights && (analysis || changedCount > 0) && (
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-border pt-3 text-xs text-muted">
+                <span>Colours in the document</span>
+                <div className="[&_button]:border-0 [&_button]:bg-transparent [&_button]:px-1 [&_button]:text-muted">
+                  <FeedbackLegend analyzed={!!analysis} changedCount={changedCount} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </aside>
       </div>
 

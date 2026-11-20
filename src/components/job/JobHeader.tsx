@@ -54,7 +54,7 @@ function TitleField({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-/** Status, Follow up and Deadline share one control size, so the column lines up. */
+/** Status, Deadline and Follow up share one control box (h-8, w-44), starting at the same left edge as each other. */
 const CONTROL = "flex h-8 w-44 items-center [&>*]:h-full [&>*]:w-full [&_input]:w-full [&_select]:w-full";
 
 /**
@@ -119,22 +119,21 @@ export function JobHeader({
           {!applied && (
             <>
               <span className="text-muted">Status</span>
-              {/* The select's dot sits 10px in; pull the wrapper back so the dot lines up with the other values. */}
-              <div className={`${CONTROL} -ml-2.5`}>{statusSelect}</div>
+              <div className={CONTROL}>{statusSelect}</div>
             </>
           )}
           {/* DeadlineField's own label sits in the same 84px column as the other labels. */}
-          <div className="col-span-2 [&_label]:gap-3 [&_label>span]:w-[84px] [&_label>span]:shrink-0 [&_label>span]:text-[13px] [&_input]:h-8 [&_input]:w-44 [&_input]:text-[13px] [&_input]:sm:-ml-[5px]">
+          <div className="col-span-2 [&_label]:gap-3 [&_label>span]:w-[84px] [&_label>span]:shrink-0 [&_label>span]:text-[13px] [&_input]:h-8 [&_input]:w-44 [&_input]:text-[13px]">
             <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => onPatch({ deadline: v })} />
           </div>
           {SUBMITTED_STATUSES.has(job.status) && (
             <>
               <span className="text-muted">Follow up</span>
-              <div className={`${CONTROL} sm:-ml-[5px]`}>
+              <div className={CONTROL}>
                 <input
                   type="date"
                   aria-label="Follow-up date"
-                  className="ghost-input text-[13px] border-border sm:border-transparent"
+                  className="ghost-input text-[13px] border-border"
                   value={job.follow_up_date ?? ""}
                   onChange={(e) => onPatch({ follow_up_date: e.target.value || null })}
                 />

@@ -13,14 +13,21 @@ export const STATUS_DOT: Record<JobStatus, string> = {
   skipped: "var(--dot-grey)",
 };
 
-/** Status as a dot and a label, still a native select underneath. */
-export function StatusSelect({ value, onChange }: { value: JobStatus; onChange: (s: JobStatus) => void }) {
+/**
+ * Status as a dot and a label, still a native select underneath.
+ * `form`: fills its parent and matches the job page's date fields (h-8, bordered, 13px). The dashboard table keeps the default.
+ */
+export function StatusSelect({ value, onChange, form = false }: { value: JobStatus; onChange: (s: JobStatus) => void; form?: boolean }) {
   return (
-    <span className="relative inline-flex items-center">
+    <span className={`relative inline-flex items-center ${form ? "h-full w-full" : ""}`}>
       <span aria-hidden className="pointer-events-none absolute left-2.5 h-2 w-2 rounded-full" style={{ background: STATUS_DOT[value] }} />
       <select
         aria-label="Status"
-        className="input rounded-full border-transparent bg-transparent py-1 pl-6 pr-1 text-xs font-medium hover:bg-surface-2"
+        className={
+          form
+            ? "ghost-input h-full w-full border-border pl-6 pr-1 text-[13px] font-medium"
+            : "input rounded-full border-transparent bg-transparent py-1 pl-6 pr-1 text-xs font-medium hover:bg-surface-2"
+        }
         value={value}
         onChange={(e) => onChange(e.target.value as JobStatus)}
       >

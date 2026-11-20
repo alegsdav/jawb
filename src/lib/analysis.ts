@@ -16,6 +16,20 @@ function fitOfRaw(r: Record<string, unknown>): Fit {
   return Number.isFinite(score) ? fitFromScore(score) : "possible";
 }
 
+/**
+ * Bullet ids are internal. A `[b:ID]` or `b:ID` token (ID = [A-Za-z0-9_-]+) that leaks into user-facing
+ * text is removed, along with a directly preceding "bullet " / "in bullet " / "for bullet ".
+ */
+const BULLET_REF = /(?:\b(?:[Ff]or |[Ii]n )?[Bb]ullet\s+)?(?:\[b:[A-Za-z0-9_-]+\]|(?<![A-Za-z0-9_-])b:[A-Za-z0-9_-]+)/g;
+
+/** Strips leaked bullet-id references from user-facing text. Text without one is returned unchanged. */
+export function stripBulletIds(text: string): string {
+  if (!text.includes("b:")) return text;
+  const out = text.replace(BULLET_REF, "");
+  if (out === text) return text;
+  return out.replace(/ {2,}/g, " ").replace(/\s+([.,;:!?])/g, "$1").trim();
+}
+
 /** Coerce whatever the model (or an old stored row) returned into a complete Analysis so the UI never crashes on a missing field. */
 export function normalizeAnalysis(raw: unknown): Analysis {
   const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
@@ -23,17 +37,18 @@ export function normalizeAnalysis(raw: unknown): Analysis {
   const rating = (v: unknown): "strong" | "ok" | "weak" => (v === "strong" || v === "weak" ? v : "ok");
   const bulletId = (v: unknown) => str(v).trim().replace(/^\[?b:/, "").replace(/\]$/, "");
   const sev = (v: unknown): "high" | "medium" | "low" => (v === "high" || v === "low" ? v : "medium");
+  const clean = (v: unknown) => stripBulletIds(str(v));
   const out: Analysis = {
     fit: fitOfRaw(r),
-    verdict: str(r.verdict),
+    verdict: clean(r.verdict),
     keywords: { matched: arr<unknown>(kw.matched).map(str).filter(Boolean), missing: arr<unknown>(kw.missing).map(str).filter(Boolean) },
-    strengths: arr<unknown>(r.strengths).map(str).filter(Boolean),
-    gaps: arr<Record<string, unknown>>(r.gaps).map((g) => ({ issue: str(g?.issue), severity: sev(g?.severity), fix: str(g?.fix) })),
+    strengths: arr<unknown>(r.strengths).map(clean).filter(Boolean),
+    gaps: arr<Record<string, unknown>>(r.gaps).map((g) => ({ issue: clean(g?.issue), severity: sev(g?.severity), fix: clean(g?.fix) })),
     bullets: arr<Record<string, unknown>>(r.bullets)
       .map((b) => ({
         bullet_id: bulletId(b?.bullet_id),
         rating: rating(b?.rating),
-        note: str(b?.note),
+        note: clean(b?.note),
         rewrite: str(b?.rewrite),
         ...(typeof b?.original === "string" ? { original: b.original } : {}),
       }))
@@ -44,8 +59,8 @@ export function normalizeAnalysis(raw: unknown): Analysis {
         const ph = str(q?.placeholder).trim();
         return {
           id: str(q?.id) || `q${i}`,
-          question: str(q?.question),
-          why: str(q?.why),
+          question: clean(q?.question),
+          why: clean(q?.why),
           // Only meaningful together: "fill this placeholder in this bullet".
           ...(bid && ph ? { bullet_id: bid, placeholder: ph.startsWith("[") ? ph : `[${ph}]` } : {}),
         };

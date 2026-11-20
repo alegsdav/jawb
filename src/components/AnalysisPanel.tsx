@@ -52,6 +52,17 @@ type Props = {
 
 const SEVERITY: Record<string, string> = { high: "text-bad", medium: "text-ok", low: "text-muted" };
 
+/** "5 minutes ago", "2 days ago". */
+function timeAgo(iso: string, now = Date.now()): string {
+  const secs = Math.round((new Date(iso).getTime() - now) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60],
+  ];
+  for (const [unit, size] of units) if (Math.abs(secs) >= size) return rtf.format(Math.round(secs / size), unit);
+  return "just now";
+}
+
 /** "Fill [N users] in the bullet with: [300 users] [Fill]", prefilled from the answer and editable. */
 function FillRow({ q, answer, onFill }: { q: Question; answer: string; onFill: (q: Question, value: string) => void }) {
   const [edited, setEdited] = useState<string | null>(null);
@@ -220,8 +231,8 @@ export function AnalysisPanel(p: Props) {
           </div>
         )}
         {a?.analyzed_at && (
-          <p className="text-xs text-muted">
-            Last run {new Date(a.analyzed_at).toLocaleString()}. Bullets you edit after that lose their rating until you re-analyze.
+          <p className="text-xs text-muted" title={new Date(a.analyzed_at).toLocaleString()}>
+            Analyzed {timeAgo(a.analyzed_at)}
           </p>
         )}
       </div>
@@ -266,7 +277,7 @@ export function AnalysisPanel(p: Props) {
                 <span key={k} className="chip border-border text-good" title="Matched">{k}</span>
               ))}
             </div>
-            <p className="text-xs text-muted">Red = in the posting but not on your resume. Only add ones that are true.</p>
+            <p className="text-xs text-muted">Only add what&apos;s true for you.</p>
           </div>
 
           {a.gaps.length > 0 && (
