@@ -24,7 +24,8 @@ import { MenuItem, MenuSeparator } from "@/components/Menu";
 import { PageSetupDialog } from "@/components/PageSetupDialog";
 import { EditorCanvas } from "@/components/ZoomFrame";
 import { CopyIcon, DocIcon, DownloadIcon } from "@/components/icons";
-import { ResumeImport, type ImportSource } from "@/components/ResumeImport";
+import { ReimportDialog } from "@/components/ReimportDialog";
+import { type ImportSource } from "@/components/ResumeImport";
 import { ImportReview } from "@/components/ImportReview";
 import { resumePlainText } from "@/lib/importReview";
 import { FactsPanel } from "@/components/FactsPanel";
@@ -395,7 +396,8 @@ export default function MasterResumePage() {
   const deleteFact = async (f: Fact) => {
     if (await facts.remove([f.id])) setUndo({ message: "Fact deleted", restore: [f] });
   };
-  const onboarding = empty && !importOpen;
+  // The re-import dialog opens over whatever is behind it, so an empty master stays on onboarding under the dialog.
+  const onboarding = empty;
   const banners = (
     <>
       {review && (
@@ -438,11 +440,6 @@ export default function MasterResumePage() {
           <Link href="/" className="btn btn-sm btn-primary w-full sm:w-auto">Next: add a job →</Link>
         </div>
       )}
-      {importOpen && (
-        <div className="rounded-lg border border-border bg-surface p-4">
-          <ResumeImport replaceWarning onImported={onImported} onCancel={() => setImportOpen(false)} />
-        </div>
-      )}
       {(error || actions.error) && <p role="alert" className="px-1 text-sm text-bad">{error || actions.error}</p>}
       {notice && <p role="status" className="px-1 text-sm text-good">{notice}</p>}
     </>
@@ -469,7 +466,7 @@ export default function MasterResumePage() {
                 Page setup…
               </MenuItem>
               <MenuSeparator />
-              <MenuItem onSelect={() => setImportOpen((o) => !o)}>Re-import resume</MenuItem>
+              <MenuItem onSelect={() => setImportOpen(true)}>Re-import resume</MenuItem>
             </MenuBarMenu>
             <EditMenu commandsRef={commandsRef} fmt={formatState} />
             <MenuBarMenu label="View">
@@ -619,6 +616,7 @@ export default function MasterResumePage() {
         </div>
       </div>
 
+      {importOpen && <ReimportDialog onImported={onImported} onClose={() => setImportOpen(false)} />}
       {pageSetupOpen && resume && (
         <PageSetupDialog
           page={resume.page ?? PAGE_DEFAULTS}
