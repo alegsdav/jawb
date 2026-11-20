@@ -27,7 +27,14 @@ export function stripBulletIds(text: string): string {
   if (!text.includes("b:")) return text;
   const out = text.replace(BULLET_REF, "");
   if (out === text) return text;
-  return out.replace(/ {2,}/g, " ").replace(/\s+([.,;:!?])/g, "$1").trim();
+  const tidy = out
+    .replace(/ {2,}/g, " ")
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .replace(/^[\s,;:]+/, "") // "In bullet b:x, what…" would leave ", what…"
+    .trim();
+  // When the sentence started with the id, it starts with the next word now: capitalize it.
+  const ledWithId = /^\s*(?:(?:[Ff]or |[Ii]n )?[Bb]ullet\s+)?\[?b:/.test(text);
+  return ledWithId && tidy ? tidy[0].toUpperCase() + tidy.slice(1) : tidy;
 }
 
 /** Coerce whatever the model (or an old stored row) returned into a complete Analysis so the UI never crashes on a missing field. */

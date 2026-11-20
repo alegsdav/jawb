@@ -118,15 +118,18 @@ describe("mergeAnalysis", () => {
 describe("stripBulletIds", () => {
   it("removes a bullet id and its 'in bullet' lead-in, then tidies the punctuation", () => {
     expect(stripBulletIds("replace [X%] in bullet b:u2ze00dz.")).toBe("replace [X%].");
+    expect(stripBulletIds("In bullet b:abc123, what stack did you use?")).toBe("What stack did you use?");
+    expect(stripBulletIds("[b:abc123]: what changed?")).toBe("What changed?");
+    expect(stripBulletIds("Weak, see b:abc123, add a metric")).toBe("Weak, see, add a metric");
   });
 
   it("removes a bracketed id at the start and trims the result", () => {
-    expect(stripBulletIds("[b:abc] is weak")).toBe("is weak");
+    expect(stripBulletIds("[b:abc] is weak")).toBe("Is weak");
   });
 
   it("removes 'bullet' and 'for bullet' lead-ins and bracketed ids", () => {
     expect(stripBulletIds("Tighten the verb for bullet [b:abc_1-2], then add a number.")).toBe("Tighten the verb, then add a number.");
-    expect(stripBulletIds("Bullet [b:xyz] needs a metric")).toBe("needs a metric");
+    expect(stripBulletIds("Bullet [b:xyz] needs a metric")).toBe("Needs a metric");
   });
 
   it("leaves a sentence without an id unchanged", () => {

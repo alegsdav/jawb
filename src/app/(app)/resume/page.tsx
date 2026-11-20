@@ -465,7 +465,7 @@ export default function MasterResumePage() {
 
       {!empty && (
         // One row: the formatting controls (portalled into the slot), then Download PDF on the right. Phones scroll it sideways.
-        <div data-doc-keep-selection className="flex min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1">
+        <div data-doc-keep-selection className={`${view === "coach" ? "hidden lg:flex" : "flex"} min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1`}>
           <div ref={setSlot} className="flex shrink-0 items-center" />
           <div className="ml-auto shrink-0">
             <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>

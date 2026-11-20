@@ -271,13 +271,12 @@ export function AnalysisPanel(p: Props) {
             <h3 className="text-[13px] font-semibold">Keywords</h3>
             <div className="flex flex-wrap gap-1">
               {a.keywords.missing.map((k) => (
-                <span key={k} className="chip border-border text-bad" title="In the posting, missing from your resume">{k}</span>
+                <span key={k} className="chip border-border text-bad" title="In the posting, missing from your resume. Only add it if it's true for you.">{k}</span>
               ))}
               {a.keywords.matched.map((k) => (
                 <span key={k} className="chip border-border text-good" title="Matched">{k}</span>
               ))}
             </div>
-            <p className="text-xs text-muted">Only add what&apos;s true for you.</p>
           </div>
 
           {a.gaps.length > 0 && (
