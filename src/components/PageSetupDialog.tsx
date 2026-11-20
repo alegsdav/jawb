@@ -72,30 +72,26 @@ export function PageSetupDialog({
       >
         <div>
           <h2 id={titleId} className="font-semibold">Page setup</h2>
-          <p className="text-xs text-muted">
-            Margins in inches, from {MARGIN_RANGE_IN.min} to {MARGIN_RANGE_IN.max}. Applies to the editor, the PDF and the
-            page count.
-          </p>
+          <p className="text-xs text-muted">Margins in inches ({MARGIN_RANGE_IN.min}–{MARGIN_RANGE_IN.max}).</p>
         </div>
 
-        <fieldset className="space-y-2">
-          <legend className="mb-2 text-sm font-medium">Presets</legend>
-          <div className="flex flex-wrap gap-1.5">
-            {PAGE_PRESETS.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                className="btn btn-sm"
-                onClick={() => {
-                  setValues(inputsFromPage(preset.page));
-                  setInvalid(false);
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
+        <div role="group" aria-label="Presets" className="flex flex-wrap gap-1.5 sm:flex-nowrap">
+          {PAGE_PRESETS.map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              className="btn btn-sm"
+              title={preset.label}
+              onClick={() => {
+                setValues(inputsFromPage(preset.page));
+                setInvalid(false);
+              }}
+            >
+              {/* The preset's values are in its title; the pill shows the name only. */}
+              {preset.label.split(" (")[0]}
+            </button>
+          ))}
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           {MARGIN_SIDES.map((key, i) => (
@@ -119,10 +115,6 @@ export function PageSetupDialog({
           ))}
         </div>
 
-        <p className="text-xs text-muted">
-          Now: top {page.marginTop.toFixed(2)} in, bottom {page.marginBottom.toFixed(2)} in, left{" "}
-          {page.marginLeft.toFixed(2)} in, right {page.marginRight.toFixed(2)} in.
-        </p>
         {invalid && (
           <p role="alert" className="text-sm text-red-700 dark:text-red-300">
             Enter a number for each margin.

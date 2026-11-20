@@ -1,26 +1,14 @@
 "use client";
 
-import type { ComponentType } from "react";
 import { FONT_CHOICES } from "@/lib/doc/fonts";
-import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { UndoRedo } from "./DocToolbar";
-import { AlignCenterIcon, AlignJustifyIcon, AlignLeftIcon, AlignRightIcon, LinkIcon, ListIcon } from "./icons";
-import { FONT_SIZES, type Align, type DocCommands, type FormatState, type MarkName } from "./editorTypes";
-
-/** Line spacing choices in the spacing menu. */
-const LINE_SPACINGS = [1, 1.15, 1.5, 2];
+import { LinkIcon, ListIcon } from "./icons";
+import { FONT_SIZES, type DocCommands, type FormatState, type MarkName } from "./editorTypes";
 
 const MARKS: { name: MarkName; title: string; glyph: string; glyphClass: string }[] = [
   { name: "bold", title: "Bold (Ctrl+B)", glyph: "B", glyphClass: "text-[14px] font-bold" },
   { name: "italic", title: "Italic (Ctrl+I)", glyph: "I", glyphClass: "font-serif text-[16px] italic" },
   { name: "underline", title: "Underline (Ctrl+U)", glyph: "U", glyphClass: "text-[14px] underline" },
-];
-
-const ALIGNS: { align: Align; title: string; Icon: ComponentType<{ className?: string }> }[] = [
-  { align: "left", title: "Align left (Ctrl+Shift+L)", Icon: AlignLeftIcon },
-  { align: "center", title: "Center (Ctrl+Shift+E)", Icon: AlignCenterIcon },
-  { align: "right", title: "Align right (Ctrl+Shift+R)", Icon: AlignRightIcon },
-  { align: "justify", title: "Justify (Ctrl+Shift+J)", Icon: AlignJustifyIcon },
 ];
 
 const Sep = () => <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />;
@@ -30,8 +18,8 @@ const btnClass = "icon-btn shrink-0 aria-pressed:bg-surface-2 aria-pressed:text-
 const textBtnClass = "btn btn-sm shrink-0 min-h-8 px-2 text-[13px]";
 
 /**
- * The formatting toolbar, in Google Docs order: undo/redo, font, size, bold/italic/underline, align, lists,
- * indent, spacing, clear formatting. Wraps onto more rows on narrow screens; nothing scrolls sideways.
+ * The formatting toolbar: undo/redo, font, size, bold/italic/underline/link, lists. Alignment, indent, spacing,
+ * tab stops and clear formatting live in the Format menu. One row that scrolls sideways on phones, never wraps.
  */
 export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: DocCommands }) {
   const on = fmt.active;
@@ -43,7 +31,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
     : FONT_SIZES;
 
   return (
-    <div role="toolbar" aria-label="Formatting" className="flex min-w-0 flex-wrap items-center gap-1">
+    <div role="toolbar" aria-label="Formatting" className="flex min-w-0 flex-nowrap items-center gap-1">
       <UndoRedo undo={commands.undo} redo={commands.redo} canUndo={fmt.canUndo} canRedo={fmt.canRedo} />
       <Sep />
       <select
@@ -99,22 +87,6 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         <LinkIcon className="h-4 w-4" />
       </button>
       <Sep />
-      {ALIGNS.map(({ align, title, Icon }) => (
-        <button
-          key={align}
-          type="button"
-          className={btnClass}
-          title={title}
-          aria-label={title}
-          aria-pressed={fmt.align === align}
-          disabled={!on}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => commands.setAlign(align)}
-        >
-          <Icon className="h-4 w-4" />
-        </button>
-      ))}
-      <Sep />
       <button
         type="button"
         className={btnClass}
@@ -138,57 +110,6 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         onClick={() => commands.toggleList("ordered")}
       >
         1. 2.
-      </button>
-      <Sep />
-      <button
-        type="button"
-        className={btnClass}
-        title="Decrease indent"
-        aria-label="Decrease indent"
-        disabled={!on}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => commands.outdent()}
-      >
-        ⇤
-      </button>
-      <button
-        type="button"
-        className={btnClass}
-        title="Increase indent"
-        aria-label="Increase indent"
-        disabled={!on}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => commands.indent()}
-      >
-        ⇥
-      </button>
-      <Sep />
-      <Menu label="Spacing" title="Line and paragraph spacing" buttonClassName={textBtnClass}>
-        {LINE_SPACINGS.map((n) => (
-          <MenuItem key={n} onSelect={() => commands.setLineHeight(n)} disabled={!on}>
-            <span className="inline-flex items-center gap-2">
-              <span aria-hidden="true" className="inline-block w-3">{Math.abs(fmt.lineHeight - n) < 0.01 ? "✓" : ""}</span>
-              {`Line spacing ${n}`}
-            </span>
-          </MenuItem>
-        ))}
-        <MenuSeparator />
-        <MenuItem onSelect={() => commands.adjustSpaceBefore(6)} disabled={!on}>Add space before paragraph</MenuItem>
-        <MenuItem onSelect={() => commands.adjustSpaceBefore(-6)} disabled={!on}>Remove space before paragraph</MenuItem>
-        <MenuItem onSelect={() => commands.adjustSpaceAfter(6)} disabled={!on}>Add space after paragraph</MenuItem>
-        <MenuItem onSelect={() => commands.adjustSpaceAfter(-6)} disabled={!on}>Remove space after paragraph</MenuItem>
-      </Menu>
-      <Sep />
-      <button
-        type="button"
-        className={textBtnClass}
-        title="Clear formatting (Ctrl/⌘+\)"
-        aria-label="Clear formatting"
-        disabled={!on}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => commands.clearFormatting()}
-      >
-        Clear
       </button>
     </div>
   );

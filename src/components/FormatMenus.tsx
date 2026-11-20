@@ -20,7 +20,7 @@ const LINE_SPACINGS = [1, 1.15, 1.5, 2];
 /** A menu row with a check mark when `on`. */
 function Tick({ on, children }: { on: boolean; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex items-center gap-2 whitespace-nowrap">
       <span aria-hidden="true" className="inline-block w-3">{on ? "✓" : ""}</span>
       {children}
       {on && <span className="sr-only">(on)</span>}
@@ -75,6 +75,8 @@ export function FormatMenu({ commandsRef, fmt }: MenuProps) {
         <MenuItem onSelect={run((c) => c.toggleList("ordered"))} disabled={off}>
           <Tick on={fmt.list === "ordered"}>Numbered list</Tick>
         </MenuItem>
+        <MenuItem onSelect={run((c) => c.outdent())} disabled={off}>Decrease indent</MenuItem>
+        <MenuItem onSelect={run((c) => c.indent())} disabled={off}>Increase indent</MenuItem>
         <MenuSeparator />
         <div className="float-muted px-2 pt-1 text-[11px]">Line spacing</div>
         {LINE_SPACINGS.map((n) => (
@@ -82,6 +84,11 @@ export function FormatMenu({ commandsRef, fmt }: MenuProps) {
             <Tick on={Math.abs(fmt.lineHeight - n) < 0.01}>{String(n)}</Tick>
           </MenuItem>
         ))}
+        <MenuSeparator />
+        <MenuItem onSelect={run((c) => c.adjustSpaceBefore(6))} disabled={off}>Add space before paragraph</MenuItem>
+        <MenuItem onSelect={run((c) => c.adjustSpaceBefore(-6))} disabled={off}>Remove space before paragraph</MenuItem>
+        <MenuItem onSelect={run((c) => c.adjustSpaceAfter(6))} disabled={off}>Add space after paragraph</MenuItem>
+        <MenuItem onSelect={run((c) => c.adjustSpaceAfter(-6))} disabled={off}>Remove space after paragraph</MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={() => setTabsOpen(true)} disabled={off}>
           Tab stops…

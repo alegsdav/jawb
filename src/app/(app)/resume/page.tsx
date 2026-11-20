@@ -11,19 +11,18 @@ import { PAGE_DEFAULTS } from "@/lib/doc/types";
 import type { Fact, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
 import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
-import { EditMenu, FormatMenu } from "@/components/FormatMenus";
+import { FormatMenu } from "@/components/FormatMenus";
 import { CoachPanel } from "@/components/CoachPanel";
 import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
 import { useResumeActions } from "@/components/ResumeActions";
 import {
-  countWords, DocToolbar, EDIT_SHORTCUTS, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, ToolbarSep,
-  useEditorShortcuts, useZoom, ZoomSelect,
+  countWords, DocToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, useEditorShortcuts, useZoom,
 } from "@/components/DocToolbar";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
 import { PageSetupDialog } from "@/components/PageSetupDialog";
 import { EditorCanvas } from "@/components/ZoomFrame";
-import { CopyIcon, DocIcon, DownloadIcon } from "@/components/icons";
+import { DownloadIcon } from "@/components/icons";
 import { ReimportDialog } from "@/components/ReimportDialog";
 import { type ImportSource } from "@/components/ResumeImport";
 import { ImportReview } from "@/components/ImportReview";
@@ -38,32 +37,6 @@ import { SaveErrorToast, SaveStatus, useAutosaveWithRetry } from "@/lib/useAutos
 
 /** Re-import keeps bullet ids stable (so jobs' "changes vs master" and linked facts stay right). */
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
-
-/** The editing tips, shown as the Help menu's hint (the document itself stays uncluttered). */
-const EDIT_TIPS =
-  "Type anywhere, like a normal document: Enter starts a new paragraph, Backspace joins. Select text and use the toolbar " +
-  "or Format menu for bold, italic, underline, size, alignment and lists. The AI reads your bullets from the document's " +
-  "lists and bold section headings. Undo with Ctrl/⌘+Z.";
-
-/** Zoom choices for View > Zoom (0 = Fit). */
-const ZOOM_CHOICES: { label: string; value: number }[] = [
-  { label: "Fit", value: 0 },
-  { label: "50%", value: 0.5 },
-  { label: "75%", value: 0.75 },
-  { label: "90%", value: 0.9 },
-  { label: "100%", value: 1 },
-  { label: "125%", value: 1.25 },
-  { label: "150%", value: 1.5 },
-];
-
-/** Printer glyph (same 24px stroke style as ./icons; there is no printer icon there). */
-function PrintIcon({ className }: { className?: string }) {
-  return (
-    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
-      <path d="M7 9V4h10v5" /><rect x="4" y="9" width="16" height="7" rx="1.5" /><path d="M7 14h10v6H7z" />
-    </svg>
-  );
-}
 
 type MasterRow = { id: string; content: unknown; updated_at: string };
 const MASTER_COLS = "id, content, updated_at";
@@ -448,43 +421,23 @@ export default function MasterResumePage() {
   return (
     <div className="flex flex-col lg:h-full lg:min-h-0">
       <DocToolbar>
-        <h1 className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-normal text-muted">
-          <DocIcon className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Master resume</span>
-          <span className="sr-only sm:hidden">Master resume</span>
-        </h1>
+        <h1 className="sr-only">Master resume</h1>
         {/* Phones: the menus wrap onto a second line and get smaller padding, so each popup stays on screen. */}
         <div className="ml-1 flex min-w-0 items-center whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-36 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
           <MenuBar>
             <MenuBarMenu label="File">
-              <MenuItem onSelect={() => void actions.download()} disabled={actions.busy} hint="Your resume as a PDF, ready to send">
+              <MenuItem onSelect={() => void actions.download()} disabled={actions.busy}>
                 Download PDF
               </MenuItem>
               <MenuItem onSelect={() => void actions.copy()}>Copy as text</MenuItem>
               <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
-              <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume} hint="Margins of every page">
+              <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume}>
                 Page setup…
               </MenuItem>
               <MenuSeparator />
               <MenuItem onSelect={() => setImportOpen(true)}>Re-import resume</MenuItem>
             </MenuBarMenu>
-            <EditMenu commandsRef={commandsRef} fmt={formatState} />
-            <MenuBarMenu label="View">
-              {ZOOM_CHOICES.map((z) => (
-                <MenuItem key={z.value} onSelect={() => setZoom(z.value)}>
-                  <span className="inline-flex items-center gap-2">
-                    <span aria-hidden="true" className="inline-block w-3">{zoom === z.value ? "✓" : ""}</span>
-                    {z.label}
-                    {zoom === z.value && <span className="sr-only">(current)</span>}
-                  </span>
-                </MenuItem>
-              ))}
-            </MenuBarMenu>
             <FormatMenu commandsRef={commandsRef} fmt={formatState} />
-            <MenuBarMenu label="Help">
-              <MenuItem onSelect={() => {}} hint={EDIT_TIPS}>Editing tips</MenuItem>
-              <MenuItem onSelect={() => {}} hint={EDIT_SHORTCUTS}>Keyboard shortcuts</MenuItem>
-            </MenuBarMenu>
           </MenuBar>
         </div>
         <div className="ml-auto flex min-w-0 items-center gap-2">
@@ -503,21 +456,15 @@ export default function MasterResumePage() {
       </DocToolbar>
 
       {!empty && (
-        <EditorToolbar>
-          <IconButton label="Print (Ctrl/⌘+P)" onClick={() => window.print()}>
-            <PrintIcon />
-          </IconButton>
-          <ZoomSelect value={zoom} onChange={setZoom} />
-          <ToolbarSep />
-          <div ref={setSlot} className="flex items-center" />
-          <ToolbarSep />
-          <IconButton label={actions.copied ? "Copied" : "Copy as text"} onClick={() => void actions.copy()}>
-            <CopyIcon />
-          </IconButton>
-          <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>
-            <DownloadIcon />
-          </IconButton>
-        </EditorToolbar>
+        // One row: the formatting controls (portalled into the slot), then Download PDF on the right. Phones scroll it sideways.
+        <div data-doc-keep-selection className="flex min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1">
+          <div ref={setSlot} className="flex shrink-0 items-center" />
+          <div className="ml-auto shrink-0">
+            <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>
+              <DownloadIcon />
+            </IconButton>
+          </div>
+        </div>
       )}
 
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">

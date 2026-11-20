@@ -288,7 +288,7 @@ export function UndoRedo({ undo, redo, canUndo, canRedo }: { undo: () => void; r
 
 /** Quiet muted text like "2173 words" / "1 page". Over-length is flagged in text-bad. */
 export function PageCount({ pages, overflowLines }: { pages: number; overflowLines: number }) {
-  if (pages <= 1) return <span className="px-1 text-xs text-muted" title="Fits on one page">1 page</span>;
+  if (pages <= 1) return null;
   return (
     <span className="px-1 text-xs text-bad" title="Most internship resumes should be one page">
       {pages} pages · ~{overflowLines} lines over
