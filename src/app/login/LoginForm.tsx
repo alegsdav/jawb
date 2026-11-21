@@ -12,7 +12,8 @@ export function LoginForm({ notice }: { notice?: string }) {
   const [linkState, linkAction, linkPending] = useActionState(sendMagicLink, { message: "" });
 
   return (
-    <main className="min-h-dvh grid place-items-center px-4">
+    // Top-anchored so an error message grows the card downward and the fields and button stay put.
+    <main className="min-h-dvh grid items-start justify-items-center px-4 pt-[18vh]">
       <div className="card w-full max-w-sm p-7 space-y-5">
         <div className="space-y-3">
           <Logo size={28} />

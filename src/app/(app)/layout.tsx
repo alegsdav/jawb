@@ -7,7 +7,6 @@ import { cookies } from "next/headers";
 import { Sidebar } from "@/components/Sidebar";
 import { SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { Logo } from "@/components/icons";
-import { signOut } from "../login/actions";
 
 /**
  * The workspace shell. Desktop (lg and up): the window is the grey chrome, the sidebar sits on it, and
@@ -25,11 +24,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <header className="lg:hidden border-b border-border bg-surface sticky top-0 z-20">
           <div className="mx-auto max-w-7xl px-4 h-12 sm:h-14 flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2 font-semibold"><Logo size={22} />Jawb</Link>
-            <div className="ml-auto flex items-center gap-4 text-sm">
-              <form action={signOut}>
-                <button className="text-muted hover:text-fg">Sign out</button>
-              </form>
-            </div>
           </div>
         </header>
         <main className="min-w-0 flex-1 bg-surface lg:my-2 lg:mr-2 lg:h-[calc(100dvh-1rem)] lg:overflow-y-auto lg:flex-none lg:rounded-xl lg:border lg:border-border lg:shadow-[0_1px_3px_rgb(0_0_0/0.04)]">

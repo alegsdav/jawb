@@ -49,7 +49,7 @@ export function UsageMeter() {
   const pct = heavy.limit ? Math.round((heavy.remaining / heavy.limit) * 100) : 0;
   return (
     <div className="space-y-1.5 px-2 text-[13px]" title="Job analyses, resume imports and resume drafts. Rolling 24 hours.">
-      <p className={`truncate ${heavy.remaining ? "text-muted" : "text-bad"}`}>
+      <p className={heavy.remaining ? "text-muted" : "text-bad"}>
         {heavyLine(heavy)}
         {!heavy.remaining && heavy.resetAt && <> · next one at {clock(heavy.resetAt)}</>}
       </p>
@@ -73,7 +73,13 @@ export function UsageCard() {
   return (
     <section className="space-y-2" aria-labelledby="usage-heading">
       <h2 id="usage-heading" className="font-semibold">AI usage</h2>
-      {!usage ? null : !usage.available ? (
+      {!usage ? (
+        // Two bars the height of the loaded lines (text-sm = 20px), so the page doesn't shift when usage arrives.
+        <>
+          <div aria-hidden className="h-5 w-4/5 rounded bg-fg/10 animate-pulse motion-reduce:animate-none" />
+          <div aria-hidden className="h-5 w-3/5 rounded bg-fg/10 animate-pulse motion-reduce:animate-none" />
+        </>
+      ) : !usage.available ? (
         <p className="text-sm text-muted">{MIGRATION_HINT} Until then there are no AI limits.</p>
       ) : (
         <>

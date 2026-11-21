@@ -164,6 +164,16 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
       if (site) return toPaste(value, { site });
       return send({ url: value }, value);
     }
+    // One word with no spaces is never a description: a half-typed link ("http//x", "www.acme") or a stray
+    // word would otherwise create an "Untitled role" job and spend an analysis.
+    if (!/\s/.test(value)) {
+      const looksLikeLink = /^http/i.test(value) || value.startsWith("www.") || /[./]/.test(value);
+      return setError(
+        looksLikeLink
+          ? "That doesn't look like a link. Paste the full address starting with https://"
+          : "Paste a link to the posting or the full job description.",
+      );
+    }
     return send({ text: value }, null);
   }
 

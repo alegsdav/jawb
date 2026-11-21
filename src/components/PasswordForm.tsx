@@ -12,12 +12,26 @@ export function PasswordForm() {
     <div className="space-y-3 border-t border-border pt-4">
       <button
         type="button"
-        className="text-sm font-medium"
+        className="btn btn-sm font-medium"
         aria-expanded={open}
         aria-controls={formId}
         onClick={() => setOpen((o) => !o)}
       >
         Change password
+        <svg
+          aria-hidden
+          viewBox="0 0 12 12"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
+        >
+          <path d="M2.5 4.5 6 8l3.5-3.5" />
+        </svg>
       </button>
       {open && (
         <form id={formId} action={action} className="space-y-3">

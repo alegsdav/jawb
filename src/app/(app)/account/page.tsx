@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requireUser } from "@/lib/supabase/server";
 import { PasswordForm } from "@/components/PasswordForm";
 import { UsageCard } from "@/components/UsageMeter";
+import { signOut } from "@/app/login/actions";
 
 export const metadata: Metadata = { title: "Account · Jawb" };
 
@@ -31,6 +32,10 @@ export default async function AccountPage() {
           Download backup (.json)
         </a>
       </section>
+
+      <form action={signOut} className="border-t border-border pt-4">
+        <button className="btn w-full py-2.5">Sign out</button>
+      </form>
     </div>
   );
 }
