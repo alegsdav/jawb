@@ -21,7 +21,7 @@ export function SideTabs<T extends string>({
             aria-selected={active}
             onClick={() => onChange(t.key)}
             className={`-mb-px min-h-10 border-b-[1.5px] px-0.5 text-[13px] transition-colors sm:min-h-0 sm:py-2 ${
-              active ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"
+              active ? "border-fg text-fg" : "border-transparent text-muted hover:text-fg"
             }`}
           >
             {t.label}

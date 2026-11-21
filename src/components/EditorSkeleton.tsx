@@ -68,8 +68,8 @@ function JobSkeleton() {
         <span
           key={key}
           className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-[1.5px] px-0.5 text-[13px] transition-colors ${
-            key === "analysis" ? "lg:hidden" : ""
-          } ${key === "resume" ? "border-fg font-medium text-fg" : "border-transparent text-muted"}`}
+            key === "analysis" ? "xl:hidden" : ""
+          } ${key === "resume" ? "border-fg text-fg" : "border-transparent text-muted"}`}
         >
           {label}
         </span>
@@ -113,7 +113,7 @@ function JobSkeleton() {
         </EditorToolbar>
       </div>
 
-      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
+      <div className="flex flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
         <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <BlankDocument zoom={zoom} className="min-w-0 flex-1 lg:overflow-auto" />
@@ -121,7 +121,7 @@ function JobSkeleton() {
           </div>
         </div>
         {/* The right panel's frame, empty. Phones: hidden on the Resume tab, as on the real page. */}
-        <aside className="relative order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l max-lg:border-b-0 max-lg:p-0" />
+        <aside className="relative order-first space-y-3 border-b border-border p-4 lg:min-h-0 lg:overflow-y-auto xl:order-none xl:space-y-4 xl:w-[340px] xl:shrink-0 xl:border-b-0 xl:border-l max-xl:space-y-0 max-xl:border-b-0 max-xl:p-0" />
       </div>
     </div>
   );
@@ -143,11 +143,17 @@ function MasterSkeleton() {
         </div>
         <div className={`ml-auto flex min-w-0 items-center gap-2 ${slide.className}`} style={slide.style}>
           <span className="block min-w-0 max-w-[72px] overflow-hidden text-right sm:max-w-none" />
-          <span aria-hidden="true" className="invisible hidden rounded-md px-2 py-1 text-xs text-muted sm:inline-flex lg:hidden">
+          <span aria-hidden="true" className="invisible hidden rounded-md px-2 py-1 text-xs text-muted sm:inline-flex xl:hidden">
             Facts (0)
           </span>
         </div>
       </DocToolbar>
+
+      {/* Phones and tablets: the Resume and Coach switch, as on the real page. */}
+      <div className="flex items-stretch gap-3 border-b border-border px-4 pt-1 xl:hidden">
+        <span className="-mb-px flex shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0.5 py-1.5 text-[13px] border-fg text-fg">Resume</span>
+        <span className="-mb-px flex shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0.5 py-1.5 text-[13px] border-transparent text-muted">Coach &amp; facts</span>
+      </div>
 
       <div data-doc-keep-selection className="flex min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1">
         <div className="flex shrink-0 items-center">
@@ -160,19 +166,13 @@ function MasterSkeleton() {
         </div>
       </div>
 
-      {/* Phones: the Resume and Coach switch, as on the real page. */}
-      <div className="flex items-stretch gap-3 border-b border-border px-4 pt-1 lg:hidden">
-        <span className="-mb-px flex shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0.5 py-1.5 text-[13px] border-fg font-medium text-fg">Resume</span>
-        <span className="-mb-px flex shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0.5 py-1.5 text-[13px] border-transparent text-muted">Coach</span>
-      </div>
-
-      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
-        <div className="min-w-0 flex-1 flex-col lg:flex lg:min-h-0 flex">
+      <div className="flex flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
+        <div className="min-w-0 flex-1 flex-col lg:min-h-0 xl:flex flex">
           <BlankDocument zoom={zoom} className="min-w-0 flex-1 pb-6 lg:min-h-0 lg:overflow-auto" />
           <StatusBarFrame />
         </div>
         {/* The right panel's frame, empty. */}
-        <div id="side-panel" className="scroll-mt-16 border-border lg:relative lg:w-[340px] lg:shrink-0 lg:space-y-4 lg:overflow-y-auto lg:border-l lg:p-4" />
+        <div id="side-panel" className="scroll-mt-16 border-border lg:min-h-0 lg:overflow-y-auto xl:relative xl:w-[340px] xl:shrink-0 xl:space-y-4 xl:border-l xl:p-4" />
       </div>
     </div>
   );

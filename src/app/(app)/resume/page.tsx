@@ -445,7 +445,7 @@ export default function MasterResumePage() {
           </span>
           <a
             href="#side-panel"
-            className="hidden rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg sm:inline-flex lg:hidden"
+            className="hidden rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg sm:inline-flex xl:hidden"
             onClick={() => {
               setSideTab("facts");
               setPhoneView("coach");
@@ -456,9 +456,30 @@ export default function MasterResumePage() {
         </div>
       </DocToolbar>
 
+      {/* Phones and tablets: switch between the document and the Coach and Facts panel. Hidden on xl+.
+          Above the formatting row, which the Coach view hides, so the tabs never move when you switch. */}
+      {!empty && (
+        <div role="tablist" aria-label="Resume sections" className="flex items-stretch gap-3 border-b border-border px-4 pt-1 xl:hidden">
+          {(["resume", "coach"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={view === v}
+              onClick={() => setPhoneView(v)}
+              className={`-mb-px flex shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0.5 py-1.5 text-[13px] transition-colors ${
+                view === v ? "border-fg text-fg" : "border-transparent text-muted hover:text-fg"
+              }`}
+            >
+              {v === "resume" ? "Resume" : "Coach & facts"}
+            </button>
+          ))}
+        </div>
+      )}
+
       {!empty && (
         // One row: the formatting controls (portalled into the slot), then Download PDF on the right. Phones scroll it sideways.
-        <div data-doc-keep-selection className={`${view === "coach" ? "hidden lg:flex" : "flex"} min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1`}>
+        <div data-doc-keep-selection className={`${view === "coach" ? "hidden xl:flex" : "flex"} min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1`}>
           <div ref={setSlot} className="flex shrink-0 items-center" />
           <div className="ml-auto shrink-0">
             <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>
@@ -468,29 +489,9 @@ export default function MasterResumePage() {
         </div>
       )}
 
-      {/* Phones and tablets: switch between the document and the Coach and Facts panel. Hidden on lg+. */}
-      {!empty && (
-        <div role="tablist" aria-label="Resume sections" className="flex items-stretch gap-3 border-b border-border px-4 pt-1 lg:hidden">
-          {(["resume", "coach"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              role="tab"
-              aria-selected={view === v}
-              onClick={() => setPhoneView(v)}
-              className={`-mb-px flex shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0.5 py-1.5 text-[13px] transition-colors ${
-                view === v ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"
-              }`}
-            >
-              {v === "resume" ? "Resume" : "Coach"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
+      <div className="flex flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
         {/* Document column: grey Docs canvas (scrolls on lg+), status bar pinned at its bottom. */}
-        <div className={`min-w-0 flex-1 flex-col lg:flex lg:min-h-0 ${view === "coach" ? "hidden" : "flex"}`}>
+        <div className={`min-w-0 flex-1 flex-col lg:min-h-0 xl:flex ${view === "coach" ? "hidden" : "flex"}`}>
           {onboarding ? (
             <div className="mx-auto w-full max-w-[860px] space-y-3 px-4 pb-6 pt-4 sm:px-8">
               {building ? (
@@ -528,17 +529,17 @@ export default function MasterResumePage() {
         {/* Side panel: hairline divider on lg+, its own scroll. Phones: stacked below the document. */}
         <div
           id="side-panel"
-          className={`scroll-mt-16 border-border lg:relative lg:w-[340px] lg:shrink-0 lg:space-y-4 lg:overflow-y-auto lg:border-l lg:p-4 ${
-            view === "coach" ? "space-y-4 border-t p-4 lg:border-t-0" : ""
+          className={`scroll-mt-16 border-border lg:min-h-0 lg:overflow-y-auto xl:relative xl:w-[340px] xl:shrink-0 xl:space-y-4 xl:border-l xl:p-4 ${
+            view === "coach" ? "space-y-4 border-t p-4 lg:max-xl:flex-1 xl:border-t-0" : ""
           }`}
         >
           {/* The selected bullet's comment card. Takes no room in flow: a bottom sheet on phones, an overlay on the panel on lg+.
               Outside the hidden part below, so it still shows over the document on phones. */}
           <div
             ref={setCommentEl}
-            className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto lg:absolute lg:inset-x-4 lg:bottom-auto lg:top-4 lg:z-20 lg:max-h-[70%]"
+            className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto lg:inset-x-auto lg:right-4 lg:bottom-4 lg:w-[380px] xl:absolute xl:inset-x-4 xl:w-auto xl:bottom-auto xl:top-4 xl:z-20 xl:max-h-[70%]"
           />
-          <div className={`space-y-4 ${view === "resume" ? "hidden lg:block" : ""}`}>
+          <div className={`space-y-4 ${view === "resume" ? "hidden xl:block" : ""}`}>
             {built && (
               <section aria-labelledby="built-heading" className="space-y-2 rounded-lg border border-border p-3 text-sm">
                 <h2 id="built-heading" className="font-medium">Your first draft is ready.</h2>
@@ -630,25 +631,26 @@ export default function MasterResumePage() {
           raised={status === "error"}
         />
       )}
-      {/* Toasts: one at a time, most urgent first. Errors stay until dismissed; the rest go on their own. */}
+      {/* Toasts: one at a time, most urgent first. Errors stay until dismissed; the rest go on their own. They sit above
+          the Undo toast while it shows, so they never cover its Undo button. */}
       {errorToast ? (
         <FlashToast
           message={errorText}
           tone="bad"
-          raised={status === "error" || !!conflict}
+          raised={status === "error" || !!conflict || !!undo}
           onClose={() => setDismissedError(errorText)}
         />
       ) : review ? (
         <FlashToast
           message={review.rebuilt ? "Rebuilt in the clean template" : `Imported ${review.fileName}`}
-          raised={status === "error" || !!conflict}
+          raised={status === "error" || !!conflict || !!undo}
           action={{ label: "Undo", onClick: undoReview }}
           onClose={() => setReview(null)}
         />
       ) : notice ? (
         <FlashToast
           message={notice}
-          raised={status === "error" || !!conflict}
+          raised={status === "error" || !!conflict || !!undo}
           onClose={() => setNotice("")}
         />
       ) : null}

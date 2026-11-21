@@ -69,6 +69,35 @@ type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConfl
 /** Don't re-read the rows again when `focus` and `visibilitychange` fire together. */
 const REFRESH_GAP_MS = 1500;
 
+/**
+ * An analysis this device started for a job (localStorage, per job). The server keeps running it when the page is
+ * reloaded or left, so a page opened meanwhile waits for that run instead of paying for a second one.
+ */
+const analyzingKey = (jobId: string) => `jawb:analyzing:${jobId}`;
+/** Longer than an analysis takes (20-90s); an older mark is from a run that never finished. */
+const ANALYZING_MAX_MS = 3 * 60_000;
+/** How often a waiting page looks for the other run's result. */
+const ANALYZING_POLL_MS = 4000;
+
+/** When this device started an analysis of the job that may still be running, or null. */
+function analyzingSince(jobId: string): number | null {
+  try {
+    const at = Number(localStorage.getItem(analyzingKey(jobId)));
+    return at > 0 && Date.now() - at < ANALYZING_MAX_MS ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+function markAnalyzing(jobId: string, running: boolean): void {
+  try {
+    if (running) localStorage.setItem(analyzingKey(jobId), String(Date.now()));
+    else localStorage.removeItem(analyzingKey(jobId));
+  } catch {
+    // Storage blocked (private mode): a reopened page may start a second run, as before.
+  }
+}
+
 export default function JobPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -576,8 +605,10 @@ export default function JobPage() {
     if (!resume) return;
     setAnalyzing(true);
     setAnalyzeError("");
+    markAnalyzing(id, true);
     await persistResume().catch(() => {}); // analyze exactly what's on screen (the route reads the saved copy)
     const { data, error } = await postApi<{ analysis: Analysis; saved?: boolean }>("/api/analyze", { jobId: id });
+    markAnalyzing(id, false);
     setAnalyzing(false);
     if (error || !data?.analysis) return setAnalyzeError(error ?? "The analysis didn't come back. Try again.");
     // Keep answers and drafts typed on this page; match them to the new questions by text. The job
@@ -588,13 +619,51 @@ export default function JobPage() {
     setError("");
   }, [resume, persistResume, id, setDrafts, updateJob]);
 
+  // Mounted flag for the wait below (its loop outlives the effect that starts it).
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  /** Shows "Analyzing…" while another page's run of this job finishes, then its result; runs one itself if none comes. */
+  const waitForRun = useCallback(
+    async (since: number) => {
+      setAnalyzing(true);
+      while (Date.now() - since < ANALYZING_MAX_MS) {
+        await new Promise((r) => setTimeout(r, ANALYZING_POLL_MS));
+        if (!mounted.current) return;
+        const server = await readJob(supabase, id).catch(() => null);
+        if (!mounted.current) return;
+        if (server?.analysis) {
+          await serial(async () => applyServerJob(server));
+          setAnalyzing(false);
+          return;
+        }
+        // That run ended here without a result (it failed): stop waiting.
+        if (analyzingSince(id) === null) break;
+      }
+      if (!mounted.current) return;
+      markAnalyzing(id, false);
+      setAnalyzing(false);
+      void analyze();
+    },
+    [supabase, id, serial, applyServerJob, analyze],
+  );
+
   // Run the first analysis automatically so the tailored copy has suggestions right away.
   // (Never with an empty master: there's no tailored copy then, so `resume` stays null. Never after applying.)
+  // If this device started one moments ago (the page was reloaded or reopened mid-run), wait for that run's result.
   useEffect(() => {
     if (autoRan.current || !job || !resume) return;
     autoRan.current = true;
-    if (!job.analysis && !job.submitted_at && job.description.trim() && !isEmptyResume(resume)) analyze();
-  }, [job, resume, analyze]);
+    if (job.analysis || job.submitted_at || !job.description.trim() || isEmptyResume(resume)) return;
+    const since = analyzingSince(id);
+    if (since === null) analyze();
+    else void waitForRun(since);
+  }, [job, resume, analyze, id, waitForRun]);
 
   function selectTab(t: Tab) {
     setTab(t);
@@ -1081,8 +1150,8 @@ export default function JobPage() {
           aria-selected={tab === key}
           onClick={() => selectTab(key)}
           className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-[1.5px] px-0.5 text-[13px] transition-colors ${
-            key === "analysis" ? "lg:hidden" : ""
-          } ${tab === key ? "border-fg font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}
+            key === "analysis" ? "xl:hidden" : ""
+          } ${tab === key ? "border-fg text-fg" : "border-transparent text-muted hover:text-fg"}`}
         >
           {label}
           {/* No room for the chip at phone width; the Analysis tab itself shows it. */}
@@ -1107,8 +1176,13 @@ export default function JobPage() {
 
       {/* Phones: the top bar is nowrap, and the menus would inherit that and stretch to fit their hints off-screen.
           Wrapping them at phone width keeps each popup about 224px wide, inside the screen. */}
-      {resumeTab && (
-        <div className="ml-2 whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-44 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
+      {/* Kept in place (invisible, inert) on the other tabs from sm up, so the tabs beside them don't slide left. */}
+      {(resumeTab || !needsMaster) && (
+        <div
+          inert={!resumeTab}
+          aria-hidden={!resumeTab || undefined}
+          className={`${resumeTab ? "" : "invisible max-sm:hidden"} ml-2 whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-44 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56`}
+        >
           <MenuBar>
             <MenuBarMenu label="File">
               <MenuItem onSelect={downloadPdf} disabled={pdfBusy}>
@@ -1154,9 +1228,10 @@ export default function JobPage() {
         </div>
       </div>
 
-      {/* Formatting-style row under the top bar: fixed height, scrolls sideways on phones. Resume tab only. */}
-      {resumeTab && !needsMaster && (
-        <div className="shrink-0">
+      {/* Formatting-style row under the top bar: fixed height, scrolls sideways on phones. Resume tab only; from sm up
+          the other tabs keep its height (empty), so their content and the side panel don't jump up 41px. */}
+      {!needsMaster && (
+        <div inert={!resumeTab} aria-hidden={!resumeTab || undefined} className={`shrink-0 ${resumeTab ? "" : "invisible max-sm:hidden"}`}>
           <EditorToolbar>
             {/* Document actions (add, move, delete) and the formatting controls portal in here: one fixed group. */}
             <div ref={setSlot} className="flex shrink-0 items-center">
@@ -1176,7 +1251,7 @@ export default function JobPage() {
                     Analyzing<span className="hidden sm:inline"> against the job</span>…
                   </span>
                 ) : analyzeError ? (
-                  <button type="button" className={`${quietText} text-bad lg:hidden`} onClick={() => selectTab("analysis")}>
+                  <button type="button" className={`${quietText} text-bad xl:hidden`} onClick={() => selectTab("analysis")}>
                     Analysis failed
                   </button>
                 ) : null}
@@ -1193,9 +1268,9 @@ export default function JobPage() {
         </div>
       )}
 
-      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
+      <div className="flex flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
         {/* Document column: grey canvas on the resume tab (scrolls on lg+), with notices above and a status bar below. */}
-        <div className={`flex min-w-0 flex-1 flex-col lg:min-h-0 ${tab === "analysis" ? "hidden lg:flex" : "flex"}`}>
+        <div className={`flex min-w-0 flex-1 flex-col lg:min-h-0 ${tab === "analysis" ? "hidden xl:flex" : "flex"}`}>
           {!docTab && (
             <div className="min-h-0 flex-1 lg:overflow-y-auto">
               <div className="mx-auto max-w-[860px] space-y-4 px-4 pb-6 pt-4 sm:px-8">
@@ -1266,12 +1341,12 @@ export default function JobPage() {
 
         {/* Side panel: the comment card of the selected bullet at the top (only when there is one), then job details
             and the coach/facts/analysis panels. Its own scroll on lg+. Phones: the details come first; the panels show on the Analysis tab. */}
-        <aside className={`relative order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l ${resumeTab ? "max-lg:space-y-0 max-lg:border-b-0 max-lg:p-0" : ""}`}>
+        <aside className={`relative order-first space-y-3 border-b border-border p-4 lg:min-h-0 lg:overflow-y-auto xl:order-none xl:space-y-4 xl:w-[340px] xl:shrink-0 xl:border-b-0 xl:border-l ${tab === "analysis" ? "lg:max-xl:flex-1" : ""} ${resumeTab ? "max-xl:space-y-0 max-xl:border-b-0 max-xl:p-0" : ""}`}>
           {/* Header block: the selected bullet's comment card is an overlay under it on desktop (absolute, so the
               rows above and the panel below never move). On phones it is a bottom sheet above the tab bar, so its
               slot stays shown on the Resume tab, where the header is hidden. */}
           <div className="relative">
-            <div className={resumeTab ? "max-lg:hidden" : ""}>
+            <div className={resumeTab ? "max-xl:hidden" : ""}>
               <JobHeader
                 job={job}
                 applied={applied}
@@ -1284,12 +1359,12 @@ export default function JobPage() {
             </div>
             <div
               ref={setCommentEl}
-              className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:absolute lg:inset-x-0 lg:top-full lg:mt-3 lg:bottom-auto lg:z-20 lg:max-h-none lg:overflow-visible"
+              className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:inset-x-auto lg:right-4 lg:bottom-4 lg:w-[380px] xl:absolute xl:inset-x-0 xl:w-auto xl:top-full xl:mt-3 xl:bottom-auto xl:z-20 xl:max-h-none xl:overflow-visible"
             />
           </div>
           {/* Notices (migration hint, errors, applied state, pull-from-master plan) sit under the header, on every tab. */}
-          <div className={`space-y-3 empty:hidden ${resumeTab ? "max-lg:hidden" : ""}`}>{notices}</div>
-          <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>
+          <div className={`space-y-3 empty:hidden ${resumeTab ? "max-xl:hidden" : ""}`}>{notices}</div>
+          <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 xl:block`}>
             {side}
             {/* Collapsed by default: the "?" opens what the colours mean. Inside the panel only: on phones, the Analysis tab's bottom. */}
             {resumeBar && showHighlights && (analysis || changedCount > 0) && (

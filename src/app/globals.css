@@ -196,8 +196,8 @@ body {
   .doc-content ul, .doc-content ol { padding-left: 14pt; }
   .doc-changed::before { right: -10px; }
 }
-/* Below lg the comment card is a bottom sheet (45dvh). Keep a focused or scrolled-to paragraph clear of it. */
-@media (max-width: 1023px) {
+/* Below xl the comment card floats over the bottom of the page (45dvh). Keep a focused or scrolled-to paragraph clear of it. */
+@media (max-width: 1279px) {
   .doc-editor p { scroll-margin-bottom: 50dvh; }
 }
 
