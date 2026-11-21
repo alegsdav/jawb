@@ -371,3 +371,50 @@ for item 3, and only if the cause is there), `src/components/ZoomFrame.tsx` (rea
 **Acceptance:** blank page and real page boxes identical (state the numbers you derived from the CSS/markup); first
 visit to an editor route shows the editor skeleton, not the generic loader; item 3 explained (and fixed if ours).
 tsc + eslint + `npx vitest run tests/loader.test.ts` clean.
+
+---
+
+## S1. Sync sidebar pins and visit order to the account (migration 0009)
+
+**Files:** `src/lib/jobNav.ts`, `src/components/Sidebar.tsx`, `tests/job-nav.test.ts`, `README.md` (Setup migration
+list + the Workspace bullet). Do NOT edit `supabase/migrations/0009_job_nav.sql` (written and tested by the
+orchestrator) — read it: it defines table `public.job_nav (job_id uuid pk → jobs on delete cascade, user_id,
+visited_at timestamptz, pinned_at timestamptz)` with RLS (own rows, own jobs), and two RPCs that use the database
+clock: `record_job_visit(p_job uuid) → timestamptz` and `set_job_pinned(p_job uuid, p_pinned boolean) → timestamptz|null`.
+
+Today (T6) pins and visits live only in localStorage (`jawb_pinned_jobs`, `jawb_job_visits`). Make the account the
+source of truth, keeping localStorage only as the fallback before the migration is run.
+
+**Do:**
+1. Load: alongside the jobs query, read `job_nav` (`select("job_id, visited_at, pinned_at")`). Build `visits`
+   (job_id → visited_at) and `pins` (job ids with pinned_at, newest pinned_at first) from it. Re-read on the same
+   triggers as the jobs list (navigation, window focus), so another device's changes show up.
+2. Fallback: if that read fails with `isMissingRelation` (src/lib/db.ts), keep the current localStorage behaviour
+   exactly (no console noise beyond one `console.info` per page load). Any other error: `console.warn`, keep the last
+   known state.
+3. Visit: keep the instant optimistic reorder + FLIP from T6 (local state updates in the click handler with
+   `new Date().toISOString()`), then call `supabase.rpc("record_job_visit", { p_job: id })` and, when it returns,
+   store the server timestamp for that job. Also on direct loads of `/jobs/<id>` (the existing path effect). Don't
+   await it before navigating.
+4. Pin/unpin: optimistic local update, then `supabase.rpc("set_job_pinned", { p_job, p_pinned })`; on error revert and
+   `console.warn`.
+5. One-time move of this device's local data: after the first successful `job_nav` read on a device, if localStorage
+   has `jawb_job_visits` / `jawb_pinned_jobs`, upload them — for each pinned id not already pinned on the account call
+   `set_job_pinned(id, true)` (oldest pin first, so the newest ends up newest); for visits, upsert
+   `{ job_id, visited_at }` rows with `supabase.from("job_nav").upsert(..., { onConflict: "job_id",
+   ignoreDuplicates: false })` ONLY for jobs whose local visit is newer than the account's (never move an account
+   timestamp backwards; skip ids not in the jobs list). Then remove both localStorage keys. Wrap in try/catch.
+6. Delete: the database cascade removes the row; just drop it from local state (already done in T6).
+7. Pure helpers in jobNav.ts stay pure and tested: add `navStateFromRows(rows)` → `{ visits, pins }` (pins sorted
+   newest pinned_at first; null pinned_at excluded) and `visitsToUpload(local, account, jobIds)`; test both.
+8. README: add `0009_job_nav.sql` to the Setup step 1 migration list with one sentence on what it does (pins and
+   recently-visited order synced across devices; without it they stay on the device), and update the Workspace
+   feature bullet if it mentions the sidebar order.
+
+**Acceptance:**
+- [ ] With the table present: pins and visit order come from the account, survive clearing localStorage, and match on a
+      second browser context after a reload/focus.
+- [ ] Without the table (missing relation): behaviour identical to T6, no errors thrown.
+- [ ] Click still reorders instantly with the slide; nothing waits on the network.
+- [ ] Local data is uploaded once and the keys removed; account timestamps never move backwards.
+- [ ] tsc + eslint clean; `npx vitest run tests/job-nav.test.ts` passes.
