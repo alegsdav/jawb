@@ -537,7 +537,7 @@ export default function MasterResumePage() {
               Outside the hidden part below, so it still shows over the document on phones. */}
           <div
             ref={setCommentEl}
-            className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto lg:inset-x-auto lg:right-4 lg:bottom-4 lg:w-[380px] xl:absolute xl:inset-x-4 xl:w-auto xl:bottom-auto xl:top-4 xl:z-20 xl:max-h-[70%]"
+            className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto lg:inset-x-auto lg:right-4 lg:bottom-12 lg:w-[380px] xl:absolute xl:inset-x-4 xl:w-auto xl:bottom-auto xl:top-4 xl:z-20 xl:max-h-[70%]"
           />
           <div className={`space-y-4 ${view === "resume" ? "hidden xl:block" : ""}`}>
             {built && (

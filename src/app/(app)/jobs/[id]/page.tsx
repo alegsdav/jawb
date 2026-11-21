@@ -1359,7 +1359,7 @@ export default function JobPage() {
             </div>
             <div
               ref={setCommentEl}
-              className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:inset-x-auto lg:right-4 lg:bottom-4 lg:w-[380px] xl:absolute xl:inset-x-0 xl:w-auto xl:top-full xl:mt-3 xl:bottom-auto xl:z-20 xl:max-h-none xl:overflow-visible"
+              className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:inset-x-auto lg:right-4 lg:bottom-12 lg:w-[380px] xl:absolute xl:inset-x-0 xl:w-auto xl:top-full xl:mt-3 xl:bottom-auto xl:z-20 xl:max-h-none xl:overflow-visible"
             />
           </div>
           {/* Notices (migration hint, errors, applied state, pull-from-master plan) sit under the header, on every tab. */}
