@@ -13,7 +13,7 @@ const SECURITY_HEADERS = [
   {
     key: "Permissions-Policy",
     value:
-      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), hid=(), " +
+      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), " +
       "magnetometer=(), gyroscope=(), accelerometer=(), display-capture=(), browsing-topics=()",
   },
 ];

@@ -89,6 +89,15 @@ export const SettingsIcon = ({ className }: P) => (
 export const ListIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M9.5 6.5h10M9.5 12h10M9.5 17.5h10" /><circle cx="5" cy="6.5" r=".9" fill="currentColor" /><circle cx="5" cy="12" r=".9" fill="currentColor" /><circle cx="5" cy="17.5" r=".9" fill="currentColor" /></svg>
 );
+/** Like ListIcon, with a small "1 2 3" mark on each line instead of a dot. */
+export const NumberedListIcon = ({ className }: P) => (
+  <svg {...base} className={className}>
+    <path d="M9.5 6.5h10M9.5 12h10M9.5 17.5h10" />
+    <path d="M3.9 5.2 4.6 4.5V8.5" />
+    <path d="M3.8 10.4a1.1 1.1 0 0 1 2.2 0c0 1-2.2 1.6-2.2 3.6H6" />
+    <path d="M3.8 15.8a1 1 0 0 1 2 0 1 1 0 0 1-1 1 1 1 0 0 1 1 1 1 1 0 0 1-2 0" />
+  </svg>
+);
 export const AlignLeftIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M4 6h16M4 10h10M4 14h16M4 18h10" /></svg>
 );

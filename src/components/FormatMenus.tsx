@@ -48,32 +48,43 @@ export function FormatMenu({ commandsRef, fmt }: MenuProps) {
           </MenuItem>
         ))}
         <MenuSeparator />
-        <MenuItem onSelect={run((c) => c.outdent())} disabled={off}>Decrease indent</MenuItem>
-        <MenuItem onSelect={run((c) => c.indent())} disabled={off}>Increase indent</MenuItem>
+        <MenuItem onSelect={run((c) => c.outdent())} disabled={off}><Tick on={false}>Decrease indent</Tick></MenuItem>
+        <MenuItem onSelect={run((c) => c.indent())} disabled={off}><Tick on={false}>Increase indent</Tick></MenuItem>
         <MenuSeparator />
-        <div className="float-muted px-2 pt-1 text-[11px]">Line spacing</div>
+        {/* pl-7: the item's px-2 plus the Tick column (w-3) and gap (gap-2), so the caption lines up with the labels. */}
+        <div className="float-muted pl-7 pr-2 pt-1 text-[11px]">Line spacing</div>
         {LINE_SPACINGS.map((n) => (
           <MenuItem key={n} onSelect={run((c) => c.setLineHeight(n))} disabled={off}>
             <Tick on={Math.abs(fmt.lineHeight - n) < 0.01}>{String(n)}</Tick>
           </MenuItem>
         ))}
         <MenuSeparator />
-        <MenuItem onSelect={run((c) => c.adjustSpaceBefore(6))} disabled={off}>Add space before paragraph</MenuItem>
-        <MenuItem onSelect={run((c) => c.adjustSpaceBefore(-6))} disabled={off}>Remove space before paragraph</MenuItem>
-        <MenuItem onSelect={run((c) => c.adjustSpaceAfter(6))} disabled={off}>Add space after paragraph</MenuItem>
-        <MenuItem onSelect={run((c) => c.adjustSpaceAfter(-6))} disabled={off}>Remove space after paragraph</MenuItem>
+        <MenuItem onSelect={run((c) => c.adjustSpaceBefore(6))} disabled={off}>
+          <Tick on={false}>Add space before paragraph</Tick>
+        </MenuItem>
+        <MenuItem onSelect={run((c) => c.adjustSpaceBefore(-6))} disabled={off}>
+          <Tick on={false}>Remove space before paragraph</Tick>
+        </MenuItem>
+        <MenuItem onSelect={run((c) => c.adjustSpaceAfter(6))} disabled={off}>
+          <Tick on={false}>Add space after paragraph</Tick>
+        </MenuItem>
+        <MenuItem onSelect={run((c) => c.adjustSpaceAfter(-6))} disabled={off}>
+          <Tick on={false}>Remove space after paragraph</Tick>
+        </MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={() => setTabsOpen(true)} disabled={off}>
-          Tab stops…
+          <Tick on={false}>Tab stops…</Tick>
         </MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={run((c) => c.toggleBorderBottom())} disabled={off}>
           <Tick on={fmt.borderBottom}>Paragraph border below</Tick>
         </MenuItem>
-        <MenuItem onSelect={run((c) => c.insertHorizontalLine())} disabled={off}>Horizontal line</MenuItem>
+        <MenuItem onSelect={run((c) => c.insertHorizontalLine())} disabled={off}>
+          <Tick on={false}>Horizontal line</Tick>
+        </MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={run((c) => c.clearFormatting())} disabled={off} shortcut="Ctrl+\">
-          Clear formatting
+          <Tick on={false}>Clear formatting</Tick>
         </MenuItem>
       </MenuBarMenu>
       {tabsOpen &&

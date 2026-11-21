@@ -5,7 +5,8 @@ import type { Bullet, Item, Resume, Section, TextStyle } from "./types";
 import { emptyDoc, flattenDoc, newId, normalizeDoc } from "./doc/model";
 import { outlineFromDoc } from "./doc/outline";
 import { legacyToDoc } from "./doc/legacy";
-import type { DocJSON, FlatParagraph, PageSetup } from "./doc/types";
+import { PAGE_DEFAULTS, type DocJSON, type FlatParagraph, type PageSetup } from "./doc/types";
+import { MARGIN_RANGE_IN } from "./pageSetup";
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -80,13 +81,24 @@ function carryMeta(src: Obj, out: Resume): void {
   setOpt(out, "page", cleanPage(src.page));
 }
 
-/** Margins in inches, all four required and within 0-2; otherwise undefined (PAGE_DEFAULTS apply). */
+/**
+ * Margins in inches. Each side is kept on its own: a number from 0 up to the dialog's maximum (larger ones are
+ * clamped to it), and a side that is missing or not a usable number takes its PAGE_DEFAULTS value. Only when no
+ * side is a usable number is the result undefined (all defaults), so one bad side never resets the other three.
+ */
 function cleanPage(raw: unknown): PageSetup | undefined {
   const p = obj(raw);
-  const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 2;
-  const { marginTop, marginBottom, marginLeft, marginRight } = p;
-  if (!ok(marginTop) || !ok(marginBottom) || !ok(marginLeft) || !ok(marginRight)) return undefined;
-  return { marginTop, marginBottom, marginLeft, marginRight };
+  const usable = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const sides = [p.marginTop, p.marginBottom, p.marginLeft, p.marginRight];
+  if (!sides.some(usable)) return undefined;
+  const side = (v: unknown, key: keyof PageSetup): number =>
+    usable(v) ? Math.min(MARGIN_RANGE_IN.max, v) : PAGE_DEFAULTS[key];
+  return {
+    marginTop: side(p.marginTop, "marginTop"),
+    marginBottom: side(p.marginBottom, "marginBottom"),
+    marginLeft: side(p.marginLeft, "marginLeft"),
+    marginRight: side(p.marginRight, "marginRight"),
+  };
 }
 
 /**

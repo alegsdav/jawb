@@ -6,6 +6,8 @@ import {
   pageFromInputs,
 } from "@/lib/pageSetup";
 import { PAGE_DEFAULTS, type PageSetup } from "@/lib/doc/types";
+import { emptyDoc } from "@/lib/doc/model";
+import { normalizeResume } from "@/lib/resume";
 
 const page = (marginTop: number, marginBottom: number, marginLeft: number, marginRight: number): PageSetup => ({
   marginTop,
@@ -77,5 +79,40 @@ describe("inputsFromPage", () => {
 
   it("round-trips through pageFromInputs", () => {
     expect(pageFromInputs(inputsFromPage(PAGE_DEFAULTS))).toEqual(PAGE_DEFAULTS);
+  });
+});
+
+describe("normalizeResume keeps page margins", () => {
+  const v4 = (page: unknown) => ({ version: 4, header: { name: "A", contact: "" }, sections: [], doc: emptyDoc(), page });
+
+  it("keeps a 3 in margin (the dialog's maximum) on reload", () => {
+    expect(normalizeResume(v4(page(3, 3, 3, 3))).page).toEqual(page(3, 3, 3, 3));
+    expect(normalizeResume(v4({ marginTop: 3, marginBottom: 0.5, marginLeft: 0.6, marginRight: 0.6 })).page).toEqual(
+      page(3, 0.5, 0.6, 0.6),
+    );
+  });
+
+  it("clamps a side above the maximum to the maximum", () => {
+    expect(normalizeResume(v4(page(4, 0.5, 0.5, 0.5))).page).toEqual(page(3, 0.5, 0.5, 0.5));
+  });
+
+  it("one invalid side takes its default and keeps the other three", () => {
+    const r = normalizeResume(v4({ marginTop: 1.25, marginBottom: "abc", marginLeft: 0.8, marginRight: -1 }));
+    expect(r.page).toEqual({
+      marginTop: 1.25,
+      marginBottom: PAGE_DEFAULTS.marginBottom,
+      marginLeft: 0.8,
+      marginRight: PAGE_DEFAULTS.marginRight,
+    });
+  });
+
+  it("a missing or non-finite side takes its default", () => {
+    const r = normalizeResume(v4({ marginTop: 2, marginLeft: Number.NaN, marginRight: 1 }));
+    expect(r.page).toEqual({ ...PAGE_DEFAULTS, marginTop: 2, marginRight: 1 });
+  });
+
+  it("with no usable side the page is undefined (all defaults)", () => {
+    expect(normalizeResume(v4(undefined)).page).toBeUndefined();
+    expect(normalizeResume(v4({ marginTop: "x", marginBottom: null })).page).toBeUndefined();
   });
 });

@@ -2,7 +2,7 @@
 
 import { FONT_CHOICES } from "@/lib/doc/fonts";
 import { UndoRedo } from "./DocToolbar";
-import { LinkIcon, ListIcon } from "./icons";
+import { LinkIcon, ListIcon, NumberedListIcon } from "./icons";
 import { FONT_SIZES, type DocCommands, type FormatState, type MarkName } from "./editorTypes";
 
 const MARKS: { name: MarkName; title: string; glyph: string; glyphClass: string }[] = [
@@ -15,7 +15,6 @@ const Sep = () => <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border"
 
 /** A toolbar button: stays enabled only with a selection; keeps the editor's focus on press. */
 const btnClass = "icon-btn shrink-0 aria-pressed:bg-surface-2 aria-pressed:text-fg";
-const textBtnClass = "btn btn-sm shrink-0 min-h-8 px-2 text-[13px]";
 
 /**
  * The formatting toolbar: undo/redo, font, size, bold/italic/underline/link, lists. Alignment, indent, spacing,
@@ -23,11 +22,14 @@ const textBtnClass = "btn btn-sm shrink-0 min-h-8 px-2 text-[13px]";
  */
 export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: DocCommands }) {
   const on = fmt.active;
-  const families = fmt.fontFamily && !(FONT_CHOICES as readonly string[]).includes(fmt.fontFamily)
-    ? [...FONT_CHOICES, fmt.fontFamily]
+  // Without a focused editor the marks describe nothing, so the selects go blank and nothing shows pressed.
+  const font = on ? fmt.fontFamily : null;
+  const size = on ? fmt.fontSize : null;
+  const families = font && !(FONT_CHOICES as readonly string[]).includes(font)
+    ? [...FONT_CHOICES, font]
     : FONT_CHOICES;
-  const sizes = fmt.fontSize !== null && !(FONT_SIZES as readonly number[]).includes(fmt.fontSize)
-    ? [...FONT_SIZES, fmt.fontSize].sort((a, b) => a - b)
+  const sizes = size !== null && !(FONT_SIZES as readonly number[]).includes(size)
+    ? [...FONT_SIZES, size].sort((a, b) => a - b)
     : FONT_SIZES;
 
   return (
@@ -38,10 +40,10 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         aria-label="Font"
         className="h-8 w-36 max-w-full shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
         disabled={!on}
-        value={fmt.fontFamily ?? ""}
+        value={font ?? ""}
         onChange={(e) => commands.setFontFamily(e.target.value)}
       >
-        {fmt.fontFamily === null && <option value="" disabled />}
+        {font === null && <option value="" disabled />}
         {families.map((f) => (
           <option key={f} value={f}>{f}</option>
         ))}
@@ -50,10 +52,10 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         aria-label="Font size"
         className="h-8 w-[4.5rem] shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
         disabled={!on}
-        value={fmt.fontSize === null ? "" : String(fmt.fontSize)}
+        value={size === null ? "" : String(size)}
         onChange={(e) => commands.setSize(Number(e.target.value))}
       >
-        {fmt.fontSize === null && <option value="" disabled />}
+        {size === null && <option value="" disabled />}
         {sizes.map((pt) => (
           <option key={pt} value={String(pt)}>{pt}</option>
         ))}
@@ -66,7 +68,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
           className={btnClass}
           title={b.title}
           aria-label={b.title}
-          aria-pressed={fmt[b.name]}
+          aria-pressed={on && fmt[b.name]}
           disabled={!on}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => commands.toggleMark(b.name)}
@@ -79,7 +81,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         className={btnClass}
         title="Insert link (Ctrl+K)"
         aria-label="Insert link"
-        aria-pressed={fmt.link !== null}
+        aria-pressed={on && fmt.link !== null}
         disabled={!on}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => commands.openLink()}
@@ -92,7 +94,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         className={btnClass}
         title="Bulleted list"
         aria-label="Bulleted list"
-        aria-pressed={fmt.list === "bullet"}
+        aria-pressed={on && fmt.list === "bullet"}
         disabled={!on}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => commands.toggleList("bullet")}
@@ -101,15 +103,15 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
       </button>
       <button
         type="button"
-        className={textBtnClass}
+        className={btnClass}
         title="Numbered list"
         aria-label="Numbered list"
-        aria-pressed={fmt.list === "ordered"}
+        aria-pressed={on && fmt.list === "ordered"}
         disabled={!on}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => commands.toggleList("ordered")}
       >
-        1. 2.
+        <NumberedListIcon className="h-4 w-4" />
       </button>
     </div>
   );

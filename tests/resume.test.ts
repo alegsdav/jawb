@@ -212,12 +212,14 @@ describe("normalizeResume: version 3 to version 4", () => {
     expect(docEquals(resumeDoc(again), edited.doc!)).toBe(true);
   });
 
-  it("keeps facts, baseline and page, and drops page setups with bad margins", () => {
+  it("keeps facts, baseline and page, and clamps a margin past the dialog's maximum", () => {
     const withMeta = normalizeResume({ ...v3(), facts: ["Speaks Spanish"], baseline: { b1: "old", n: 3 }, page: { marginTop: 1, marginBottom: 1, marginLeft: 0.75, marginRight: 0.75 } });
     expect(withMeta.facts).toEqual(["Speaks Spanish"]);
     expect(withMeta.baseline).toEqual({ b1: "old" });
     expect(withMeta.page).toEqual({ marginTop: 1, marginBottom: 1, marginLeft: 0.75, marginRight: 0.75 });
-    expect(normalizeResume({ ...v3(), page: { marginTop: 9, marginBottom: 1, marginLeft: 1, marginRight: 1 } }).page).toBeUndefined();
+    expect(normalizeResume({ ...v3(), page: { marginTop: 9, marginBottom: 1, marginLeft: 1, marginRight: 1 } }).page).toEqual({
+      marginTop: 3, marginBottom: 1, marginLeft: 1, marginRight: 1,
+    });
   });
 });
 
