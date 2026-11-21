@@ -1176,12 +1176,9 @@ export default function JobPage() {
       <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
         {/* Document column: grey canvas on the resume tab (scrolls on lg+), with notices above and a status bar below. */}
         <div className={`flex min-w-0 flex-1 flex-col lg:min-h-0 ${tab === "analysis" ? "hidden lg:flex" : "flex"}`}>
-          {docTab ? (
-            <div className="mx-auto w-full max-w-[860px] shrink-0 space-y-4 px-4 pt-4 sm:px-8 empty:hidden">{notices}</div>
-          ) : (
+          {!docTab && (
             <div className="min-h-0 flex-1 lg:overflow-y-auto">
               <div className="mx-auto max-w-[860px] space-y-4 px-4 pb-6 pt-4 sm:px-8">
-                {notices}
                 {tab === "job" && <PostingTab job={job} onPatch={patch} />}
                 {tab === "cover" && (
                   <CoverLetterTab
@@ -1264,6 +1261,8 @@ export default function JobPage() {
               className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:absolute lg:inset-x-0 lg:top-full lg:mt-3 lg:bottom-auto lg:z-20 lg:max-h-none lg:overflow-visible"
             />
           </div>
+          {/* Notices (migration hint, errors, applied state, pull-from-master plan) sit under the header, on every tab. */}
+          <div className="space-y-3 empty:hidden">{notices}</div>
           <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>
             {side}
             {/* Collapsed by default: the "?" opens what the colours mean. Inside the panel only: on phones, the Analysis tab's bottom. */}

@@ -259,6 +259,12 @@ inline in panels, or in the sidebar.
    confirm.
 8. Clear-then-load: when the job page's `id` changes without a remount (shouldn't happen with the app router, but
    guard it), it must show the BlankDocument, not the previous job's text.
+9. Phones (below lg), job page: the `<aside>` is `order-first`, so its header block (JobHeader + the notices T4 moved
+   there) renders between the toolbars and the canvas on the Resume tab. On the Resume tab below lg, hide the whole
+   aside (`hidden lg:block` when `tab === "resume"`), so the canvas starts right under the toolbars. On the Analysis,
+   Posting and Letter tabs it shows as now. The comment-card slot (`setCommentEl`) is `position: fixed` on phones and
+   must keep working on the Resume tab: move that slot element out of the aside (e.g. render it as a sibling right
+   after the aside with the same classes) so hiding the aside doesn't hide it. The skeleton matches this.
 
 **Acceptance:**
 - [ ] Loader is black, and only appears centred over the document (editor) or centred in the content area.

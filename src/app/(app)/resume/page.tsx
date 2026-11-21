@@ -26,8 +26,9 @@ import { EditorCanvas } from "@/components/ZoomFrame";
 import { DownloadIcon } from "@/components/icons";
 import { ReimportDialog } from "@/components/ReimportDialog";
 import { type ImportSource } from "@/components/ResumeImport";
-import { ImportReview } from "@/components/ImportReview";
+import { FlashToast } from "@/components/FlashToast";
 import { resumePlainText } from "@/lib/importReview";
+import { postApi } from "@/lib/api";
 import { FactsPanel } from "@/components/FactsPanel";
 import { Builder } from "@/components/Builder";
 import { Onboarding } from "@/components/Onboarding";
@@ -35,6 +36,9 @@ import { UndoToast } from "@/components/UndoToast";
 import { useFacts } from "@/lib/useFacts";
 import { importedBulletFacts, plural } from "@/lib/facts";
 import { SaveErrorToast, SaveStatus, useAutosaveWithRetry } from "@/lib/useAutosave";
+
+const REBUILD_CONFIRM =
+  "Rebuild your resume in the app's clean template? Your text is kept; the layout and fonts change. Uses 1 AI analysis.";
 
 /** Re-import keeps bullet ids stable (so jobs' "changes vs master" and linked facts stay right). */
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
@@ -64,8 +68,8 @@ async function loadOrCreateMaster(supabase: SupabaseClient): Promise<MasterRow> 
 type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConflict[]; replaced: boolean };
 
 /**
- * The review of the last file import: the master as it was before the import (Undo puts it back), the facts the
- * import added (Undo removes them), and whether the text has been rebuilt in the clean template since.
+ * The last file import, or the last rebuild in the clean template: the master as it was before (Undo puts it back),
+ * the facts it added (Undo removes them). Shown as a toast with an Undo button for a few seconds.
  */
 type ImportReviewState = { fileName: string; before: Resume; addedFacts: Fact[]; rebuilt: boolean };
 
@@ -157,6 +161,10 @@ export default function MasterResumePage() {
   const [notice, setNotice] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [review, setReview] = useState<ImportReviewState | null>(null);
+  /** File > Rebuild in a clean template is waiting on the AI. */
+  const [rebuilding, setRebuilding] = useState(false);
+  /** The error message the user dismissed; a new message (different text) shows again. */
+  const [dismissedError, setDismissedError] = useState("");
   const [pageSetupOpen, setPageSetupOpen] = useState(false);
   const [justImported, setJustImported] = useState(false);
   const [measure, setMeasure] = useState({ pages: 1, overflowLines: 0 });
@@ -221,9 +229,17 @@ export default function MasterResumePage() {
 
   useEffect(() => {
     if (!notice) return;
-    const t = setTimeout(() => setNotice(""), 8000);
+    const t = setTimeout(() => setNotice(""), 5000);
     return () => clearTimeout(t);
   }, [notice]);
+
+  // The import/rebuild toast and its Undo last 8s. A new import or rebuild (a new `before`) restarts the clock.
+  const reviewBefore = review?.before ?? null;
+  useEffect(() => {
+    if (!reviewBefore) return;
+    const t = setTimeout(() => setReview(null), 8000);
+    return () => clearTimeout(t);
+  }, [reviewBefore]);
 
   /**
    * Conflict-safe autosave: if the master changed elsewhere since our last load/save (another tab or
@@ -333,19 +349,35 @@ export default function MasterResumePage() {
     setReview({ fileName: source.fileName, before, addedFacts: [], rebuilt: false });
     linkImportFacts(next, (added) => addReviewFacts(before, added));
   };
-  /** The review's rebuild: the clean-template text replaces the document; Undo still goes back to before the file. */
-  const onRebuilt = (r: Resume) => {
-    if (!review) return;
-    const before = review.before;
-    const next = takeImport(r);
-    setReview((cur) => (cur ? { ...cur, rebuilt: true } : cur));
+  /** File > Rebuild in a clean template: the document's text (edits kept) is rebuilt in the app's template. */
+  const rebuildInTemplate = async () => {
+    const current = latestDoc.current;
+    if (!current || rebuilding || !window.confirm(REBUILD_CONFIRM)) return;
+    const text = resumePlainText(current.doc);
+    if (!text) {
+      setDismissedError("");
+      setError("There is no text to rebuild.");
+      return;
+    }
+    setRebuilding(true);
+    const { data, error: apiError } = await postApi<{ resume: Resume }>("/api/parse-resume", { text });
+    setRebuilding(false);
+    if (apiError || !data) {
+      setDismissedError("");
+      setError(apiError ?? "Couldn't rebuild the resume. Try again.");
+      return;
+    }
+    // Undo goes back to the document as it was when the rebuild landed (its edits included).
+    const before = latestDoc.current ?? current;
+    const next = takeImport(data.resume);
+    setReview({ fileName: "", before, addedFacts: [], rebuilt: true });
     linkImportFacts(next, (added) => addReviewFacts(before, added));
   };
-  /** Undo: the master as it was before the file import, and without the facts that import added. */
-  const undoImport = () => {
+  /** Undo for the toast: the master as it was before the import or rebuild, and without the facts it added. */
+  const undoReview = () => {
     if (!review) return;
     setResume(review.before);
-    setJustImported(false);
+    if (!review.rebuilt) setJustImported(false);
     if (review.addedFacts.length) void facts.remove(review.addedFacts.map((f) => f.id));
     setReview(null);
   };
@@ -377,52 +409,9 @@ export default function MasterResumePage() {
   };
   // The re-import dialog opens over whatever is behind it, so an empty master stays on onboarding under the dialog.
   const onboarding = empty;
-  const banners = (
-    <>
-      {review && (
-        <ImportReview
-          fileName={review.fileName}
-          rebuilt={review.rebuilt}
-          resumeText={() => resumePlainText(latestDoc.current?.doc)}
-          onRebuilt={onRebuilt}
-          onUndo={undoImport}
-          onDismiss={() => setReview(null)}
-        />
-      )}
-      {built && (
-        <section aria-labelledby="built-heading" className="space-y-2 rounded-lg border border-border bg-surface p-4">
-          <h2 id="built-heading" className="text-sm font-medium">Your first draft is ready.</h2>
-          <p className="text-sm text-muted">
-            It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
-            a few quick questions help you find numbers worth adding.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {built
-              .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
-              .filter((x): x is NonNullable<typeof x> => !!x)
-              .map(({ sec, it }) => (
-                <button key={it.id} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => goDeeper(sec.id, it.id)}>
-                  Go deeper: {it.title || "this experience"}
-                </button>
-              ))}
-            <Link href="/" className="btn btn-sm btn-primary min-h-10 sm:min-h-0">Next: add a job →</Link>
-            <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setBuilt(null)}>Dismiss</button>
-          </div>
-        </section>
-      )}
-      {justImported && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface p-4">
-          <div className="min-w-48 flex-1">
-            <p className="text-sm font-medium">Step 1 done — your master resume is ready.</p>
-            <p className="text-xs text-muted">Check it below, then add the first job you want to tailor it for.</p>
-          </div>
-          <Link href="/" className="btn btn-sm btn-primary w-full sm:w-auto">Next: add a job →</Link>
-        </div>
-      )}
-      {(error || actions.error) && <p role="alert" className="px-1 text-sm text-bad">{error || actions.error}</p>}
-      {notice && <p role="status" className="px-1 text-sm text-good">{notice}</p>}
-    </>
-  );
+  /** One error toast at a time (until dismissed); the import or rebuild toast; then the notice. Most urgent first. */
+  const errorText = error || actions.error;
+  const errorToast = !!errorText && errorText !== dismissedError;
 
   return (
     <div className="flex flex-col lg:h-full lg:min-h-0">
@@ -442,6 +431,9 @@ export default function MasterResumePage() {
               </MenuItem>
               <MenuSeparator />
               <MenuItem onSelect={() => setImportOpen(true)}>Re-import resume</MenuItem>
+              <MenuItem onSelect={() => void rebuildInTemplate()} disabled={empty || rebuilding}>
+                {rebuilding ? "Rebuilding…" : "Rebuild in a clean template…"}
+              </MenuItem>
             </MenuBarMenu>
             <FormatMenu commandsRef={commandsRef} fmt={formatState} />
           </MenuBar>
@@ -509,8 +501,6 @@ export default function MasterResumePage() {
             </div>
           ) : (
             <>
-              {/* Banners sit above the canvas, unscaled, in the page's column. */}
-              <div className="mx-auto w-full max-w-[816px] shrink-0 space-y-3 px-4 pt-4 empty:hidden">{banners}</div>
               <EditorCanvas zoom={zoom} className="min-w-0 flex-1 pb-6 lg:min-h-0 lg:overflow-auto">
                 <ResumeDocument
                   value={resume}
@@ -549,6 +539,34 @@ export default function MasterResumePage() {
             className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto lg:absolute lg:inset-x-4 lg:bottom-auto lg:top-4 lg:z-20 lg:max-h-[70%]"
           />
           <div className={`space-y-4 ${view === "resume" ? "hidden lg:block" : ""}`}>
+            {built && (
+              <section aria-labelledby="built-heading" className="space-y-2 rounded-lg border border-border p-3 text-sm">
+                <h2 id="built-heading" className="font-medium">Your first draft is ready.</h2>
+                <p className="text-muted">
+                  It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
+                  a few quick questions help you find numbers worth adding.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {built
+                    .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
+                    .filter((x): x is NonNullable<typeof x> => !!x)
+                    .map(({ sec, it }) => (
+                      <button key={it.id} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => goDeeper(sec.id, it.id)}>
+                        Go deeper: {it.title || "this experience"}
+                      </button>
+                    ))}
+                  <Link href="/" className="btn btn-sm btn-primary min-h-10 sm:min-h-0">Next: add a job →</Link>
+                  <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setBuilt(null)}>Dismiss</button>
+                </div>
+              </section>
+            )}
+            {justImported && (
+              <section aria-label="Next step" className="space-y-2 rounded-lg border border-border p-3 text-sm">
+                <p className="font-medium">Step 1 done — your master resume is ready.</p>
+                <p className="text-xs text-muted">Check it, then add the first job you want to tailor it for.</p>
+                <Link href="/" className="btn btn-sm btn-primary w-full">Next: add a job →</Link>
+              </section>
+            )}
             <SideTabs
               label="Panel"
               value={sideTab}
@@ -612,6 +630,28 @@ export default function MasterResumePage() {
           raised={status === "error"}
         />
       )}
+      {/* Toasts: one at a time, most urgent first. Errors stay until dismissed; the rest go on their own. */}
+      {errorToast ? (
+        <FlashToast
+          message={errorText}
+          tone="bad"
+          raised={status === "error" || !!conflict}
+          onClose={() => setDismissedError(errorText)}
+        />
+      ) : review ? (
+        <FlashToast
+          message={review.rebuilt ? "Rebuilt in the clean template" : `Imported ${review.fileName}`}
+          raised={status === "error" || !!conflict}
+          action={{ label: "Undo", onClick: undoReview }}
+          onClose={() => setReview(null)}
+        />
+      ) : notice ? (
+        <FlashToast
+          message={notice}
+          raised={status === "error" || !!conflict}
+          onClose={() => setNotice("")}
+        />
+      ) : null}
       {/* Fixed "Not saved — retrying…" notice; visible even when the toolbar has scrolled away on phones. */}
       {conflict ? (
         <ConflictBanner conflict={conflict} busy={resolving} onReload={reloadTheirs} onKeepMine={keepMine} />
