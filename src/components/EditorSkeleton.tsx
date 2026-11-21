@@ -5,10 +5,16 @@ import { PAGE_DEFAULTS } from "@/lib/doc/types";
 import { useKindSlide, type EditorKind } from "@/lib/editorKind";
 import { DocToolbar, EditorToolbar, IconButton, MenuBar, ToolbarSep, useZoom } from "./DocToolbar";
 import { FormatToolbar } from "./FormatToolbar";
-import { EMPTY_FORMAT_STATE, NOOP_COMMANDS } from "./editorTypes";
+import { EMPTY_FORMAT_STATE, NOOP_COMMANDS, type FormatState } from "./editorTypes";
 import { DownloadIcon } from "./icons";
 import { Loader } from "./Loader";
 import { EditorCanvas } from "./ZoomFrame";
+
+/**
+ * The toolbar's format state with no selection. The real editor shows the size of the text under its caret, which
+ * the skeleton can't know, so the size box stays empty here rather than showing a size that's wrong.
+ */
+const BLANK_FORMAT: FormatState = { ...EMPTY_FORMAT_STATE, fontSize: null };
 
 /** The job page's tabs. The page and its loading state both read them from here, so they can't drift apart. */
 export const JOB_TABS = [
@@ -30,12 +36,15 @@ export function BlankDocument({ zoom, className }: { zoom: number; className: st
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <EditorCanvas zoom={zoom} className={className}>
-        <div
-          className="doc-page doc-page-blank"
-          style={{
-            padding: `${PAGE_DEFAULTS.marginTop}in ${PAGE_DEFAULTS.marginRight}in ${PAGE_DEFAULTS.marginBottom}in ${PAGE_DEFAULTS.marginLeft}in`,
-          }}
-        />
+        {/* The wrapper ResumeDocument puts the page in: its top padding is what places the page on the canvas. */}
+        <div className="doc-canvas">
+          <div
+            className="doc-page doc-page-blank"
+            style={{
+              padding: `${PAGE_DEFAULTS.marginTop}in ${PAGE_DEFAULTS.marginRight}in ${PAGE_DEFAULTS.marginBottom}in ${PAGE_DEFAULTS.marginLeft}in`,
+            }}
+          />
+        </div>
       </EditorCanvas>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <Loader label="Loading document…" />
@@ -93,7 +102,7 @@ function JobSkeleton() {
       <div className="shrink-0">
         <EditorToolbar>
           <div className="flex shrink-0 items-center">
-            <FormatToolbar fmt={EMPTY_FORMAT_STATE} commands={NOOP_COMMANDS} />
+            <FormatToolbar fmt={BLANK_FORMAT} commands={NOOP_COMMANDS} />
           </div>
           <ToolbarSep />
           <div className={`ml-auto flex shrink-0 items-center gap-1 ${slide.className}`} style={slide.style}>
@@ -142,7 +151,7 @@ function MasterSkeleton() {
 
       <div data-doc-keep-selection className="flex min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1">
         <div className="flex shrink-0 items-center">
-          <FormatToolbar fmt={EMPTY_FORMAT_STATE} commands={NOOP_COMMANDS} />
+          <FormatToolbar fmt={BLANK_FORMAT} commands={NOOP_COMMANDS} />
         </div>
         <div className="ml-auto shrink-0">
           <IconButton label="Download PDF" onClick={noop} disabled>
