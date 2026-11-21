@@ -14,7 +14,7 @@ import { applyStatusChange } from "@/lib/status";
 import { useJobWrites, type RowSaveState } from "@/lib/jobWrites";
 import { SaveErrorToast } from "@/lib/useAutosave";
 import { FitBadge, StatusSelect } from "@/components/StatusSelect";
-import { AddJobForm, stashCapture } from "@/components/AddJobForm";
+import { AddJobForm } from "@/components/AddJobForm";
 import { OutcomeStats } from "@/components/OutcomeStats";
 import { deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 import { InProgress } from "@/components/dashboard/InProgress";
@@ -168,7 +168,6 @@ export default function TrackerPage() {
       .then(({ data, error }) => {
         if (cancelled) return;
         if (!error && (!data || isEmptyResume(normalizeResume(data.content)))) {
-          stashCapture();
           router.replace("/resume");
           return;
         }
@@ -364,7 +363,7 @@ export default function TrackerPage() {
       <NeedsAttention followUps={due} closing={closing} today={today} onFollowedUp={followedUp} />
 
       <div className="grid gap-6 lg:gap-10 lg:grid-cols-12 lg:items-start">
-        {/* Phones: Add a job comes first (a one-line button once there are jobs). Desktop: the right column. */}
+        {/* The Jobs box (add a job, matches to come). Phones: first. Desktop: the right column. */}
         <div id="add-job" className="scroll-mt-4 lg:col-span-4 lg:col-start-9 lg:row-start-1">
           <AddJobForm existing={jobs} />
         </div>

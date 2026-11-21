@@ -1,15 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { pasteOnlySite } from "@/lib/jobsites";
 import { postApi } from "@/lib/api";
 import { findDuplicateJob } from "@/lib/status";
 import type { Job } from "@/lib/types";
-import { Bookmarklet } from "./Bookmarklet";
+import { PlusIcon } from "./icons";
 
 const URL_RE = /^https?:\/\/\S+$/i;
-const PENDING_KEY = "jp:pending-capture";
 
 /** A full http(s) address that the browser can parse (the server checks again). */
 function isHttpUrl(s: string): boolean {
@@ -20,49 +19,6 @@ function isHttpUrl(s: string): boolean {
     return false;
   }
 }
-
-type Capture = { url?: string; title?: string; text?: string };
-
-function parseCapture(raw: string): Capture | null {
-  try {
-    const v = JSON.parse(decodeURIComponent(raw)) as Capture;
-    return v && typeof v === "object" ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * If the page was opened by the bookmarklet (`#add=…`), keep the capture for after a redirect
- * (e.g. onboarding sends a brand-new user to /resume first).
- */
-export function stashCapture() {
-  try {
-    if (location.hash.startsWith("#add=")) sessionStorage.setItem(PENDING_KEY, location.hash.slice(5));
-  } catch {
-    /* storage unavailable: the capture is lost, the user can click the bookmarklet again */
-  }
-}
-
-/** Read (and clear) a bookmarklet capture from the URL hash or from a stash left before a redirect. */
-function takeCapture(): Capture | null {
-  if (location.hash.startsWith("#add=")) {
-    const c = parseCapture(location.hash.slice(5));
-    history.replaceState(history.state, "", location.pathname + location.search);
-    return c;
-  }
-  try {
-    const raw = sessionStorage.getItem(PENDING_KEY);
-    if (raw) {
-      sessionStorage.removeItem(PENDING_KEY);
-      return parseCapture(raw);
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
 
 /** An existing job, for the duplicate check. */
 export type ExistingJob = Pick<Job, "id" | "url" | "company" | "title" | "created_at">;
@@ -90,21 +46,21 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
   const [link, setLink] = useState("");
   const [desc, setDesc] = useState("");
   /** Why we're in paste mode. `failed` carries the message, shown once as the instruction. */
-  const [reason, setReason] = useState<{ site?: string; captured?: string; failed?: string } | null>(null);
+  const [reason, setReason] = useState<{ site?: string; failed?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   /** A job already on the list that matches what's being added. */
   const [dup, setDup] = useState<{ id: string; created_at: string; body: IntakeBody; fromUrl: string | null } | null>(null);
 
-  useEffect(() => {
-    const c = takeCapture();
-    if (!c) return;
-    setMode("paste");
-    setLink(c.url ?? "");
-    setDesc(c.text ?? "");
-    setReason({ captured: c.title?.trim() || c.url || "the page" });
-  }, []);
+  // The box grows with what's pasted, from one line up to its old fixed height (then it scrolls).
+  const box = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [input, mode]);
 
   function toPaste(url: string, why: NonNullable<typeof reason>) {
     setMode("paste");
@@ -226,15 +182,9 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
       onDrop={onDrop}
       className={`rounded-xl bg-surface p-4 space-y-3 border text-[13px] ${dragging ? "border-fg/40" : "border-border"}`}
     >
-      <div>
-        <div className="flex items-center gap-2">
-          <h2 className="text-[15px] font-semibold">Add a job</h2>
-        </div>
-        {mode === "one" ? null : reason?.captured ? (
-          <p className="text-[13px] text-good">
-            Captured from <strong className="break-words">{reason.captured}</strong> — review and click Add job.
-          </p>
-        ) : reason?.site ? (
+      <div className="space-y-1">
+        <h2 className="text-[15px] font-semibold">Jobs</h2>
+        {mode === "one" ? null : reason?.site ? (
           <p className="text-[13px] text-muted">
             <strong className="text-fg">{reason.site} needs a login</strong>, so the app can&apos;t read that link. Open the
             posting, copy the job description, and paste it below. The link is kept so you can find it again.
@@ -249,7 +199,9 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
 
       {mode === "one" ? (
         <textarea
-          className="input w-full h-24 sm:h-28"
+          ref={box}
+          rows={1}
+          className="input block w-full resize-none overflow-y-auto rounded-lg text-[13px] leading-5 max-h-24 sm:max-h-28"
           aria-label="Job link or description"
           placeholder="Job link or description"
           value={input}
@@ -268,7 +220,7 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
             <input
               type="url"
               inputMode="url"
-              className="input w-full"
+              className="input w-full rounded-lg text-[13px]"
               placeholder="https://www.linkedin.com/jobs/view/…"
               value={link}
               onChange={(e) => {
@@ -280,10 +232,10 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
           <label className="block space-y-1">
             <span className="label">Paste the job description</span>
             <textarea
-              className="input w-full h-40 sm:h-48"
+              className="input w-full h-40 sm:h-48 resize-none rounded-lg text-[13px]"
               placeholder="Select the whole posting on the job site, copy, and paste it here"
               value={desc}
-              autoFocus={!reason?.captured}
+              autoFocus
               onChange={(e) => setDesc(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
@@ -293,7 +245,7 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
         </div>
       )}
 
-      {/* Messages sit above the buttons, so on a phone they're seen before the full-width button. */}
+      {/* Messages sit above the button, so on a phone they're seen before it. */}
       {error && (
         <p role="alert" className="text-[13px] text-bad">
           {error}
@@ -315,24 +267,63 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
           </div>
         </div>
       ) : (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="space-y-1.5">
+          {/* The full width of the box above it: black with white text, the one obvious action here. */}
           <button
-            className="btn btn-primary btn-sm min-h-10 sm:min-h-0 w-full sm:w-auto"
+            type="button"
+            className="flex h-10 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-fg text-[13px] font-medium text-surface transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none"
             disabled={busy || (mode === "one" ? !input.trim() : !desc.trim())}
             onClick={submit}
           >
+            {!busy && <PlusIcon className="h-4 w-4" />}
             {busy ? (isUrl && mode === "one" ? "Reading job…" : "Adding…") : "Add job"}
           </button>
           {mode === "paste" && (
-            <button className="btn btn-sm min-h-10 sm:min-h-0 w-full sm:w-auto" onClick={reset} disabled={busy}>
+            <button type="button" className="h-8 w-full cursor-pointer rounded-lg text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={reset} disabled={busy}>
               Cancel
             </button>
           )}
-          {hint && !busy && <span className="text-xs text-muted">{hint}</span>}
+          {/* One line kept for the hint, so it showing up as you type doesn't push the list below down. */}
+          <p className="min-h-4 text-xs leading-4 text-muted">{busy ? "" : hint}</p>
         </div>
       )}
 
-      <Bookmarklet />
+      <JobMatchesPreview />
     </div>
+  );
+}
+
+/** Placeholder rows for the job matches to come: grey bars of varied widths, not data, and not animated. */
+const PREVIEW_ROWS = [
+  { title: "w-3/4", sub: "w-1/2" },
+  { title: "w-2/3", sub: "w-2/5" },
+  { title: "w-4/5", sub: "w-1/3" },
+  { title: "w-3/5", sub: "w-1/2" },
+  { title: "w-2/3", sub: "w-2/5" },
+];
+
+/** Where matching jobs will be listed. For now a template of empty cards, marked Coming soon. */
+function JobMatchesPreview() {
+  return (
+    <section aria-labelledby="job-matches-heading" className="space-y-2.5 border-t border-border pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 id="job-matches-heading" className="text-[13px] font-medium">Matches for you</h3>
+        <span className="rounded-full bg-fg/[0.06] px-2 py-0.5 text-[11px] text-muted">Coming soon</span>
+      </div>
+      <ul aria-hidden className="space-y-2">
+        {PREVIEW_ROWS.map((r, i) => (
+          // Phones: two cards, so the template doesn't push the real lists far down.
+          <li key={i} className={`items-center gap-3 rounded-lg border border-border p-2.5 ${i < 2 ? "flex" : "hidden lg:flex"}`}>
+            <span className="h-8 w-8 shrink-0 rounded-md bg-fg/[0.06]" />
+            <span className="min-w-0 flex-1 space-y-1.5">
+              <span className={`block h-2.5 rounded-full bg-fg/[0.09] ${r.title}`} />
+              <span className={`block h-2 rounded-full bg-fg/[0.05] ${r.sub}`} />
+            </span>
+            <span className="h-5 w-10 shrink-0 rounded-full bg-fg/[0.05]" />
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted">Internships that fit your resume will show up here.</p>
+    </section>
   );
 }
