@@ -192,6 +192,13 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   const [jobs, setJobs] = useState<NavJob[]>([]);
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  /**
+   * Whether the icon-only rail is drawn. Collapsing keeps the open layout while the width shrinks over the labels (the
+   * icons stay where they are), and swaps to the rail once the width has finished: each icon sits within half a pixel
+   * of its place in the open layout, so the swap doesn't show. Opening draws the open layout at once and the width
+   * grows to reveal it.
+   */
+  const [rail, setRail] = useState(initialCollapsed);
   // Per-device memory (localStorage): when each job was last opened, and the pinned job ids, newest pin first.
   const [visits, setVisits] = useState<Visits>({});
   const [pins, setPins] = useState<string[]>([]);
@@ -219,7 +226,29 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   const setCollapsedAndSave = (next: boolean) => {
     setCollapsed(next);
     saveCollapsed(next);
+    if (!next) setRail(false);
   };
+
+  // Collapsing: swap to the rail when the width transition ends (at once without motion; a timer in case the
+  // transitionend never comes, e.g. a background tab).
+  useEffect(() => {
+    if (!collapsed || rail) return;
+    const nav = navRef.current;
+    if (!nav || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setRail(true);
+      return;
+    }
+    const done = () => setRail(true);
+    const onEnd = (e: TransitionEvent) => {
+      if (e.target === nav && e.propertyName === "width") done();
+    };
+    nav.addEventListener("transitionend", onEnd);
+    const timer = setTimeout(done, 250);
+    return () => {
+      nav.removeEventListener("transitionend", onEnd);
+      clearTimeout(timer);
+    };
+  }, [collapsed, rail]);
 
   // The rail's search button opens the sidebar and puts the caret in the search box.
   useEffect(() => {
@@ -472,7 +501,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   const actions: RowActions = { open: openJob, pin: togglePin, rename: startRename, endRename, remove: deleteJob };
 
   // The rail shows no search box, so only an open sidebar searches.
-  const searching = !collapsed && query.trim().length > 0;
+  const searching = !rail && query.trim().length > 0;
   const { pinned, recent } = sidebarJobs(jobs, pins, visits);
   const pinnedIds = new Set(pins);
   const shown = searching ? searchJobs(jobs, query, 20, visits) : recent;
@@ -512,7 +541,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       onClick={() => setCollapsedAndSave(!collapsed)}
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       aria-expanded={!collapsed}
-      className={`flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg ${collapsed ? "" : "ml-auto"}`}
+      className={`flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg ${rail ? "" : "ml-auto"}`}
     >
       <SidebarIcon className={ICON} />
     </button>
@@ -524,9 +553,9 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       aria-label="Workspace"
       // Open: every block is laid out at its final width (232 - 2×12px padding) from the first frame, so while the width
       // animates the content is revealed as it is instead of re-wrapping ("Master resume" on two lines) for a moment.
-      className={`flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px] transition-[width] duration-150 motion-reduce:transition-none ${collapsed ? "w-14" : "w-[232px] [&>*]:w-[208px]"}`}
+      className={`flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px] transition-[width] duration-150 motion-reduce:transition-none ${collapsed ? "w-14" : "w-[232px]"} ${rail ? "" : "[&>*]:w-[208px]"}`}
     >
-      {collapsed ? (
+      {rail ? (
         <Rail label="Expand sidebar" tall>{toggle}</Rail>
       ) : (
         <div className="flex h-8 items-center">
@@ -538,7 +567,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
         </div>
       )}
 
-      {collapsed ? (
+      {rail ? (
         <div className="flex flex-col items-center gap-px">
           {railLink("/", "Dashboard", path === "/", <HomeIcon className={ICON} />)}
           {railLink("/resume", "Master resume", path.startsWith("/resume"), <DocIcon className={ICON} />)}
@@ -556,7 +585,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-2">
-        {collapsed ? (
+        {rail ? (
           <div className="flex flex-col items-center gap-px">
             <Rail label="Search jobs">
               <button
@@ -590,12 +619,21 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
           </>
         )}
 
-        {collapsed ? (
-          <ul className="min-h-0 flex-1 space-y-px overflow-y-auto" aria-label="Jobs">
-            {pinned.map(badge)}
-            {pinned.length > 0 && recent.length > 0 && <li aria-hidden className="mx-2 my-1 h-px bg-fg/10" />}
-            {recent.map(badge)}
-          </ul>
+        {rail ? (
+          // The open list's section headings are kept as invisible spacers, so every job sits at the same height in both
+          // layouts and the swap at the end of a collapse doesn't move them.
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+            {pinned.length > 0 && (
+              <div>
+                <div aria-hidden className="invisible whitespace-nowrap px-2 pt-1 text-[13px] font-medium">Pinned</div>
+                <ul className="space-y-px" aria-label="Pinned jobs">{pinned.map(badge)}</ul>
+              </div>
+            )}
+            <div>
+              <div aria-hidden className="invisible whitespace-nowrap px-2 pt-1 text-[13px] font-medium">Recent jobs</div>
+              <ul className="space-y-px" aria-label="Recent jobs">{recent.map(badge)}</ul>
+            </div>
+          </div>
         ) : (
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
             {searching ? (
@@ -629,7 +667,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
         )}
       </div>
 
-      {collapsed ? (
+      {rail ? (
         <div className="flex flex-col items-center gap-px">
           {railLink("/account", "Account", path.startsWith("/account"), <UserIcon className={ICON} />)}
           <form action={signOut} className="w-full">
