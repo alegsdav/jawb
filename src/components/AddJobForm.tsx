@@ -63,6 +63,7 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
   }, [input, mode]);
 
   function toPaste(url: string, why: NonNullable<typeof reason>) {
+    setError("");
     setMode("paste");
     setLink(url);
     setDesc("");
@@ -167,7 +168,7 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
       : !input.trim()
         ? ""
         : site
-          ? `${site} needs a login: next you'll paste the description.`
+          ? `${site} needs a login: paste the text next.`
           : isUrl
             ? "Reads the posting from the link."
             : "Uses the pasted description.";
@@ -208,6 +209,7 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
           onChange={(e) => {
             setInput(e.target.value);
             setDup(null);
+            setError("");
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
@@ -226,6 +228,7 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
               onChange={(e) => {
                 setLink(e.target.value);
                 setDup(null);
+                setError("");
               }}
             />
           </label>
@@ -236,20 +239,16 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
               placeholder="Select the whole posting on the job site, copy, and paste it here"
               value={desc}
               autoFocus
-              onChange={(e) => setDesc(e.target.value)}
+              onChange={(e) => {
+                setDesc(e.target.value);
+                setError("");
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
               }}
             />
           </label>
         </div>
-      )}
-
-      {/* Messages sit above the button, so on a phone they're seen before it. */}
-      {error && (
-        <p role="alert" className="text-[13px] text-bad">
-          {error}
-        </p>
       )}
 
       {dup ? (
@@ -283,8 +282,11 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
               Cancel
             </button>
           )}
-          {/* One line kept for the hint, so it showing up as you type doesn't push the list below down. */}
-          <p className="min-h-4 text-xs leading-4 text-muted">{busy ? "" : hint}</p>
+          {/* One line kept under the button for the hint or an error, so neither moves the button, and a hint showing up
+              as you type doesn't push the list below down. */}
+          <p role={error ? "alert" : undefined} className={`min-h-4 text-xs leading-4 ${error ? "text-bad" : "text-muted"}`}>
+            {error || (busy ? "" : hint)}
+          </p>
         </div>
       )}
 

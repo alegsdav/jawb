@@ -33,7 +33,7 @@ const ROW_IDLE = "text-muted hover:bg-fg/[0.04] hover:text-fg";
 const ROW_ACTIVE = "bg-fg/[0.05] font-medium text-fg";
 const ICON = "h-[15px] w-[15px] shrink-0";
 /** A control in the collapsed rail: 32px square, icon centred. */
-const RAIL_CTRL = "flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg";
+const RAIL_CTRL = "flex h-7 w-8 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg";
 const RAIL_ACTIVE = "bg-fg/[0.05] text-fg";
 /**
  * The row's ⋯ button (24px). Hidden until the row is hovered or focused, or its menu is open; always
@@ -63,14 +63,15 @@ function saveCollapsed(collapsed: boolean) {
  * the row's rect, written on mouse enter or focus, so the tooltip sits level with the row it labels.
  * It shows on hover, or when the control gets keyboard focus (:has keeps it on the row, not the link).
  */
-function Rail({ label, children }: { label: string; children: React.ReactNode }) {
+/** Rail rows are 28px tall like the open sidebar's rows (32px for the top bar), so toggling doesn't step the rows up or down. */
+function Rail({ label, children, tall = false }: { label: string; children: React.ReactNode; tall?: boolean }) {
   const tip = useRef<HTMLSpanElement>(null);
   const place = (e: React.SyntheticEvent<HTMLSpanElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     if (tip.current) tip.current.style.top = `${r.top + r.height / 2}px`;
   };
   return (
-    <span className="group flex h-8 w-full items-center justify-center" onMouseEnter={place} onFocus={place}>
+    <span className={`group flex ${tall ? "h-8" : "h-7"} w-full items-center justify-center`} onMouseEnter={place} onFocus={place}>
       {children}
       <span
         ref={tip}
@@ -526,7 +527,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       className={`flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px] transition-[width] duration-150 motion-reduce:transition-none ${collapsed ? "w-14" : "w-[232px] [&>*]:w-[208px]"}`}
     >
       {collapsed ? (
-        <Rail label="Expand sidebar">{toggle}</Rail>
+        <Rail label="Expand sidebar" tall>{toggle}</Rail>
       ) : (
         <div className="flex h-8 items-center">
           <Link href="/" className="flex h-8 items-center gap-2 px-2 text-[13px] font-semibold text-fg">
