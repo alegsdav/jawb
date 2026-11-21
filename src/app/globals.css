@@ -220,9 +220,10 @@ body {
   ::placeholder { color: transparent !important; }
 }
 
-/* Page loader: a flipping square in the app's blue (Loader.tsx). Reduced motion gets a soft pulse instead. */
+/* Loader: a black flipping square (Loader.tsx), shown only over the document or centred in the content area.
+   Reduced motion gets a soft pulse instead. */
 .flipping-square-loader {
-  width: 40px; height: 40px; background-color: var(--dot-blue); border-radius: 4px;
+  width: 40px; height: 40px; background-color: var(--fg); border-radius: 4px;
   animation: square-flip 1.2s infinite ease-in-out;
 }
 @keyframes square-flip {
@@ -234,3 +235,21 @@ body {
   .flipping-square-loader { animation: square-pulse 1.6s infinite ease-in-out; }
 }
 @keyframes square-pulse { 50% { opacity: 0.35; } }
+
+/* Editor switches (EditorSkeleton, editorKind.ts): the toolbar groups that differ between the job and master pages
+   slide in once, so the switch reads as a change of document. Same-kind switches never get the class. */
+.editor-kind-slide { animation: editor-kind-slide 260ms ease-out both; }
+@keyframes editor-kind-slide {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .editor-kind-slide { animation: none; }
+}
+
+/* The blank page shown while a document loads (BlankDocument): the real page's paper, with no text. On phones the
+   real page is as tall as its text, so the blank one gets a screen's height to centre the loader on. */
+.doc-page-blank { min-height: 1056px; }
+@media (max-width: 639px) {
+  .doc-page-blank { min-height: 60vh; }
+}

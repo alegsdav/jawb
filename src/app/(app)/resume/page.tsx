@@ -10,7 +10,7 @@ import { keepMineVersion, mergeResumes, sameJson, saveMasterDocument, type Merge
 import { PAGE_DEFAULTS } from "@/lib/doc/types";
 import type { Fact, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
-import { PageLoader } from "@/components/Loader";
+import { EditorSkeleton } from "@/components/EditorSkeleton";
 import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { FormatMenu } from "@/components/FormatMenus";
 import { CoachPanel } from "@/components/CoachPanel";
@@ -312,7 +312,7 @@ export default function MasterResumePage() {
   }
 
   if (error && !resume) return <p className="text-bad">{error}</p>;
-  if (!resume) return <PageLoader />;
+  if (!resume) return <EditorSkeleton kind="master" />;
 
   const empty = isEmptyResume(resume);
   /** Onboarding (an empty master) has no switcher: the document view always shows. */

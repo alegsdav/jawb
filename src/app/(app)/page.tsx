@@ -21,7 +21,7 @@ import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
 import { Greeting, StatStrip } from "@/components/dashboard/Overview";
 import { CompanyMark } from "@/components/CompanyMark";
-import { Loader } from "@/components/Loader";
+import { PageLoader } from "@/components/Loader";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
@@ -33,27 +33,10 @@ const COLS_0006 = "suggestions_total, suggestions_pending";
 
 /** "Followed up" moves the next follow-up this many days out (with Undo). */
 const FOLLOW_UP_AGAIN_DAYS = 7;
-/** After this long, a muted "Still loading…" line appears under the loader so a slow phone connection doesn't look stuck. */
-const SLOW_MS = 3000;
-
 type Filter = JobStatus | "all" | "closing";
 
 /** A follow-up is due: applied, and the follow-up date is today or past. */
 const followUpDue = (j: Job, today: string) => j.status === "applied" && !!j.follow_up_date && j.follow_up_date <= today;
-
-/** True once `active` has stayed true for `ms`. */
-function useSlow(active: boolean, ms = SLOW_MS) {
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    if (!active) {
-      setSlow(false);
-      return;
-    }
-    const t = setTimeout(() => setSlow(true), ms);
-    return () => clearTimeout(t);
-  }, [active, ms]);
-  return slow;
-}
 
 /** "Not saved · Discard" next to a row whose write is failing. */
 function RowSaveNote({ state, onDiscard }: { state: RowSaveState | undefined; onDiscard: () => void }) {
@@ -137,7 +120,6 @@ export default function TrackerPage() {
   const [undo, setUndo] = useState<{ id: string; prev: string | null; message: string } | null>(null);
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
-  const slow = useSlow(!ready || loading);
 
   const markMissing = useCallback((cols: readonly string[]) => {
     let added = false;
@@ -350,14 +332,7 @@ export default function TrackerPage() {
   const showFollowUp = shown.some((j) => j.follow_up_date);
   const tableCols = 4 + [showDeadline, showApplied, showFollowUp].filter(Boolean).length;
 
-  // The loader, plus a muted "Still loading…" line once the wait is slow (see useSlow).
-  const loadingMark = (
-    <div className="flex flex-col items-start gap-2">
-      <Loader size={20} />
-      {slow && <p className="text-[13px] text-muted">Still loading…</p>}
-    </div>
-  );
-  if (!ready) return loadingMark;
+  if (!ready) return <PageLoader />;
 
   const noJobs = !loading && !loadError && jobs.length === 0;
   const allChips: { value: Filter; label: string }[] = [
@@ -428,7 +403,7 @@ export default function TrackerPage() {
 
             {/* Phones: one card per job */}
             <div className="sm:hidden space-y-2">
-              {loading ? loadingMark : shown.length === 0 ? (
+              {loading ? null : shown.length === 0 ? (
                 <p className="text-[13px] text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
               ) : (
                 shown.map((j) => {
@@ -488,7 +463,7 @@ export default function TrackerPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {loading ? (
-                    <tr><td className="p-3" colSpan={tableCols}>{loadingMark}</td></tr>
+                    <tr><td className="h-12 p-3" colSpan={tableCols} /></tr>
                   ) : shown.length === 0 ? (
                     <tr>
                       <td className="py-2.5 pr-4 text-muted" colSpan={tableCols}>{jobs.length ? "No jobs match this filter." : ""}</td>

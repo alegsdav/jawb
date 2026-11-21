@@ -25,10 +25,10 @@ export function Loader({
     </div>
   );
   if (!center) return mark;
-  return <div className="flex min-h-[50vh] w-full items-center justify-center">{mark}</div>;
+  return <div className="flex h-full min-h-[60vh] w-full items-center justify-center">{mark}</div>;
 }
 
-/** A whole-page loading state, centred in the content area. Used by route-level loading UI. */
+/** A whole-page loading state, centred in the content area (both ways). Used by route-level loading UI. */
 export function PageLoader() {
   return <Loader center />;
 }

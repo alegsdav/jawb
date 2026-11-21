@@ -1,7 +1,6 @@
 "use client";
 
 import { DownloadIcon } from "@/components/icons";
-import { Loader, PageLoader } from "@/components/Loader";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -33,7 +32,7 @@ import {
   writeJobIfUnchanged, type SaveAsMasterPlan,
 } from "@/lib/jobSync";
 import { ResumeDocument } from "@/components/ResumeDocument";
-import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
+import { EMPTY_FORMAT_STATE, NOOP_COMMANDS, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { FormatMenu } from "@/components/FormatMenus";
 import { JobHeader } from "@/components/job/JobHeader";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
@@ -52,6 +51,8 @@ import {
   PlaceholderCount, StatusBar, Toggle, ToolbarSep, useEditorShortcuts, useZoom,
 } from "@/components/DocToolbar";
 import { EditorCanvas } from "@/components/ZoomFrame";
+import { BlankDocument, EditorSkeleton, JOB_TABS, StatusBarFrame } from "@/components/EditorSkeleton";
+import { FormatToolbar } from "@/components/FormatToolbar";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
 import { PageSetupDialog } from "@/components/PageSetupDialog";
 import { SubmittedView } from "@/components/SubmittedView";
@@ -64,14 +65,6 @@ type Tab = "resume" | "analysis" | "job" | "cover";
 type Question = Analysis["questions"][number];
 type Flash = { message: string; action?: { label: string; onClick: () => void } | null };
 type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConflict[] };
-
-/** [key, label] */
-const TABS: [Tab, string][] = [
-  ["resume", "Resume"],
-  ["analysis", "Analysis"], // phones/tablets only; desktop shows it in the sidebar
-  ["job", "Posting"],
-  ["cover", "Letter"],
-];
 
 /** Don't re-read the rows again when `focus` and `visibilitychange` fire together. */
 const REFRESH_GAP_MS = 1500;
@@ -214,6 +207,12 @@ export default function JobPage() {
     hintShown.current = true;
     setMigrationHint(true);
   }, []);
+
+  // A different job under the same page: drop the old tailored copy before the new one loads.
+  useEffect(() => {
+    docLatest.current = null;
+    setResume(null);
+  }, [id]);
 
   // ---------- load ----------
 
@@ -936,7 +935,8 @@ export default function JobPage() {
       </div>
     );
   }
-  if (!job) return <PageLoader />;
+  // A different job under the same page (no remount): show the loading state, never the previous job's text.
+  if (!job || job.id !== id) return <EditorSkeleton kind="job" />;
   const showHighlights = showFeedback && !quiet;
 
   const panel = (
@@ -1073,7 +1073,7 @@ export default function JobPage() {
   /** The document tabs. Desktop: inside the top bar. Phones: their own row under it (the menus keep the whole bar). */
   const tabList = (className: string) => (
     <div role="tablist" aria-label="Job sections" className={className}>
-      {TABS.map(([key, label]) => (
+      {JOB_TABS.map(([key, label]) => (
         <button
           key={key}
           type="button"
@@ -1155,30 +1155,37 @@ export default function JobPage() {
       </div>
 
       {/* Formatting-style row under the top bar: fixed height, scrolls sideways on phones. Resume tab only. */}
-      {resumeBar && resumeTab && (
+      {resumeTab && !needsMaster && (
         <div className="shrink-0">
           <EditorToolbar>
             {/* Document actions (add, move, delete) and the formatting controls portal in here: one fixed group. */}
-            <div ref={setSlot} className="flex shrink-0 items-center" />
+            <div ref={setSlot} className="flex shrink-0 items-center">
+              {/* Until the copy loads, the same toolbar shows disabled, so it doesn't appear later. */}
+              {!resume && <FormatToolbar fmt={EMPTY_FORMAT_STATE} commands={NOOP_COMMANDS} />}
+            </div>
             <ToolbarSep />
             <div className="ml-auto flex shrink-0 items-center gap-1">
-              {quiet ? null : pending.length > 0 ? (
-                <button type="button" className={quietText} onClick={reviewNext}>
-                  <span>Review<span className="sm:hidden"> {pending.length}</span></span>
-                </button>
-              ) : analyzing ? (
-                <span className="px-1 text-xs whitespace-nowrap text-muted">
-                  Analyzing<span className="hidden sm:inline"> against the job</span>…
-                </span>
-              ) : analyzeError ? (
-                <button type="button" className={`${quietText} text-bad lg:hidden`} onClick={() => selectTab("analysis")}>
-                  Analysis failed
-                </button>
-              ) : null}
-              {!quiet && <PlaceholderCount count={placeholderCount} onClick={goToPlaceholder} />}
-              <span className="hidden md:inline-flex"><PageCount {...measure} /></span>
-              {!quiet && <Toggle on={showFeedback} onChange={setShowFeedback} label="Highlights" />}
-              <IconButton label={pdfBusy ? "Building PDF…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy}>
+              {resumeBar && (
+                <>
+                  {quiet ? null : pending.length > 0 ? (
+                  <button type="button" className={quietText} onClick={reviewNext}>
+                    <span>Review<span className="sm:hidden"> {pending.length}</span></span>
+                  </button>
+                ) : analyzing ? (
+                  <span className="px-1 text-xs whitespace-nowrap text-muted">
+                    Analyzing<span className="hidden sm:inline"> against the job</span>…
+                  </span>
+                ) : analyzeError ? (
+                  <button type="button" className={`${quietText} text-bad lg:hidden`} onClick={() => selectTab("analysis")}>
+                    Analysis failed
+                  </button>
+                ) : null}
+                {!quiet && <PlaceholderCount count={placeholderCount} onClick={goToPlaceholder} />}
+                <span className="hidden md:inline-flex"><PageCount {...measure} /></span>
+                {!quiet && <Toggle on={showFeedback} onChange={setShowFeedback} label="Highlights" />}
+                </>
+              )}
+              <IconButton label={pdfBusy ? "Building PDF…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy || !resume}>
                 <DownloadIcon />
               </IconButton>
             </div>
@@ -1221,7 +1228,10 @@ export default function JobPage() {
                 <Link href="/resume" className="btn btn-primary">Import your resume</Link>
               </div>
             ) : !resume ? (
-              <Loader center label="Loading your tailored copy…" />
+              <>
+                <BlankDocument zoom={zoom} className="min-w-0 flex-1 lg:overflow-auto" />
+                <StatusBarFrame />
+              </>
             ) : (
               <>
                 <EditorCanvas zoom={zoom} className="min-w-0 flex-1 lg:overflow-auto">
@@ -1256,26 +1266,29 @@ export default function JobPage() {
 
         {/* Side panel: the comment card of the selected bullet at the top (only when there is one), then job details
             and the coach/facts/analysis panels. Its own scroll on lg+. Phones: the details come first; the panels show on the Analysis tab. */}
-        <aside className="relative order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l">
+        <aside className={`relative order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l ${resumeTab ? "max-lg:border-b-0 max-lg:p-0" : ""}`}>
           {/* Header block: the selected bullet's comment card is an overlay under it on desktop (absolute, so the
-              rows above and the panel below never move). On phones it is a bottom sheet above the tab bar. */}
+              rows above and the panel below never move). On phones it is a bottom sheet above the tab bar, so its
+              slot stays shown on the Resume tab, where the header is hidden. */}
           <div className="relative">
-            <JobHeader
-              job={job}
-              applied={applied}
-              statusSelect={statusSelect}
-              detailsOpen={detailsOpen}
-              onToggleDetails={() => setDetailsOpen((o) => !o)}
-              onPatch={patch}
-              onDelete={deleteJob}
-            />
+            <div className={resumeTab ? "max-lg:hidden" : ""}>
+              <JobHeader
+                job={job}
+                applied={applied}
+                statusSelect={statusSelect}
+                detailsOpen={detailsOpen}
+                onToggleDetails={() => setDetailsOpen((o) => !o)}
+                onPatch={patch}
+                onDelete={deleteJob}
+              />
+            </div>
             <div
               ref={setCommentEl}
               className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto rounded-lg shadow-lg lg:absolute lg:inset-x-0 lg:top-full lg:mt-3 lg:bottom-auto lg:z-20 lg:max-h-none lg:overflow-visible"
             />
           </div>
           {/* Notices (migration hint, errors, applied state, pull-from-master plan) sit under the header, on every tab. */}
-          <div className="space-y-3 empty:hidden">{notices}</div>
+          <div className={`space-y-3 empty:hidden ${resumeTab ? "max-lg:hidden" : ""}`}>{notices}</div>
           <div className={`${tab === "analysis" ? "" : "hidden"} border-t border-border pt-4 lg:block`}>
             {side}
             {/* Collapsed by default: the "?" opens what the colours mean. Inside the panel only: on phones, the Analysis tab's bottom. */}

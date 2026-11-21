@@ -93,3 +93,27 @@ export type DocSelection =
   | { kind: "section"; sectionId: string }
   | { kind: "entry"; sectionId: string; entryId: string }
   | { kind: "bullet"; sectionId: string; entryId: string; bulletId: string };
+
+const noop = () => {};
+
+/** Every command a no-op: the editor's chrome while no document is loaded (EditorSkeleton). */
+export const NOOP_COMMANDS: DocCommands = {
+  undo: noop,
+  redo: noop,
+  toggleMark: noop,
+  setSize: noop,
+  setFontFamily: noop,
+  setAlign: noop,
+  toggleList: noop,
+  indent: noop,
+  outdent: noop,
+  setLineHeight: noop,
+  setTabStops: noop,
+  adjustSpaceBefore: noop,
+  adjustSpaceAfter: noop,
+  toggleBorderBottom: noop,
+  insertHorizontalLine: noop,
+  setLink: noop,
+  openLink: noop,
+  clearFormatting: noop,
+};

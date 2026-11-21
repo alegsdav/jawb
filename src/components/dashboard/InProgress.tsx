@@ -6,7 +6,6 @@ import { shortDate } from "@/lib/dates";
 import { inProgress, jobProgress, sortInProgress } from "@/lib/progress";
 import { deadlineUrgency } from "../DeadlineField";
 import { CompanyMark } from "../CompanyMark";
-import { Loader } from "../Loader";
 
 function ProgressBar({ job }: { job: Job }) {
   const p = jobProgress(job);
@@ -38,9 +37,7 @@ export function InProgress({ jobs, today, loading }: { jobs: Job[]; today: strin
         <h2 id="in-progress-heading" className="text-[15px] font-semibold">In progress</h2>
         <span className="text-xs font-medium text-muted">{list.length}</span>
       </div>
-      {loading ? (
-        <Loader size={16} className="justify-start" />
-      ) : !list.length ? (
+      {loading ? null : !list.length ? (
         <p className="text-[13px] text-muted">Nothing in progress. Add a job to start tailoring your resume for it.</p>
       ) : (
         <ul className="divide-y divide-border">
