@@ -24,7 +24,8 @@ let uploadingLocalNav = false;
 const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label])) as Record<JobStatus, string>;
 
 /** One row of the sidebar: 28px tall, 13px text, muted until it is the current page. */
-const ROW_BASE = "flex h-7 w-full items-center gap-2.5 rounded-md text-[13px] leading-none";
+// leading-5, not leading-none: a 13px line box would cut off descenders (g, y, p) where a title truncates (overflow hidden).
+const ROW_BASE = "flex h-7 w-full items-center gap-2.5 rounded-md text-[13px] leading-5 whitespace-nowrap";
 const ROW = `${ROW_BASE} px-2`;
 /** A job row keeps room on the right for its ⋯ button, so long titles truncate before it. */
 const JOB_ROW = `${ROW_BASE} pl-2 pr-8`;
@@ -520,7 +521,9 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
     <nav
       ref={navRef}
       aria-label="Workspace"
-      className={`flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px] transition-[width] duration-150 motion-reduce:transition-none ${collapsed ? "w-14" : "w-[232px]"}`}
+      // Open: every block is laid out at its final width (232 - 2×12px padding) from the first frame, so while the width
+      // animates the content is revealed as it is instead of re-wrapping ("Master resume" on two lines) for a moment.
+      className={`flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px] transition-[width] duration-150 motion-reduce:transition-none ${collapsed ? "w-14" : "w-[232px] [&>*]:w-[208px]"}`}
     >
       {collapsed ? (
         <Rail label="Expand sidebar">{toggle}</Rail>
