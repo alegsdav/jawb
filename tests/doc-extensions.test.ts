@@ -337,3 +337,37 @@ describe("autolink: which typed or pasted text links", () => {
     expect(typedHrefs("Node.js ")).toEqual([]);
   });
 });
+
+describe("paragraph spacing adds up (padding above, margin below)", () => {
+  const paraNode = (attrs: Record<string, unknown>) =>
+    docFromJSON({ type: "doc", content: [{ type: "paragraph", attrs: para("spacing1", attrs), content: [{ type: "text", text: "x" }] }] }).firstChild!;
+  const renderStyle = (attrs: Record<string, unknown>) => {
+    const [, out] = docSchema.nodes.paragraph.spec.toDOM!(paraNode(attrs)) as [string, Record<string, string>];
+    return out.style ?? "";
+  };
+  const parseRule = () => docSchema.nodes.paragraph.spec.parseDOM!.find((r) => r.tag === "p")!;
+  const parseAttrs = (style: Record<string, string>) =>
+    (parseRule().getAttrs as (el: unknown) => Record<string, unknown>)({ getAttribute: () => null, style });
+
+  it("renders spaceBefore as padding-top and spaceAfter as margin-bottom", () => {
+    const css = renderStyle({ spaceBefore: 6, spaceAfter: 12 });
+    expect(css).toContain("padding-top: 6pt");
+    expect(css).toContain("margin-bottom: 12pt");
+    expect(css).not.toContain("margin-top");
+  });
+
+  it("keeps spaceBefore, lineHeight and borderBottom together when they are all set", () => {
+    const css = renderStyle({ spaceBefore: 6, lineHeight: 1.5, borderBottom: true });
+    expect(css).toContain("padding-top: 6pt");
+    expect(css).toContain("line-height: 1.5");
+    expect(css).toContain("border-bottom: 1px solid currentColor");
+    expect(css).toContain("padding-bottom: 1px");
+  });
+
+  it("reads spaceBefore from padding-top, and from margin-top only when there is no padding", () => {
+    expect(parseAttrs({ paddingTop: "9pt", marginTop: "3pt" }).spaceBefore).toBe(9);
+    expect(parseAttrs({ marginTop: "12pt" }).spaceBefore).toBe(12);
+    expect(parseAttrs({ marginTop: "16px" }).spaceBefore).toBe(12);
+    expect(parseAttrs({}).spaceBefore ?? null).toBeNull();
+  });
+});

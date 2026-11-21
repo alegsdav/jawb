@@ -105,7 +105,8 @@ function ParagraphView({ p }: { p: RenderParagraph }) {
   return (
     <div
       style={{
-        marginTop: pt(p.spaceBeforePt),
+        // Padding for the space above, so it adds to the space below (margins would collapse), as in the editor and PDF.
+        paddingTop: pt(p.spaceBeforePt),
         marginBottom: pt(p.spaceAfterPt),
         // The line strut: unsized text keeps the default, and each line is as tall as its text (see paragraphStrutPt).
         fontSize: pt(p.strutPt),

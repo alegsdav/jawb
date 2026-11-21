@@ -101,11 +101,15 @@ const ParagraphFormat = Extension.create({
             parseHTML: (element: HTMLElement) => element.getAttribute("data-id") || null,
             renderHTML: (attrs: { id?: string | null }) => (attrs.id ? { "data-id": attrs.id } : {}),
           },
+          // Padding, not margin: adjacent margins collapse in CSS (12pt after + 6pt before would show 12pt), but Word and
+          // the PDF add them. Pasted HTML may carry only a margin-top, so that is the fallback.
           spaceBefore: {
             default: null,
-            parseHTML: (element: HTMLElement) => ptFromStyle(element.style.marginTop),
+            // Word's pasted HTML often writes `padding: 0in` beside a real margin-top, so a zero padding falls back too.
+            parseHTML: (element: HTMLElement) =>
+              ptFromStyle(element.style.paddingTop) || ptFromStyle(element.style.marginTop),
             renderHTML: (attrs: { spaceBefore?: number | null }) =>
-              attrs.spaceBefore == null ? {} : { style: `margin-top: ${attrs.spaceBefore}pt` },
+              attrs.spaceBefore == null ? {} : { style: `padding-top: ${attrs.spaceBefore}pt` },
           },
           spaceAfter: {
             default: null,
