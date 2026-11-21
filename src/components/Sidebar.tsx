@@ -2,18 +2,24 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { isMissingRelation } from "@/lib/db";
 import { signOut } from "@/app/login/actions";
 import { STATUSES, type JobStatus } from "@/lib/types";
 import {
-  NAV_JOB_COLS, navJob, readPins, readVisits, recordVisit, savePins, saveVisits, searchJobs, sidebarJobs,
-  withPin, withoutPin, withoutVisit, type NavJob, type Visits,
+  NAV_JOB_COLS, clearLocalNav, localNavPresent, navJob, navStateFromRows, readPins, readVisits, recordVisit, savePins,
+  saveVisits, searchJobs, sidebarJobs, visitsToUpload, withPin, withVisit, withoutPin, withoutVisit,
+  type NavJob, type NavRow, type Visits,
 } from "@/lib/jobNav";
 import { SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { UsageMeter } from "./UsageMeter";
 import { DocIcon, HomeIcon, LineIcon, Logo, LogoutIcon, MoreIcon, PlusIcon, SearchIcon, SidebarIcon, UserIcon } from "./icons";
+
+/** Module-wide: the one-time upload of this device's local pins and visits is running (dev StrictMode and a focus
+ *  reload can start a second load meanwhile; that one skips the upload). */
+let uploadingLocalNav = false;
 
 const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label])) as Record<JobStatus, string>;
 
@@ -195,6 +201,16 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   const navRef = useRef<HTMLElement>(null);
   // Row tops captured by a click, so the reorder it causes can slide each row from where it was.
   const flipFrom = useRef<Map<string, number> | null>(null);
+  // Which store holds pins and visits: true once the account's job_nav has been read, false when migration
+  // 0009 is missing (this device keeps them, as before), null until the first read.
+  const navMode = useRef<boolean | null>(null);
+  // Visits opened before navMode was known. They go to the account with the first read, or to this device's log.
+  const pendingOpens = useRef<Visits>({});
+  // Bumped by every write to job_nav, and counted while in flight: a read that overlaps a write can't put back older state.
+  const navWrites = useRef(0);
+  const navInFlight = useRef(0);
+  // The job a click just recorded, so the path change that click causes doesn't record it again.
+  const clickedId = useRef<string | null>(null);
 
   const setCollapsedAndSave = (next: boolean) => {
     setCollapsed(next);
@@ -215,20 +231,122 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
     setPins(readPins());
   }, []);
 
-  // A job page counts as a visit however it was reached (a click already recorded it, a direct load didn't).
-  useEffect(() => {
-    const m = /^\/jobs\/([^/]+)/.exec(path);
-    if (m) setVisits(recordVisit(decodeURIComponent(m[1])));
-  }, [path]);
+  /** Records a job opened: on the account when it is in use (the server's clock), else on this device. */
+  const recordOpen = useCallback(
+    (id: string) => {
+      const now = new Date().toISOString();
+      if (navMode.current === false) {
+        setVisits(recordVisit(id, now));
+        return;
+      }
+      setVisits((cur) => ({ ...cur, [id]: now }));
+      if (navMode.current === null) {
+        pendingOpens.current[id] = now;
+        return;
+      }
+      navWrites.current++;
+      navInFlight.current++;
+      const send = async () => {
+        try {
+          const { data, error } = await supabase.rpc("record_job_visit", { p_job: id });
+          if (error) return console.warn("Sidebar: recording the visit failed:", error.message);
+          // The server's time replaces ours, so every device sorts the job the same way.
+          if (typeof data === "string") setVisits((cur) => ({ ...cur, [id]: data }));
+        } finally {
+          navInFlight.current--;
+        }
+      };
+      void send();
+    },
+    [supabase],
+  );
 
-  // Re-read on navigation and when the window comes back, so new and renamed jobs show up.
+  // A job page counts as a visit however it was reached: a click already recorded it, a direct load didn't.
+  useEffect(() => {
+    const skip = clickedId.current;
+    clickedId.current = null;
+    const m = /^\/jobs\/([^/]+)/.exec(path);
+    if (!m) return;
+    const id = decodeURIComponent(m[1]);
+    if (skip !== id) recordOpen(id);
+  }, [path, recordOpen]);
+
+  // Re-read on navigation and when the window comes back, so new, renamed, pinned and visited jobs show up on
+  // every device. The jobs and the account's visits and pins are read together.
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const { data, error } = await supabase.from("jobs").select(NAV_JOB_COLS).order("updated_at", { ascending: false });
+      const quiet = navInFlight.current === 0;
+      const writes = navWrites.current;
+      const [jobsRes, navRes] = await Promise.all([
+        supabase.from("jobs").select(NAV_JOB_COLS).order("updated_at", { ascending: false }),
+        supabase.from("job_nav").select("job_id, visited_at, pinned_at"),
+      ]);
       if (!alive) return;
-      if (error) return console.warn("Sidebar: loading jobs failed:", error.message);
-      setJobs(((data ?? []) as unknown as Record<string, unknown>[]).map(navJob));
+      if (jobsRes.error) return console.warn("Sidebar: loading jobs failed:", jobsRes.error.message);
+      const list = ((jobsRes.data ?? []) as unknown as Record<string, unknown>[]).map(navJob);
+      setJobs(list);
+
+      if (navRes.error) {
+        if (!isMissingRelation(navRes.error)) return console.warn("Sidebar: loading the job order failed:", navRes.error.message);
+        // Migration 0009 isn't run yet: visits and pins stay on this device, as before.
+        if (navMode.current !== false) console.info("Sidebar: pins and visit order stay on this device until migration 0009 is run.");
+        navMode.current = false;
+        const pending = pendingOpens.current;
+        pendingOpens.current = {};
+        if (Object.keys(pending).length) {
+          let log = readVisits();
+          for (const [id, at] of Object.entries(pending)) log = withVisit(log, id, at);
+          saveVisits(log);
+        }
+        return;
+      }
+
+      navMode.current = true;
+      let rows = (navRes.data ?? []) as NavRow[];
+      // This device's own data (from before the account kept it) goes up once, then its keys are removed.
+      const pending = { ...pendingOpens.current };
+      if (!uploadingLocalNav && (localNavPresent() || Object.keys(pending).length)) {
+        uploadingLocalNav = true;
+        try {
+          const ids = list.map((j) => j.id);
+          const known = new Set(ids);
+          const account = navStateFromRows(rows);
+          const local = { visits: { ...readVisits(), ...pending }, pins: readPins() };
+          let ok = true;
+          // Oldest pin first, so the newest local pin is also the newest on the account.
+          for (const id of local.pins.filter((p) => known.has(p) && !account.pins.includes(p)).reverse()) {
+            const { error } = await supabase.rpc("set_job_pinned", { p_job: id, p_pinned: true });
+            if (error) {
+              ok = false;
+              console.warn("Sidebar: moving a pin to the account failed:", error.message);
+              break;
+            }
+          }
+          const visitRows = visitsToUpload(local.visits, account.visits, ids);
+          if (ok && visitRows.length) {
+            const { error } = await supabase.from("job_nav").upsert(visitRows, { onConflict: "job_id", ignoreDuplicates: false });
+            if (error) {
+              ok = false;
+              console.warn("Sidebar: moving visits to the account failed:", error.message);
+            }
+          }
+          if (ok) {
+            clearLocalNav();
+            pendingOpens.current = {};
+            const again = await supabase.from("job_nav").select("job_id, visited_at, pinned_at");
+            if (!again.error) rows = (again.data ?? []) as NavRow[];
+          }
+        } finally {
+          uploadingLocalNav = false;
+        }
+      }
+
+      // Skip the apply if any write overlapped this read: the write's own state is already on screen.
+      if (!alive || !quiet || navInFlight.current > 0 || navWrites.current !== writes) return;
+      const state = navStateFromRows(rows);
+      setVisits(state.visits);
+      setPins(state.pins);
     };
     void load();
     window.addEventListener("focus", load);
@@ -262,13 +380,33 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   /** Clicking a job moves it to the top at once, before the page change finishes. */
   function openJob(id: string) {
     flipFrom.current = rowTops(navRef.current);
-    setVisits(recordVisit(id));
+    clickedId.current = id;
+    recordOpen(id);
   }
 
+  /** Pin or unpin: the list changes at once, and the account is told in the background. */
   function togglePin(id: string) {
-    const next = pins.includes(id) ? withoutPin(pins, id) : withPin(pins, id);
+    const pin = !pins.includes(id);
+    const next = pin ? withPin(pins, id) : withoutPin(pins, id);
     setPins(next);
-    savePins(next);
+    if (navMode.current !== true) {
+      savePins(next);
+      return;
+    }
+    navWrites.current++;
+    navInFlight.current++;
+    const send = async () => {
+      try {
+        const { error } = await supabase.rpc("set_job_pinned", { p_job: id, p_pinned: pin });
+        if (!error) return;
+        console.warn("Sidebar: saving the pin failed:", error.message);
+        // Put the list back the way it was (an unpin that failed goes back to the top of the pins).
+        setPins((cur) => (pin ? withoutPin(cur, id) : withPin(cur, id)));
+      } finally {
+        navInFlight.current--;
+      }
+    };
+    void send();
   }
 
   function startRename(id: string) {
@@ -305,13 +443,16 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
     if (!window.confirm("Delete this job and its tailored copy?")) return;
     const { error } = await supabase.from("jobs").delete().eq("id", j.id);
     if (error) return console.warn("Sidebar: deleting the job failed:", error.message);
+    // The database cascade removes the job's account row; here it leaves the lists and this device's copy.
+    navWrites.current++;
     setJobs((cur) => cur.filter((x) => x.id !== j.id));
-    const nextPins = withoutPin(readPins(), j.id);
-    savePins(nextPins);
-    setPins(nextPins);
-    const nextVisits = withoutVisit(readVisits(), j.id);
-    saveVisits(nextVisits);
-    setVisits(nextVisits);
+    setPins((cur) => withoutPin(cur, j.id));
+    setVisits((cur) => withoutVisit(cur, j.id));
+    delete pendingOpens.current[j.id];
+    if (navMode.current !== true) {
+      savePins(withoutPin(readPins(), j.id));
+      saveVisits(withoutVisit(readVisits(), j.id));
+    }
     window.dispatchEvent(new CustomEvent("jawb:jobs-changed", { detail: { id: j.id } }));
     if (path === `/jobs/${j.id}`) router.push("/");
   }

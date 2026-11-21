@@ -81,6 +81,58 @@ export function recordVisit(id: string, now?: string): Visits {
   return next;
 }
 
+/** True while this device still holds visits or pins that were never sent to the account. */
+export function localNavPresent(): boolean {
+  try {
+    return localStorage.getItem(VISITS_KEY) !== null || localStorage.getItem(PINS_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Drop this device's visit and pin data once it has been sent to the account. */
+export function clearLocalNav(): void {
+  try {
+    localStorage.removeItem(VISITS_KEY);
+    localStorage.removeItem(PINS_KEY);
+  } catch {
+    /* blocked storage: nothing was saved here */
+  }
+}
+
+// ---------- the account's copy (table job_nav, migration 0009) ----------
+
+/** A row of job_nav as the sidebar reads it (timestamps as the database sends them). */
+export type NavRow = { job_id: string; visited_at: string | null; pinned_at: string | null };
+
+/**
+ * The account's visits and pins from its job_nav rows. Pins are newest pin first; rows never pinned
+ * (null pinned_at) are left out. Times are normalised to ISO strings so they compare like local ones. Pure.
+ */
+export function navStateFromRows(rows: NavRow[]): { visits: Visits; pins: string[] } {
+  const visits: Visits = {};
+  const pinned: { id: string; at: number }[] = [];
+  for (const r of rows) {
+    const seen = Date.parse(r.visited_at ?? "");
+    if (!Number.isNaN(seen)) visits[r.job_id] = new Date(seen).toISOString();
+    const at = Date.parse(r.pinned_at ?? "");
+    if (r.pinned_at && !Number.isNaN(at)) pinned.push({ id: r.job_id, at });
+  }
+  return { visits, pins: pinned.sort((a, b) => b.at - a.at).map((p) => p.id) };
+}
+
+/**
+ * The local visits to send to the account: only jobs still in the list whose local visit is newer than
+ * the account's (an account time never moves backwards). Pure.
+ */
+export function visitsToUpload(local: Visits, account: Visits, jobIds: string[]): { job_id: string; visited_at: string }[] {
+  const ids = new Set(jobIds);
+  const time = (iso: string | undefined) => Date.parse(iso ?? "") || 0;
+  return Object.entries(local)
+    .filter(([id, at]) => ids.has(id) && time(at) > time(account[id]))
+    .map(([job_id, visited_at]) => ({ job_id, visited_at }));
+}
+
 export function readPins(): string[] {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(PINS_KEY) ?? "null");

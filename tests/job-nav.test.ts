@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_VISITS, navJob, readPins, readVisits, recentJobs, recordVisit, searchJobs, sidebarJobs, withPin, withVisit, withoutPin, withoutVisit,
+  MAX_VISITS, navJob, navStateFromRows, readPins, readVisits, recentJobs, recordVisit, searchJobs, sidebarJobs, visitsToUpload,
+  withPin, withVisit, withoutPin, withoutVisit,
 } from "@/lib/jobNav";
 
 const row = (id: string, title: string, company: string, updated_at: string, extra: Record<string, unknown> = {}) =>
@@ -82,5 +83,50 @@ describe("sidebar jobs", () => {
     expect(readVisits()).toEqual({});
     expect(readPins()).toEqual([]);
     expect(() => recordVisit("a", "2026-01-01T00:00:00.000Z")).not.toThrow();
+  });
+});
+
+describe("account copy of pins and visits (job_nav)", () => {
+  const row = (job_id: string, visited_at: string | null, pinned_at: string | null) => ({ job_id, visited_at, pinned_at });
+
+  it("pins come from pinned_at, newest pin first; never-pinned rows are left out", () => {
+    const { pins } = navStateFromRows([
+      row("a", null, "2026-11-01T10:00:00+00:00"),
+      row("b", "2026-11-05T10:00:00+00:00", null),
+      row("c", null, "2026-11-03T10:00:00.250000+00:00"),
+    ]);
+    expect(pins).toEqual(["c", "a"]);
+  });
+
+  it("visits come from visited_at as ISO strings; rows with no visit are left out", () => {
+    const { visits } = navStateFromRows([
+      row("a", "2026-11-05T10:00:00.123456+00:00", null),
+      row("b", null, "2026-11-01T10:00:00+00:00"),
+    ]);
+    expect(visits).toEqual({ a: "2026-11-05T10:00:00.123Z" });
+  });
+
+  it("no rows: nothing pinned, nothing visited", () => {
+    expect(navStateFromRows([])).toEqual({ visits: {}, pins: [] });
+  });
+
+  it("uploads only local visits that are newer than the account's, for jobs still in the list", () => {
+    const local = {
+      newer: "2026-11-10T00:00:00.000Z",
+      older: "2026-11-01T00:00:00.000Z",
+      fresh: "2026-11-02T00:00:00.000Z",
+      gone: "2026-11-10T00:00:00.000Z",
+    };
+    const account = { newer: "2026-11-05T00:00:00.000Z", older: "2026-11-05T00:00:00.000Z" };
+    expect(visitsToUpload(local, account, ["newer", "older", "fresh"])).toEqual([
+      { job_id: "newer", visited_at: "2026-11-10T00:00:00.000Z" },
+      { job_id: "fresh", visited_at: "2026-11-02T00:00:00.000Z" },
+    ]);
+  });
+
+  it("an account visit is never moved backwards, even to an equal time", () => {
+    const same = "2026-11-05T00:00:00.000Z";
+    expect(visitsToUpload({ a: same }, { a: same }, ["a"])).toEqual([]);
+    expect(visitsToUpload({ a: "not a date" }, {}, ["a"])).toEqual([]);
   });
 });
