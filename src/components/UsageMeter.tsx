@@ -74,10 +74,10 @@ export function UsageCard() {
     <section className="space-y-2" aria-labelledby="usage-heading">
       <h2 id="usage-heading" className="font-semibold">AI usage</h2>
       {!usage ? (
-        // Two bars the height of the loaded lines (text-sm = 20px), so the page doesn't shift when usage arrives.
+        // Blank space the height of the two loaded lines (text-sm = 20px), so the page doesn't shift when usage arrives.
         <>
-          <div aria-hidden className="h-5 w-4/5 rounded bg-fg/10 animate-pulse motion-reduce:animate-none" />
-          <div aria-hidden className="h-5 w-3/5 rounded bg-fg/10 animate-pulse motion-reduce:animate-none" />
+          <div aria-hidden className="h-5" />
+          <div aria-hidden className="h-5" />
         </>
       ) : !usage.available ? (
         <p className="text-sm text-muted">{MIGRATION_HINT} Until then there are no AI limits.</p>

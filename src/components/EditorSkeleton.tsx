@@ -7,7 +7,6 @@ import { DocToolbar, EditorToolbar, IconButton, MenuBar, ToolbarSep, useZoom } f
 import { FormatToolbar } from "./FormatToolbar";
 import { EMPTY_FORMAT_STATE, NOOP_COMMANDS, type FormatState } from "./editorTypes";
 import { DownloadIcon } from "./icons";
-import { Loader } from "./Loader";
 import { EditorCanvas } from "./ZoomFrame";
 
 /**
@@ -31,7 +30,7 @@ const MenuLabel = ({ children }: { children: React.ReactNode }) => (
   <span className="rounded px-1.5 py-1 text-[13px] text-fg sm:px-2">{children}</span>
 );
 
-/** The page as it is while its document loads: blank paper, with the loader centred over the visible canvas. */
+/** The page as it is while its document loads: blank paper; the document appears on it once it has fully loaded. */
 export function BlankDocument({ zoom, className }: { zoom: number; className: string }) {
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -46,9 +45,6 @@ export function BlankDocument({ zoom, className }: { zoom: number; className: st
           />
         </div>
       </EditorCanvas>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <Loader label="Loading document…" />
-      </div>
     </div>
   );
 }

@@ -21,7 +21,6 @@ import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
 import { Greeting, StatStrip } from "@/components/dashboard/Overview";
 import { CompanyMark } from "@/components/CompanyMark";
-import { PageLoader } from "@/components/Loader";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
@@ -332,7 +331,8 @@ export default function TrackerPage() {
   const tableCols = 4 + [showDeadline, showApplied, showFollowUp].filter(Boolean).length;
 
   // Wait for the first jobs read too: painting the greeting and empty sections first made the page jump when the rows came in.
-  if (!ready || loading) return <PageLoader />;
+  // Blank until the jobs are read, then the whole page at once (no loader, nothing filling in).
+  if (!ready || loading) return null;
 
   const noJobs = !loading && !loadError && jobs.length === 0;
   const allChips: { value: Filter; label: string }[] = [
