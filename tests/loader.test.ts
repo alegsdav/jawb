@@ -6,20 +6,24 @@ const css = readFileSync(`${process.cwd()}/src/app/globals.css`, "utf8");
 // Component rendering is not set up for tests (tsconfig jsx is "preserve"), so check the source for the exports.
 const loaderSource = readFileSync(`${process.cwd()}/src/components/Loader.tsx`, "utf8");
 
+const morphSource = readFileSync(`${process.cwd()}/src/components/ui/morph-loading.tsx`, "utf8");
+
 describe("page loader", () => {
-  it("defines the flip keyframes and the reduced-motion fallback", () => {
-    expect(css).toMatch(/@keyframes square-flip\s*{/);
+  it("defines the four morph keyframes and the reduced-motion fallback", () => {
+    for (const i of [0, 1, 2, 3]) expect(css).toMatch(new RegExp(`@keyframes morph-${i}\\s*{`));
     expect(css).toMatch(/@keyframes square-pulse\s*{/);
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*{\s*\.flipping-square-loader\s*{[^}]*square-pulse/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*{\s*\.morph-loader > div > div\s*{[^}]*square-pulse[^}]*!important/);
   });
 
-  it("draws the loader in the near-black foreground colour", () => {
-    expect(css).toMatch(/\.flipping-square-loader\s*{[^}]*background-color: var\(--fg\)/);
+  it("draws the squares in the near-black foreground colour", () => {
+    expect(morphSource).toMatch(/className="absolute h-4 w-4 bg-fg"/);
+    expect(morphSource).toMatch(/morph-loader/);
   });
 
-  it("exports Loader and PageLoader, and centres PageLoader in the content area", () => {
+  it("exports Loader and PageLoader, uses the morph loader, and centres PageLoader in the content area", () => {
     expect(loaderSource).toMatch(/export function Loader\(/);
     expect(loaderSource).toMatch(/export function PageLoader\(/);
+    expect(loaderSource).toMatch(/<UniqueLoading variant="morph"/);
     expect(loaderSource).toMatch(/flex h-full min-h-\[60vh\] w-full items-center justify-center/);
   });
 });

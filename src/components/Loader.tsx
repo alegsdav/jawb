@@ -1,26 +1,26 @@
+import UniqueLoading from "@/components/ui/morph-loading";
+
 /**
- * The app's loading mark: a flipping blue square (the owner's loader, in the app's colours).
+ * The app's loading mark: four near-black squares that morph around the centre (components/ui/morph-loading.tsx).
  * Plain markup with no hooks, so it works in server and client components alike.
  * Motion is swapped for a gentle pulse under prefers-reduced-motion (see globals.css).
  */
 export function Loader({
-  size = 40,
+  size = "md",
   label = "Loading…",
   center = false,
   className = "",
 }: {
-  size?: number;
+  size?: "sm" | "md" | "lg";
   label?: string;
   center?: boolean;
   className?: string;
 }) {
   const mark = (
     <div role="status" aria-live="polite" className={`inline-flex ${className}`}>
-      <span
-        aria-hidden="true"
-        className="flipping-square-loader"
-        style={{ width: size, height: size, borderRadius: Math.max(2, Math.round(size * 0.1)) }}
-      />
+      <span aria-hidden="true">
+        <UniqueLoading variant="morph" size={size} />
+      </span>
       <span className="sr-only">{label}</span>
     </div>
   );
