@@ -89,20 +89,94 @@ async function timedFetch(url: URL | string, init: RequestInit, signal: AbortSig
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
+// ---------- Entities and clean fields ----------
+
+const NAMED_ENTITIES = new Map<string, string>([
+  ["amp", "&"],
+  ["lt", "<"],
+  ["gt", ">"],
+  ["quot", '"'],
+  ["apos", "'"],
+  ["nbsp", " "],
+  ["rsquo", "’"],
+  ["lsquo", "‘"],
+  ["rdquo", "”"],
+  ["ldquo", "“"],
+  ["ndash", "–"],
+  ["mdash", "—"],
+  ["hellip", "…"],
+]);
+
+/**
+ * Decodes numeric (&#39; &#x27;) and common named entities in one pass, so "&amp;amp;" becomes "&amp;".
+ * Unknown named entities and invalid code points stay as written.
+ */
+export function decodeEntities(s: string): string {
+  return s.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (whole, name: string) => {
+    if (name[0] === "#") {
+      const hex = name[1] === "x" || name[1] === "X";
+      const code = parseInt(name.slice(hex ? 2 : 1), hex ? 16 : 10);
+      const valid = code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
+      return valid ? String.fromCodePoint(code) : whole;
+    }
+    return NAMED_ENTITIES.get(name.toLowerCase()) ?? whole;
+  });
+}
+
+/** Titles and names that sites leave as template placeholders; never shown to a student. */
+const PLACEHOLDER = /^(page_?title|title|untitled|undefined|null|\{\{.*\}\})$/i;
+
+/** Plain text for a title or location: entities decoded, whitespace collapsed, placeholders become "". */
+export function cleanField(s: string | null | undefined): string {
+  const out = decodeEntities(String(s ?? "")).replace(/\s+/g, " ").trim();
+  return PLACEHOLDER.test(out) ? "" : out;
+}
+
+/** The careers-page words sites append to a company name in their <title>, e.g. "Perpay - Career's Page". */
+const CAREERS_SUFFIX = /\s+(?:-\s+)?(?:career['’]s page|career page|careers|jobs)$/i;
+
+export function cleanCompany(s: string | null | undefined): string {
+  return cleanField(cleanField(s).replace(CAREERS_SUFFIX, ""));
+}
+
+/** Page titles of lists of openings (a company's careers page), which aren't one posting. */
+const LISTING_TITLE =
+  /^(?:jobs at|careers at|current openings at|open roles at) |^(?:jobs|careers|open positions)$| careers(?: page)?$| career['’]s page$/i;
+
+export function isListingTitle(title: string): boolean {
+  return LISTING_TITLE.test(cleanField(title));
+}
+
+/** Lever's posting title reads "Company - Job title". Returns the company, or "" when the title doesn't say so. */
+export function companyFromLeverTitle(pageTitle: string, jobTitle: string): string {
+  const title = cleanField(pageTitle);
+  const cut = title.indexOf(" - ");
+  if (cut <= 0) return "";
+  const rest = cleanField(title.slice(cut + 3)).toLowerCase();
+  const job = cleanField(jobTitle).toLowerCase();
+  return job && rest === job ? cleanCompany(title.slice(0, cut)) : "";
+}
+
+/** "shield-ai" → "Shield Ai": the company name when a page doesn't give one. */
+function prettifySlug(slug: string): string {
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+// ---------- Text from HTML ----------
+
 export function htmlToText(html: string): string {
-  return html
+  const withoutTags = html
     .replace(/<(script|style|noscript|svg|head)[\s\S]*?<\/\1>/gi, " ")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|h[1-6]|tr|section|ul|ol)>/gi, "\n")
     .replace(/<li[^>]*>/gi, "• ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&#x27;|&rsquo;/g, "'")
-    .replace(/&[a-z]+;/gi, " ")
+    .replace(/<[^>]+>/g, " ");
+  // Decoded after the tags are gone, so an escaped "&lt;b&gt;" stays text instead of turning into markup.
+  return decodeEntities(withoutTags)
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n\s*/g, "\n\n")
     .trim();
@@ -229,11 +303,51 @@ async function fetchPublic(url: URL, init: RequestInit, signal: AbortSignal): Pr
   }
 }
 
-/** Fixed public API hosts (Greenhouse, Lever): not user-controlled, so no address check. */
+// ---------- Job APIs and closed postings ----------
+
+/** A non-2xx answer from a job API. The status tells a 404 (posting gone) apart from an outage. */
+class HttpStatusError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.status = status;
+  }
+}
+
+/** Fixed public API hosts (Greenhouse, Lever, Ashby): not user-controlled, so no address check. */
 async function getJSON(url: string, signal: AbortSignal) {
   const r = await timedFetch(url, { headers: { "User-Agent": UA } }, signal);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  if (!r.ok) {
+    await r.body?.cancel().catch(() => {});
+    throw new HttpStatusError(r.status);
+  }
   return JSON.parse(await readCapped(r));
+}
+
+/** A job API's 404 means this posting is gone (closed, or the id is wrong), so there is nothing to scrape. */
+async function getJobJSON(url: string, signal: AbortSignal) {
+  try {
+    return await getJSON(url, signal);
+  } catch (e) {
+    if (e instanceof HttpStatusError && e.status === 404) throw new JobClosedError(CLOSED_MESSAGE);
+    throw e;
+  }
+}
+
+/** Lever's API has no company name; its posting page's <title> ("Company - Job title") does. Any failure gives "". */
+async function leverCompany(slug: string, id: string, jobTitle: string, signal: AbortSignal): Promise<string> {
+  try {
+    const page = new URL(`https://jobs.lever.co/${encodeURIComponent(slug)}/${encodeURIComponent(id)}`);
+    const { res } = await fetchPublic(page, { headers: { "User-Agent": UA, Accept: "text/html" } }, signal);
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => {});
+      return "";
+    }
+    const html = await readCapped(res);
+    return companyFromLeverTitle(html.match(/<title>([^<]*)<\/title>/i)?.[1] ?? "", jobTitle);
+  } catch {
+    return "";
+  }
 }
 
 /** Greenhouse board hosts (boards.greenhouse.io, job-boards.greenhouse.io…), anchored so "evilgreenhouse.io" doesn't match. */
@@ -249,7 +363,7 @@ async function tryKnownBoards(u: URL, signal: AbortSignal): Promise<FetchedJob |
     const board = embed ? u.searchParams.get("for") : parts[0];
     const id = embed ? u.searchParams.get("token") : i >= 0 ? parts[i + 1] : u.searchParams.get("gh_jid");
     if (board && id) {
-      const j = await getJSON(
+      const j = await getJobJSON(
         `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs/${encodeURIComponent(id)}`,
         signal,
       );
@@ -265,14 +379,15 @@ async function tryKnownBoards(u: URL, signal: AbortSignal): Promise<FetchedJob |
     }
   }
   if (u.hostname === "jobs.lever.co" && parts.length >= 2) {
-    const j = await getJSON(`https://api.lever.co/v0/postings/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`, signal);
+    const j = await getJobJSON(`https://api.lever.co/v0/postings/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`, signal);
     const lists = (j.lists ?? [])
       .map((l: { text: string; content: string }) => `${l.text}\n${htmlToText(l.content)}`)
       .join("\n\n");
+    const company = (await leverCompany(parts[0], parts[1], cleanField(j.text), signal)) || prettifySlug(parts[0]);
     return {
       source: "board",
       title: j.text ?? "",
-      company: parts[0],
+      company,
       location: j.categories?.location ?? "",
       description: [j.descriptionPlain, lists, j.additionalPlain].filter(Boolean).join("\n\n"),
     };
@@ -280,32 +395,84 @@ async function tryKnownBoards(u: URL, signal: AbortSignal): Promise<FetchedJob |
   return null;
 }
 
+/**
+ * Ashby's job pages can stay up after a posting closes, but its public board list drops the job. If the
+ * board answers and the job isn't on it, the posting is closed. Any other outcome means "don't know".
+ */
+async function checkAshbyOpen(u: URL, signal: AbortSignal): Promise<void> {
+  const [org, id] = u.pathname.split("/").filter(Boolean);
+  if (u.hostname !== "jobs.ashbyhq.com" || !org || !id) return;
+  let board: unknown;
+  try {
+    board = await getJSON(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(org)}`, signal);
+  } catch {
+    return;
+  }
+  const jobs = (board as { jobs?: unknown } | null)?.jobs;
+  if (!Array.isArray(jobs)) return;
+  const listed = jobs.some((j) => String((j as { id?: unknown } | null)?.id ?? "").toLowerCase() === id.toLowerCase());
+  if (!listed) throw new JobClosedError(CLOSED_MESSAGE);
+}
+
+/**
+ * A link that bounced to the company's board or a parent page is closed: Greenhouse sends closed jobs to
+ * "/<board>?error=true", and other sites send them up a level (/acme/jobs/1 → /acme).
+ */
+function isClosedRedirect(from: URL, to: URL): boolean {
+  if (to.href === from.href) return false;
+  if (to.searchParams.get("error") === "true") return true;
+  const fromPath = from.pathname.replace(/\/+$/, "");
+  const toPath = to.pathname.replace(/\/+$/, "");
+  return toPath !== fromPath && fromPath.startsWith(`${toPath}/`);
+}
+
+/** Wording a closed posting uses on its page; checked in the first CLOSED_CHECK_CHARS characters. */
+const CLOSED_TEXT =
+  /no longer (accepting applications|available|open)|this (job|position|posting|role) (has been|is) (closed|filled|no longer)|job (not found|has expired)|position has been filled|posting (has )?expired/i;
+const CLOSED_CHECK_CHARS = 3000;
+
+/** A schema.org validThrough date that has already passed. */
+function hasExpired(validThrough: unknown): boolean {
+  if (typeof validThrough !== "string") return false;
+  const t = Date.parse(validThrough);
+  return !Number.isNaN(t) && t < Date.now();
+}
+
+const isJobPosting = (n: { "@type"?: string | string[] } | null | undefined) =>
+  n?.["@type"] === "JobPosting" || (Array.isArray(n?.["@type"]) && n["@type"].includes("JobPosting"));
+
+/** The schema.org JobPosting in one JSON-LD block, or null when the block isn't JSON or has none. */
+function findJobPosting(raw: string) {
+  try {
+    const data = JSON.parse(raw);
+    const nodes = Array.isArray(data) ? data : data["@graph"] ?? [data];
+    return nodes.find(isJobPosting) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Many job pages (Ashby, LinkedIn public, Workable, company sites) embed schema.org JobPosting. */
 function fromJsonLd(html: string): FetchedJob | null {
   const blocks = html.match(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi) ?? [];
   for (const block of blocks) {
     const raw = block.replace(/^<script[^>]*>/i, "").replace(/<\/script>$/i, "");
-    try {
-      const data = JSON.parse(raw);
-      const nodes = Array.isArray(data) ? data : data["@graph"] ?? [data];
-      const isPosting = (n: { "@type"?: string | string[] }) =>
-        n?.["@type"] === "JobPosting" || (Array.isArray(n?.["@type"]) && n["@type"].includes("JobPosting"));
-      const jp = nodes.find(isPosting);
-      if (jp) {
-        const loc = Array.isArray(jp.jobLocation) ? jp.jobLocation[0] : jp.jobLocation;
-        const a = loc?.address ?? {};
-        return {
-          source: "jsonld",
-          title: jp.title ?? "",
-          company: jp.hiringOrganization?.name ?? "",
-          location: [a.addressLocality, a.addressRegion].filter(Boolean).join(", ") ||
-            (jp.jobLocationType === "TELECOMMUTE" ? "Remote" : ""),
-          description: htmlToText(String(jp.description ?? "")),
-        };
-      }
-    } catch {
-      /* ignore bad blocks */
-    }
+    const jp = findJobPosting(raw);
+    if (!jp) continue;
+    if (hasExpired(jp.validThrough)) throw new JobClosedError(CLOSED_MESSAGE);
+    const loc = Array.isArray(jp.jobLocation) ? jp.jobLocation[0] : jp.jobLocation;
+    const a = loc?.address ?? {};
+    const description = htmlToText(String(jp.description ?? ""));
+    if (CLOSED_TEXT.test(description.slice(0, CLOSED_CHECK_CHARS))) throw new JobClosedError(CLOSED_MESSAGE);
+    return {
+      source: "jsonld",
+      title: jp.title ?? "",
+      company: jp.hiringOrganization?.name ?? "",
+      location:
+        [a.addressLocality, a.addressRegion].filter(Boolean).join(", ") ||
+        (jp.jobLocationType === "TELECOMMUTE" ? "Remote" : ""),
+      description,
+    };
   }
   return null;
 }
@@ -318,17 +485,37 @@ const pasteMessage = (site: string | null) =>
 /**
  * Fetch a job posting. Every error thrown is a JobFetchError with a plain sentence. The whole fetch
  * (API calls, redirects, body) must finish within FETCH_TIMEOUT_MS, and at most MAX_RESPONSE_BYTES
- * of any response is read.
+ * of any response is read. A closed posting or a list of openings throws JobClosedError.
  */
 export async function fetchJobFromUrl(rawUrl: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<FetchedJob> {
+  const job = await readJobLink(rawUrl, timeoutMs);
+  // Every return path's fields are cleaned here, so no entity or site placeholder reaches the form.
+  return {
+    ...job,
+    title: cleanField(job.title),
+    company: cleanCompany(job.company),
+    location: cleanField(job.location),
+  };
+}
+
+async function readJobLink(rawUrl: string, timeoutMs: number): Promise<FetchedJob> {
   const u = parseJobUrl(rawUrl);
   const site = pasteOnlySite(u.href);
   if (site) throw new JobFetchError(pasteMessage(site));
   const signal = AbortSignal.timeout(timeoutMs);
-  const known = await tryKnownBoards(u, signal).catch(() => null);
+  // Only a closed posting stops here; other API failures fall back to reading the page.
+  const known = await tryKnownBoards(u, signal).catch((e: unknown) => {
+    if (e instanceof JobClosedError) throw e;
+    return null;
+  });
   if (known?.description) return known;
+  await checkAshbyOpen(u, signal);
 
   const { res, url: finalUrl } = await fetchPublic(u, { headers: { "User-Agent": UA, Accept: "text/html" } }, signal);
+  if (isClosedRedirect(u, finalUrl)) {
+    await res.body?.cancel().catch(() => {});
+    throw new JobClosedError(CLOSED_MESSAGE);
+  }
   if (!res.ok) {
     await res.body?.cancel().catch(() => {});
     throw new JobFetchError(`The site returned HTTP ${res.status}. Paste the job description and keep the link.`);
@@ -342,10 +529,14 @@ export async function fetchJobFromUrl(rawUrl: string, timeoutMs = FETCH_TIMEOUT_
   const ld = fromJsonLd(html);
   if (ld?.description && ld.description.length > 200) return ld;
 
+  // A list of openings is refused at any length, so check the title before the text rules.
+  const title = cleanField(html.match(/<title>([^<]*)<\/title>/i)?.[1] ?? "");
+  if (isListingTitle(title)) throw new JobClosedError(LISTING_MESSAGE);
+
   const text = htmlToText(html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? html);
+  if (CLOSED_TEXT.test(text.slice(0, CLOSED_CHECK_CHARS))) throw new JobClosedError(CLOSED_MESSAGE);
   if (text.length < 300 || /sign in|log in to view|join now/i.test(text.slice(0, 600))) {
     throw new JobFetchError(pasteMessage(pasteOnlySite(finalUrl.href)));
   }
-  const title = html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
   return { source: "page", title, company: "", location: "", description: text.slice(0, 20000) };
 }
