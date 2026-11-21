@@ -38,6 +38,15 @@ const ICON = "h-[15px] w-[15px] shrink-0";
  */
 const fade = (collapsed: boolean) =>
   `transition-opacity motion-reduce:transition-none ${collapsed ? "opacity-0 duration-100" : "opacity-100 duration-150 delay-100"}`;
+
+/**
+ * A row's icon and label, laid out at the open row's inner width (208px minus the 8px padding each side) whatever the
+ * row's current width: while the sidebar animates, the row (and its highlight) narrows and clips this, so the text
+ * never re-flows or re-truncates frame by frame.
+ */
+function RowInner({ children }: { children: React.ReactNode }) {
+  return <span className="flex w-[192px] shrink-0 items-center gap-2.5">{children}</span>;
+}
 /**
  * The row's ⋯ button (24px). Hidden until the row is hovered or focused, or its menu is open; always
  * shown on touch screens, which have no hover.
@@ -124,10 +133,13 @@ function JobRow({
             href={`/jobs/${j.id}`}
             onClick={() => a.open(j.id)}
             aria-current={active ? "page" : undefined}
-            className={`${JOB_ROW} ${active ? ROW_ACTIVE : ROW_IDLE}`}
+            className={`${JOB_ROW} overflow-hidden ${active ? ROW_ACTIVE : ROW_IDLE}`}
           >
-            <LineIcon className={`${ICON} ${active ? "text-fg" : "text-muted"}`} />
-            <span className={`min-w-0 flex-1 truncate ${fade(collapsed)}`}>{title}</span>
+            {/* The open width minus the padding and the ⋯ button's room: the title truncates once, not every frame. */}
+            <span className="flex w-[168px] shrink-0 items-center gap-2.5">
+              <LineIcon className={`${ICON} ${active ? "text-fg" : "text-muted"}`} />
+              <span className={`min-w-0 flex-1 truncate ${fade(collapsed)}`}>{title}</span>
+            </span>
             <span className="sr-only">
               {j.company ? `, ${j.company}` : ""}, {STATUS_LABEL[j.status]}
               {pinned ? ", pinned" : ""}
@@ -453,9 +465,11 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   /** A nav row: icon, then its label. Collapsed, only the icon shows (the label fades) and hovering names it. */
   const link = (href: string, text: string, active: boolean, icon: React.ReactNode) => (
     <Tip label={text} show={collapsed}>
-      <Link href={href} aria-current={active ? "page" : undefined} className={`${ROW} ${active ? ROW_ACTIVE : ROW_IDLE}`}>
-        {icon}
-        <span className={`min-w-0 overflow-hidden ${label}`}>{text}</span>
+      <Link href={href} aria-current={active ? "page" : undefined} className={`${ROW} overflow-hidden ${active ? ROW_ACTIVE : ROW_IDLE}`}>
+        <RowInner>
+          {icon}
+          <span className={label}>{text}</span>
+        </RowInner>
       </Link>
     </Tip>
   );
@@ -481,7 +495,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       aria-label="Workspace"
       // One set of rows, open or collapsed: only the width animates. Rows are nowrap and left-aligned, so the icons
       // stay exactly where they are while the edge slides over the (fading) labels.
-      className={`flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px] transition-[width] duration-200 ease-out motion-reduce:transition-none ${collapsed ? "w-14" : "w-[232px]"}`}
+      className={`flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px] transition-[width] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${collapsed ? "w-14" : "w-[232px]"}`}
     >
       {/* Top bar: the logo stays put. Open, the toggle sits on the right; collapsed, it sits over the logo and shows
           when hovered or focused (the logo steps aside), like other apps' collapsed sidebars. */}
@@ -507,7 +521,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
           className={`flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg ${
             collapsed
               ? "absolute left-0.5 top-0.5 opacity-0 transition-opacity duration-150 hover:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
-              : "ml-auto"
+              : `ml-auto ${label}`
           }`}
         >
           <SidebarIcon className={ICON} />
@@ -525,16 +539,21 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
         <Tip label="Search jobs" show={collapsed}>
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+            {/* Its own placeholder, so it fades with the labels (a native placeholder can't). */}
+            {!query && (
+              <span className={`pointer-events-none absolute left-7 top-1/2 -translate-y-1/2 whitespace-nowrap text-[13px] text-muted ${label}`}>
+                Search jobs
+              </span>
+            )}
             <input
               ref={searchRef}
               id="job-search"
               type="search"
               // Collapsed, the box is just its icon: clicking it opens the sidebar with the caret already in the box.
               onFocus={() => collapsed && setCollapsedAndSave(false)}
-              className={`h-7 w-full rounded-md border border-transparent bg-fg/[0.06] pl-7 pr-2 text-[13px] outline-none placeholder:text-muted focus:border-fg/20 ${
-                collapsed ? "cursor-pointer text-transparent placeholder:text-transparent" : ""
+              className={`h-7 w-full rounded-md border border-transparent bg-fg/[0.06] pl-7 pr-2 text-[13px] outline-none focus:border-fg/20 ${
+                collapsed ? "cursor-pointer text-transparent" : ""
               }`}
-              placeholder="Search jobs"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -584,9 +603,11 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
           {link("/account", "Account", path.startsWith("/account"), <UserIcon className={ICON} />)}
           <Tip label="Sign out" show={collapsed}>
             <form action={signOut}>
-              <button className={`${ROW} ${ROW_IDLE} cursor-pointer`}>
-                <LogoutIcon className={ICON} />
-                <span className={`min-w-0 overflow-hidden ${label}`}>Sign out</span>
+              <button className={`${ROW} ${ROW_IDLE} cursor-pointer overflow-hidden`}>
+                <RowInner>
+                  <LogoutIcon className={ICON} />
+                  <span className={label}>Sign out</span>
+                </RowInner>
               </button>
             </form>
           </Tip>
