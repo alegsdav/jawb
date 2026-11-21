@@ -25,6 +25,7 @@ import {
   type TabStopAlign,
 } from "@/lib/doc/types";
 import { textWidthPt } from "@/lib/pdfTextWidths";
+import { wordSingleLineFactor } from "@/lib/doc/fonts";
 
 /** A file the import cannot read (not a .docx, or damaged). The message is safe to show. */
 export class DocxError extends Error {}
@@ -114,7 +115,9 @@ type PProps = {
   align?: "left" | "center" | "right" | "justify";
   before?: number;
   after?: number;
+  /** The spacing's line value in twips and its rule; the CSS line height is worked out once the font is known. */
   line?: number;
+  lineRule?: "auto" | "exact" | "atLeast";
   borderBottom?: boolean;
   /** Identity of the bottom rule (style, width, space, colour): Word groups paragraphs that share it. */
   border?: string;
@@ -124,6 +127,10 @@ type PProps = {
   /** A right or end tab stop applies, so a tab in the paragraph goes to the margin. */
   rightTab?: boolean;
   tabs?: TabStop[];
+  /** w:contextualSpacing: no space between paragraphs of the same style (see dropContextualSpacing). */
+  contextual?: boolean;
+  /** The paragraph style id: its own w:pStyle, else the default paragraph style. */
+  style?: string;
   numId?: string;
   ilvl?: number;
 };
@@ -200,6 +207,11 @@ function readBorders(bdr: XNode | undefined, p: PProps): void {
   if (betweenOn) p.borderBetween = true;
 }
 
+/** The w:lineRule of a spacing. Word reads an absent or unknown rule as "auto". */
+function lineRuleOf(v: string | undefined): "auto" | "exact" | "atLeast" {
+  return v === "exact" || v === "atLeast" ? v : "auto";
+}
+
 function readPPr(el: XNode | undefined): PProps {
   const p: PProps = {};
   if (!el) return p;
@@ -212,8 +224,12 @@ function readPPr(el: XNode | undefined): PProps {
     const line = num(attr(sp, "line"));
     if (before !== undefined) p.before = before / 20;
     if (after !== undefined) p.after = after / 20;
-    if (line !== undefined && (attr(sp, "lineRule") ?? "auto") === "auto") p.line = line / 240;
+    if (line !== undefined) {
+      p.line = line;
+      p.lineRule = lineRuleOf(attr(sp, "lineRule"));
+    }
   }
+  p.contextual = onOff(kid(el, "contextualSpacing"));
   const ind = kid(el, "ind");
   if (ind) {
     const left = num(attr(ind, "left") ?? attr(ind, "start"));
@@ -566,7 +582,7 @@ type Stop = { pos: number; align: TabStopAlign };
  * ind: the paragraph's own left indent (twips), which overrides the list level's. stops: the tab stops in effect
  * (sorted).
  */
-type Parts = { inline: DocInline[]; pp: PProps; ind?: number; stops: Stop[] };
+type Parts = { inline: DocInline[]; pp: PProps; ind?: number; stops: Stop[]; face: Face };
 
 /**
  * The tab stops in effect: each level's stops in turn (document defaults, then the style chain, then the paragraph).
@@ -589,22 +605,59 @@ function paragraphParts(p: XNode, ctx: Ctx): Parts {
   const pPrEl = kid(p, "pPr");
   const styleId = attr(kid(pPrEl, "pStyle"), "val") ?? ctx.defaultPara;
   const chain = styleChain(styleId, ctx);
-  const own = readPPr(pPrEl);
+  const own: PProps = { ...readPPr(pPrEl), style: styleId };
   const levels = [ctx.docP, ...chain.map((s) => s.p), own];
   const pp = merged<PProps>(...levels);
   const base = merged<RProps>(ctx.docR, ...chain.map((s) => s.r));
   const inline: DocInline[] = [];
   collectRuns(p, base, undefined, ctx, inline);
-  return { inline: mergeText(inline), pp, ind: own.indentLeft, stops: tabStopsOf(levels) };
+  // An empty paragraph's height comes from its paragraph mark, so the mark's own font and size come before the style's.
+  const mark = merged<RProps>(base, readRPr(kid(pPrEl, "rPr"), ctx.theme));
+  const face: Face = { font: mark.font ?? DEFAULT_FONT_FAMILY, size: mark.size ?? DEFAULT_FONT_SIZE_PT };
+  return { inline: mergeText(inline), pp, ind: own.indentLeft, stops: tabStopsOf(levels), face };
 }
 
-function paragraphAttrs(pp: PProps, tabStops?: DocTabStop[]): ParagraphAttrs {
+/** The font and size a paragraph's text is set in, used when its text has none to measure (see lineHeightOf). */
+type Face = { font: string; size: number };
+
+/**
+ * The CSS line-height that reproduces Word's line pitch. Word's "single" line is the font's own height (see
+ * wordSingleLineFactor), so an auto line scales that factor; an exact line is a fixed height over the font size; an
+ * at-least line takes the larger of the two. The font is the one most characters are set in, the size the largest run's.
+ */
+function lineHeightOf(inline: DocInline[], pp: PProps, fallback: Face): number {
+  const chars = new Map<string, number>();
+  let size: number | undefined;
+  for (const n of inline) {
+    if (n.type !== "text") continue;
+    const face = faceOfMarks(n.marks);
+    chars.set(face.family, (chars.get(face.family) ?? 0) + n.text.length);
+    size = Math.max(size ?? 0, face.size);
+  }
+  let font = fallback.font;
+  let most = 0;
+  for (const [family, count] of chars) {
+    if (count > most) {
+      font = family;
+      most = count;
+    }
+  }
+  const factor = wordSingleLineFactor(font);
+  const pt = size ?? fallback.size;
+  const twips = pp.line ?? 240;
+  let ratio = (twips / 240) * factor;
+  if (pp.line !== undefined && pp.lineRule === "exact") ratio = twips / TWIPS_PER_PT / pt;
+  else if (pp.line !== undefined && pp.lineRule === "atLeast") ratio = Math.max(twips / TWIPS_PER_PT / pt, factor);
+  return clamp(Math.round(ratio * 1000) / 1000, 0.8, 3);
+}
+
+function paragraphAttrs(pp: PProps, lineHeight: number, tabStops?: DocTabStop[]): ParagraphAttrs {
   const attrs: ParagraphAttrs = { id: newId() };
   if (tabStops) attrs.tabStops = tabStops;
   if (pp.align && pp.align !== "left") attrs.textAlign = pp.align;
   if (pp.before !== undefined && pp.before > 0) attrs.spaceBefore = clamp(pp.before, 0, 72);
   if (pp.after !== undefined && pp.after > 0) attrs.spaceAfter = clamp(pp.after, 0, 72);
-  if (pp.line !== undefined) attrs.lineHeight = clamp(pp.line, 0.8, 3);
+  attrs.lineHeight = lineHeight;
   if (pp.borderBottom) attrs.borderBottom = true;
   return attrs;
 }
@@ -670,9 +723,10 @@ function cellParagraphs(n: XNode): XNode[] {
  * reads "Company ⇥ City" with the city on the right margin). Earlier cells are separated by a space. Paragraphs
  * inside a cell are joined with a line break. Its formatting comes from the first cell that has text.
  */
-function rowParts(tr: XNode, ctx: Ctx): { inline: DocInline[]; pp: PProps } | null {
+function rowParts(tr: XNode, ctx: Ctx): { inline: DocInline[]; pp: PProps; face: Face } | null {
   const cells: DocInline[][] = [];
   let pp: PProps | undefined;
+  let face: Face | undefined;
   for (const tc of kidsOf(tr, "tc")) {
     const inline: DocInline[] = [];
     for (const p of cellParagraphs(tc)) {
@@ -681,16 +735,17 @@ function rowParts(tr: XNode, ctx: Ctx): { inline: DocInline[]; pp: PProps } | nu
       if (inline.length) inline.push({ type: "hardBreak" });
       inline.push(...part.inline);
       pp ??= part.pp;
+      face ??= part.face;
     }
     if (inline.length) cells.push(inline);
   }
-  if (!cells.length || !pp) return null;
+  if (!cells.length || !pp || !face) return null;
   const inline: DocInline[] = [];
   cells.forEach((cell, i) => {
     if (i > 0) inline.push(i === cells.length - 1 ? { type: "tab" } : { type: "text", text: " " });
     inline.push(...cell);
   });
-  return { inline: mergeText(inline), pp };
+  return { inline: mergeText(inline), pp, face };
 }
 
 /**
@@ -901,16 +956,16 @@ function resolveTabs(inline: DocInline[], pp: PProps, lay: TabLayout): { inline:
 }
 
 /** A list entry or a paragraph, with the list format a numbered list needs (see ListFormat) and its text indent (points). */
-type ImportEntry = FlatEntry & { format?: ListFormat; indentPt?: number };
+type ImportEntry = FlatEntry & { format?: ListFormat; indentPt?: number; style?: string; contextual?: boolean };
 
 function walkBody(nodes: XNode[], ctx: Ctx, out: ImportEntry[]): void {
   // The last paragraph of the open bordered group, whose rule is the only one Word draws for the group.
   let group: { entry: ImportEntry; key: string } | undefined;
   for (const n of nodes) {
     if (n.tag === "p") {
-      const { inline, pp, ind, stops } = paragraphParts(n, ctx);
+      const { inline, pp, ind, stops, face } = paragraphParts(n, ctx);
       const resolved = resolveTabs(inline, pp, tabLayoutOf(pp, ind, stops, ctx));
-      const entry = entryOf(resolved.inline, pp, ctx, ind, resolved.stops);
+      const entry = entryOf(resolved.inline, pp, ctx, face, ind, resolved.stops);
       const key = ruleGroupKey(pp);
       if (key !== undefined && group?.key === key) delete group.entry.node.attrs?.borderBottom;
       group = key === undefined ? undefined : { entry, key };
@@ -923,7 +978,7 @@ function walkBody(nodes: XNode[], ctx: Ctx, out: ImportEntry[]): void {
       for (const tr of kidsOf(n, "tr")) {
         const row = rowParts(tr, ctx);
         // Table rows are never list items, and a border of a cell is not a rule under the whole row.
-        if (row) out.push(entryOf(row.inline, { ...row.pp, numId: undefined, borderBottom: undefined }, ctx));
+        if (row) out.push(entryOf(row.inline, { ...row.pp, numId: undefined, borderBottom: undefined }, ctx, row.face));
       }
     } else if (n.tag === "sdt" || n.tag === "sdtContent" || n.tag === "customXml") {
       group = undefined;
@@ -939,14 +994,29 @@ function textBoxEntries(p: XNode, ctx: Ctx): ImportEntry[] {
   return out;
 }
 
-function entryOf(inline: DocInline[], pp: PProps, ctx: Ctx, ownIndent?: number, tabStops?: DocTabStop[]): ImportEntry {
-  const node: DocParagraph = inline.length
-    ? { type: "paragraph", attrs: paragraphAttrs(pp, tabStops), content: inline }
-    : { type: "paragraph", attrs: paragraphAttrs(pp, tabStops) };
+function entryOf(inline: DocInline[], pp: PProps, ctx: Ctx, face: Face, ownIndent?: number, tabStops?: DocTabStop[]): ImportEntry {
+  const attrs = paragraphAttrs(pp, lineHeightOf(inline, pp, face), tabStops);
+  const node: DocParagraph = inline.length ? { type: "paragraph", attrs, content: inline } : { type: "paragraph", attrs };
   const list = listOf(pp, ownIndent, ctx);
-  return list
+  const entry: ImportEntry = list
     ? { node, listType: list.listType, depth: list.depth, bullet: true, format: list.format, indentPt: list.indentPt }
     : { node, listType: null, depth: 0, bullet: false };
+  return { ...entry, style: pp.style, contextual: pp.contextual === true };
+}
+
+/**
+ * Word's contextual spacing: between two paragraphs of the same style, the space is dropped at the boundary when
+ * either one sets w:contextualSpacing (the space before the later one, and after the earlier one). Two list items of
+ * one style get no gap between them. Only paragraphs that are next to each other in the flow are compared.
+ */
+function dropContextualSpacing(entries: ImportEntry[]): void {
+  for (let i = 1; i < entries.length; i++) {
+    const prev = entries[i - 1];
+    const cur = entries[i];
+    if (prev.style !== cur.style) continue;
+    if (cur.contextual) delete cur.node.attrs.spaceBefore;
+    if (prev.contextual) delete prev.node.attrs.spaceAfter;
+  }
 }
 
 /**
@@ -1045,9 +1115,13 @@ export function docxToDoc(data: Uint8Array): { doc: DocJSON; page: PageSetup } {
   }
   const { ctx, body } = readContext(files);
   const sect = kid(body, "sectPr");
-  const entries: ImportEntry[] = sectionEntries("header", sect, ctx, files);
-  walkBody(body.kids, ctx, entries);
-  entries.push(...sectionEntries("footer", sect, ctx, files));
+  const header = sectionEntries("header", sect, ctx, files);
+  const main: ImportEntry[] = [];
+  walkBody(body.kids, ctx, main);
+  const footer = sectionEntries("footer", sect, ctx, files);
+  // Each part is its own flow: the last paragraph of the header is never paired with the first of the body.
+  for (const part of [header, main, footer]) dropContextualSpacing(part);
+  const entries = [...header, ...main, ...footer];
   const doc = normalizeDoc(buildDoc(entries));
   applyListFormats(doc, entries);
   return { doc, page: pageOf(body) };

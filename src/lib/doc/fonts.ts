@@ -71,3 +71,27 @@ function texOrGenericStack(name: string): string {
   const quoted = `"${name.replace(/["\\]/g, "\\$&")}"`;
   return `${quoted}, ${isSerifFamily(name) ? "serif" : "sans-serif"}`;
 }
+
+/**
+ * Word's single line height as a multiple of the font size, per family (ascent + descent + line gap, over the em).
+ * Word sets a "single" line with this, so a CSS line-height that matches it gives the same line pitch as Word.
+ */
+const WORD_SINGLE_LINE = new Map<string, number>([
+  ["calibri", 1.2207], ["carlito", 1.2207], ["calibri light", 1.2207],
+  ["arial", 1.1499], ["helvetica", 1.1499], ["arimo", 1.1499], ["liberation sans", 1.1499],
+  ["times new roman", 1.1499], ["times", 1.1499], ["tinos", 1.1499], ["liberation serif", 1.1499],
+  ["georgia", 1.1362], ["garamond", 1.1235], ["eb garamond", 1.1235], ["cambria", 1.1719], ["aptos", 1.2],
+  ["verdana", 1.2153], ["tahoma", 1.2071], ["trebuchet ms", 1.1611], ["segoe ui", 1.3301],
+  ["book antiqua", 1.1328], ["palatino", 1.1328], ["palatino linotype", 1.1328], ["century gothic", 1.2251],
+  ["gill sans mt", 1.1499], ["franklin gothic book", 1.1338], ["lato", 1.2], ["open sans", 1.3618],
+  ["roboto", 1.1719], ["helvetica neue", 1.2],
+]);
+
+/** Word's single line height for a family (see WORD_SINGLE_LINE). LaTeX faces are 1.2; unknown families 1.17. */
+export function wordSingleLineFactor(family: string | null | undefined): number {
+  const name = (family ?? "").trim().toLowerCase();
+  const known = WORD_SINGLE_LINE.get(name);
+  if (known !== undefined) return known;
+  if (isTexSerifFamily(name) || TEX_SANS.test(name)) return 1.2;
+  return 1.17;
+}

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Font } from "@react-pdf/renderer";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { cssFontStack, isSansFamily, isSerifFamily } from "@/lib/doc/fonts";
+import { cssFontStack, isSansFamily, isSerifFamily, wordSingleLineFactor } from "@/lib/doc/fonts";
 import { pdfFaceKind, pdfFontFor, registerPdfFonts } from "@/lib/pdfFonts";
 
 vi.mock("@react-pdf/renderer", () => ({
@@ -167,5 +167,28 @@ describe("the .docx importer's font path stays free of the PDF renderer", () => 
     for (const file of files) {
       expect(readFileSync(file, "utf8"), file).not.toMatch(/["']@react-pdf\/renderer["']/);
     }
+  });
+});
+
+describe("wordSingleLineFactor", () => {
+  it("gives a known family its Word single line height", () => {
+    expect(wordSingleLineFactor("Calibri")).toBe(1.2207);
+    expect(wordSingleLineFactor("Arial")).toBe(1.1499);
+  });
+
+  it("ignores case and surrounding spaces", () => {
+    expect(wordSingleLineFactor("  Times New ROMAN ")).toBe(1.1499);
+    expect(wordSingleLineFactor("segoe UI")).toBe(1.3301);
+  });
+
+  it("gives an unknown family 1.17, and a missing one too", () => {
+    expect(wordSingleLineFactor("Brand New Face")).toBe(1.17);
+    expect(wordSingleLineFactor(null)).toBe(1.17);
+    expect(wordSingleLineFactor("constructor")).toBe(1.17);
+  });
+
+  it("gives LaTeX faces 1.2", () => {
+    expect(wordSingleLineFactor("CMR10")).toBe(1.2);
+    expect(wordSingleLineFactor("Latin Modern Sans")).toBe(1.2);
   });
 });

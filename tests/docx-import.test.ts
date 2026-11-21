@@ -26,6 +26,8 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <w:pPr><w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs></w:pPr></w:style>
   <w:style w:type="paragraph" w:styleId="Indented"><w:name w:val="Indented"/><w:basedOn w:val="Normal"/>
     <w:pPr><w:ind w:left="1440"/></w:pPr></w:style>
+  <w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/>
+    <w:pPr><w:spacing w:before="60" w:after="60"/><w:contextualSpacing/></w:pPr></w:style>
   <w:style w:type="table" w:styleId="RuledTable"><w:name w:val="Ruled table"/>
     <w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/></w:pBdr></w:pPr></w:style>
 </w:styles>`;
@@ -162,7 +164,7 @@ const SAMPLE = `
 describe("docxToDoc", () => {
   it("maps paragraphs, runs, tabs, tables, lists, links and page margins", () => {
     const { doc, page } = docxToDoc(makeDocx(SAMPLE));
-    const lh = { lineHeight: 1 };
+    const lh = { lineHeight: 1.221 };
     expect(plain(doc)).toEqual({
       type: "doc",
       content: [
@@ -238,7 +240,7 @@ describe("docxToDoc", () => {
         },
         {
           type: "paragraph",
-          attrs: { ...lh, spaceBefore: 12, spaceAfter: 2 },
+          attrs: { lineHeight: 1.15, spaceBefore: 12, spaceAfter: 2 },
           content: [
             { type: "text", text: "Theme ", marks: [{ type: "bold" }, { type: "textStyle", attrs: { fontFamily: "Arial" } }] },
             { type: "text", text: "font", marks: [{ type: "bold" }, { type: "textStyle", attrs: { fontFamily: "Georgia" } }] },
@@ -265,7 +267,7 @@ describe("docxToDoc", () => {
       content: [
         {
           type: "bulletList",
-          content: [{ type: "listItem", content: [{ type: "paragraph", attrs: {}, content: [{ type: "text", text: "Plain", marks: [{ type: "italic" }] }] }] }],
+          content: [{ type: "listItem", content: [{ type: "paragraph", attrs: { lineHeight: 1.221 }, content: [{ type: "text", text: "Plain", marks: [{ type: "italic" }] }] }] }],
         },
       ],
     });
@@ -529,7 +531,7 @@ describe("numbered list formats", () => {
     const content = (plain(docxToDoc(makeDocx(body)).doc) as { content: { type: string; attrs?: unknown }[] }).content;
     expect(content.map((b) => [b.type, b.attrs])).toEqual([
       ["orderedList", { type: "a" }],
-      ["paragraph", { lineHeight: 1 }],
+      ["paragraph", { lineHeight: 1.221 }],
       ["orderedList", { type: "I" }],
     ]);
   });
@@ -547,8 +549,8 @@ describe("text boxes", () => {
     expect(plain(doc)).toEqual({
       type: "doc",
       content: [
-        { type: "paragraph", attrs: { lineHeight: 1 }, content: [{ type: "text", text: "Anchor" }] },
-        { type: "paragraph", attrs: { lineHeight: 1 }, content: [{ type: "text", text: "Sidebar" }] },
+        { type: "paragraph", attrs: { lineHeight: 1.221 }, content: [{ type: "text", text: "Anchor" }] },
+        { type: "paragraph", attrs: { lineHeight: 1.221 }, content: [{ type: "text", text: "Sidebar" }] },
       ],
     });
   });
@@ -640,5 +642,64 @@ describe("list indents from the numbering level and the paragraph", () => {
 
   it("gives no indent when neither the paragraph nor its level sets one", () => {
     expect(listsOf(item(1, "a"))[0].attrs).toBeUndefined();
+  });
+});
+
+/** The attributes of each paragraph, in order (lists flattened), without the paragraph ids. */
+function paragraphAttrsOf(doc: DocJSON): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const walk = (blocks: unknown[]) => {
+    for (const b of blocks as { type: string; attrs?: Record<string, unknown>; content?: unknown[] }[]) {
+      if (b.type === "paragraph") {
+        const attrs = { ...(b.attrs ?? {}) };
+        delete attrs.id;
+        out.push(attrs);
+      } else {
+        walk(b.content ?? []);
+      }
+    }
+  };
+  walk(doc.content);
+  return out;
+}
+
+describe("line height as Word draws it", () => {
+  const heights = (body: string, opts?: Parameters<typeof makeDocx>[1]) =>
+    paragraphAttrsOf(docxToDoc(makeDocx(body, opts)).doc).map((a) => a.lineHeight);
+  const spaced = (line: number, rule: string, size: number) =>
+    `<w:p><w:pPr><w:spacing w:line="${line}" w:lineRule="${rule}"/></w:pPr><w:r><w:rPr><w:sz w:val="${size}"/></w:rPr><w:t>x</w:t></w:r></w:p>`;
+
+  it("gives a single line in Calibri its font's own height: 1.221", () => {
+    expect(heights(para('<w:spacing w:line="240" w:lineRule="auto"/>'))).toEqual([1.221]);
+  });
+
+  it("scales Word's 259 line (1.08) on Calibri: 1.317", () => {
+    expect(heights(para('<w:spacing w:line="259" w:lineRule="auto"/>'))).toEqual([1.317]);
+  });
+
+  it("uses the font's single height when no line is set anywhere: Times New Roman is 1.15", () => {
+    const body = `<w:p><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/></w:rPr><w:t>x</w:t></w:r></w:p>`;
+    expect(heights(body, { styles: false })).toEqual([1.15]);
+  });
+
+  it("makes an exact line a fixed height over the text: 12 pt on 10 pt text is 1.2", () => {
+    expect(heights(spaced(240, "exact", 20))).toEqual([1.2]);
+  });
+
+  it("takes the larger of an at-least line and the font's height", () => {
+    // 12 pt is under Calibri's single height on 10 pt text, so the font wins; 20 pt is over it.
+    expect(heights(spaced(240, "atLeast", 20) + spaced(400, "atLeast", 20))).toEqual([1.221, 2]);
+  });
+
+  it("drops the space between two list items of one style when the style sets contextual spacing", () => {
+    const item = (text: string) =>
+      `<w:p><w:pPr><w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+    const { doc } = docxToDoc(makeDocx(item("one") + item("two") + TEXT_P("after")));
+    // ListParagraph is 3 pt before and after: the gap between the two items goes, the outer spacing stays.
+    expect(paragraphAttrsOf(doc)).toEqual([
+      { lineHeight: 1.221, spaceBefore: 3 },
+      { lineHeight: 1.221, spaceAfter: 3 },
+      { lineHeight: 1.221 },
+    ]);
   });
 });
