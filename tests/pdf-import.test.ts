@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createElement as h } from "react";
+import { Document, Page, Text, renderToBuffer } from "@react-pdf/renderer";
 import { flattenDoc, paragraphText } from "@/lib/doc/model";
 import { isValidDoc } from "@/lib/doc/extensions";
 import type { DocInline, DocJSON, DocList, DocMark, DocParagraph, DocText } from "@/lib/doc/types";
@@ -423,5 +425,83 @@ describe("pdfToDoc: columns keep their tabs, with a stop where each column start
     const row = paraNamed(doc, "Company");
     expect(row.content?.map((n) => n.type)).toEqual(["text", "tab", "text"]);
     expect(stopsOf(row)).toBeUndefined();
+  });
+});
+
+describe("pdfToDoc: the line pitch is measured from the source", () => {
+  const LONG =
+    "Built a forecasting model for regional housing prices using twelve years of county records, cutting the mean " +
+    "error of the quarterly estimates by a third and presenting the method to the planning committee each spring.";
+
+  /**
+   * Text blocks at a pitch of `ratio` times their 10-point size, each justified to the margin so its wrapped lines
+   * join into one paragraph. @react-pdf takes a Text's size from its own style (18 when unset), so it is set here.
+   */
+  function blocksPdf(blocks: { ratio: number; text: string; marginTop?: number }[]): Promise<Buffer> {
+    return renderToBuffer(
+      h(
+        Document,
+        null,
+        h(
+          Page,
+          { size: "LETTER", style: { paddingTop: 36, paddingBottom: 36, paddingLeft: 43, paddingRight: 43, fontFamily: "Times-Roman" } },
+          ...blocks.map((b, i) =>
+            h(Text, { key: i, style: { fontSize: 10, lineHeight: b.ratio, textAlign: "justify", marginTop: b.marginTop ?? 0 } }, b.text),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /** A wrapped paragraph at a pitch of `ratio`, then a second paragraph `gap` points lower. */
+  const pitchPdf = (ratio: number, gap = 0) =>
+    blocksPdf([
+      { ratio, text: LONG },
+      { ratio, text: "Second paragraph.", marginTop: gap },
+    ]);
+
+  const lineHeights = (doc: DocJSON) => flattenDoc(doc).map((p) => p.node.attrs.lineHeight);
+
+  it("writes the measured ratio on every paragraph of a 1.3-pitch page", async () => {
+    const { doc } = await pdfToDoc(bytes(await pitchPdf(1.3)));
+    expect(lineHeights(doc)).toEqual([1.3, 1.3]);
+  });
+
+  it("gives the space above a paragraph from the measured pitch: the margin, with the line boxes taken out", async () => {
+    const { doc } = await pdfToDoc(bytes(await pitchPdf(1.3, 10)));
+    expect(paraNamed(doc, "Second paragraph.").attrs.spaceBefore).toBe(10);
+  });
+
+  it("rounds the space above a paragraph to the half point, not the whole point", async () => {
+    const { doc } = await pdfToDoc(bytes(await pitchPdf(1.3, 6.3)));
+    expect(paraNamed(doc, "Second paragraph.").attrs.spaceBefore).toBe(6.5);
+  });
+
+  it("writes no lineHeight on a page at the editor's default pitch of 1.15", async () => {
+    const { doc } = await pdfToDoc(bytes(await pitchPdf(1.15)));
+    expect(lineHeights(doc)).toEqual([undefined, undefined]);
+  });
+
+  it("measures the ratio from single-line paragraphs when a page has no wrapped lines", async () => {
+    const lines = ["Item one", "Item two", "Item three", "Item four", "Item five"];
+    const { doc } = await pdfToDoc(
+      bytes(await blocksPdf(lines.map((text) => ({ ratio: 1.3, text })))),
+    );
+    expect(lineHeights(doc)).toEqual([1.3, 1.3, 1.3, 1.3, 1.3]);
+  });
+
+  it("gives a paragraph its own ratio when its wrapped lines clearly differ from the page's", async () => {
+    // Three gaps at 1.15 and two at 1.5: the page's median is 1.15, and the 1.5 paragraph keeps its own.
+    const { doc } = await pdfToDoc(
+      bytes(
+        await blocksPdf([
+          { ratio: 1.15, text: `${LONG} ${LONG} ${LONG}` },
+          { ratio: 1.5, text: LONG + " " + LONG, marginTop: 20 },
+        ]),
+      ),
+    );
+    const [first, second] = doc.content.filter((b): b is DocParagraph => b.type === "paragraph");
+    expect(first.attrs.lineHeight).toBeUndefined();
+    expect(second.attrs.lineHeight).toBe(1.5);
   });
 });

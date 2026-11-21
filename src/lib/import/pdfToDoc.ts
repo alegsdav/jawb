@@ -41,11 +41,19 @@ const RIGHT_PART_GAP = 1.5; // a gap this wide (em) before a part that ends at t
 const COLUMN_GAP = 1.5; // a gap this wide (em) between two parts of a line is a column: a tab, with a stop at the next part
 const SPACE_EM = 0.28; // a space is about this wide, in em (for turning a left-aligned gap back into spaces)
 const MARGIN_TOLERANCE = 0.05; // a line ends at the right margin when within this share of the content width
-const PITCH = 1.2; // a normal line pitch, in em
 const WRAP_PITCH = 1.6; // a line this close below the previous one continues its paragraph
 const TIGHT_PITCH = 1.25; // a wrapped line sits this close (em) below the one it continues: no space between paragraphs
 const WRAP_FILL = 0.85; // a line this full (share of the content width) is one a paragraph wrapped from
 const MAX_SPACE_BEFORE = 24;
+// The document's line ratio: the baseline pitch of its lines over their size, measured from the source (see documentLineRatio).
+const DEFAULT_LINE_RATIO = 1.15; // the editor's own line height: no lineHeight is written for a paragraph at this ratio
+const LINE_RATIO_SLACK = 0.01; // a ratio this close to the default is the default
+const MIN_LINE_RATIO = 1.0;
+const MAX_LINE_RATIO = 1.6;
+const MIN_WRAPPED_GAPS = 3; // fewer gaps between wrapped lines than this and the ratio comes from packed single lines
+const PACKED_MIN = 1.0; // a gap between single lines of one size, in em, counts as packed when within these bounds
+const PACKED_MAX = 1.45;
+const OWN_RATIO_DIFF = 0.08; // a paragraph whose wrapped lines differ from the document's ratio by this much keeps its own
 /** A wrapped bullet line starts at the bullet's text: within this much (em) of the estimated text start. */
 const BULLET_TEXT_TOLERANCE = 0.6;
 const RULE_MIN_WIDTH = 0.5; // a rule must span this share of the content width
@@ -167,7 +175,9 @@ export async function pdfToDoc(data: Uint8Array): Promise<{ doc: DocJSON; page: 
     for (let i = 1; i <= pdf.numPages; i++) raw.push(await readPage(await pdf.getPage(i)));
     if (!raw.some((p) => p.lines.length)) throw new NoTextError();
     const pages = withoutFurniture(raw);
-    const items = pages.flatMap((p) => pageItems(p));
+    const laid = pages.map(layOut);
+    const ratio = documentLineRatio(laid);
+    const items = laid.flatMap((l) => pageItems(l, ratio));
     return { doc: docFromItems(items), page: pageSetupOf(pages) };
   } finally {
     await task.destroy();
@@ -797,17 +807,71 @@ function alignOf(line: Line, left: number, right: number): ParagraphAttrs["textA
   return undefined;
 }
 
-/** Extra space above a paragraph, in points, from the gap to the previous line's baseline. */
-function spaceBeforeOf(prev: Para | undefined, para: Para): number | undefined {
+/** Extra space above a paragraph, in points, from the gap to the previous line's baseline, to the half point. */
+function spaceBeforeOf(prev: Para | undefined, para: Para, ratio: number): number | undefined {
   if (!prev) return undefined;
   const last = prev.lines[prev.lines.length - 1];
   const first = para.lines[0];
-  const extra = first.y - last.y - PITCH * Math.max(last.size, first.size);
-  return extra >= 2 ? Math.min(MAX_SPACE_BEFORE, Math.round(extra)) : undefined;
+  const extra = first.y - last.y - ratio * Math.max(last.size, first.size);
+  return extra >= 2 ? Math.min(MAX_SPACE_BEFORE, Math.round(extra * 2) / 2) : undefined;
 }
 
-/** Items of one page in reading order. Each rule either borders the paragraph just above it or is a rule block. */
-function pageItems(page: PageText): Item[] {
+const round3 = (x: number): number => Math.round(x * 1000) / 1000;
+
+/** A ratio kept within the range a line can have, to three decimals. */
+function clampRatio(r: number): number {
+  return round3(Math.min(MAX_LINE_RATIO, Math.max(MIN_LINE_RATIO, r)));
+}
+
+/** The line-height to write for a ratio, or undefined when it is the editor's default (then none is written). */
+function lineHeightOf(ratio: number): number | undefined {
+  return Math.abs(ratio - DEFAULT_LINE_RATIO) < LINE_RATIO_SLACK ? undefined : ratio;
+}
+
+/** The gaps between a paragraph's wrapped lines, each over the larger of its two lines' sizes. */
+function wrappedRatios(para: Para): number[] {
+  return para.lines.slice(1).map((l, i) => (l.y - para.lines[i].y) / Math.max(l.size, para.lines[i].size));
+}
+
+/**
+ * The document's line ratio, from the source's own pitch: the median gap between wrapped lines over all pages. When
+ * there are too few of those (a resume of short lines), the median gap between consecutive single-line paragraphs of
+ * one size that are tightly packed (bullets). Without either, the editor's default. Each page is read on its own, so
+ * the gap across a page break is never counted.
+ */
+function documentLineRatio(pages: Laid[]): number {
+  const wrapped = pages.flatMap((p) => p.paras.flatMap(wrappedRatios));
+  if (wrapped.length >= MIN_WRAPPED_GAPS) return clampRatio(median(wrapped));
+  const packed: number[] = [];
+  for (const { paras } of pages) {
+    for (let i = 1; i < paras.length; i++) {
+      const [prev, cur] = [paras[i - 1], paras[i]];
+      if (prev.lines.length !== 1 || cur.lines.length !== 1) continue;
+      const [a, b] = [prev.lines[0], cur.lines[0]];
+      if (Math.abs(a.size - b.size) > 0.5) continue;
+      const r = (b.y - a.y) / a.size;
+      if (r >= PACKED_MIN && r <= PACKED_MAX) packed.push(r);
+    }
+  }
+  if (packed.length) return clampRatio(median(packed));
+  // Too few wrapped gaps to trust on their own, but still the only measurement the page has.
+  if (wrapped.length) return clampRatio(median(wrapped));
+  return DEFAULT_LINE_RATIO;
+}
+
+/** The ratio a paragraph renders with: its own when its wrapped lines clearly differ from the document's, else the document's. */
+function paraRatio(para: Para, documentRatio: number): number {
+  const gaps = wrappedRatios(para);
+  if (!gaps.length) return documentRatio;
+  const own = clampRatio(median(gaps));
+  return Math.abs(own - documentRatio) > OWN_RATIO_DIFF ? own : documentRatio;
+}
+
+/** A page's lines laid into paragraphs, with the margins they are set between and the width of their content. */
+type Laid = { page: PageText; left: number; right: number; width: number; paras: Para[] };
+
+/** The page's lines as paragraphs: tabs resolved, underlines marked, wrapped lines joined (the segmentation). */
+function layOut(page: PageText): Laid {
   const left = Math.min(...page.lines.map((l) => l.x0));
   const right = contentRight(page.lines, left, page.width);
   const width = right - left;
@@ -815,6 +879,14 @@ function pageItems(page: PageText): Item[] {
   const lines = underlineLines(page.lines.map((l) => resolveTabs(l, right, width)), shortRules);
   const paras = paragraphsOf(lines, right, width);
   assignDepths(paras);
+  return { page, left, right, width, paras };
+}
+
+/**
+ * Items of one page in reading order, each paragraph set at the line ratio it renders with. Each rule either borders
+ * the paragraph just above it or is a rule block.
+ */
+function pageItems({ page, left, right, width, paras }: Laid, ratio: number): Item[] {
   const textStarts = bulletTextStarts(paras);
   const borders = new Set<Para>();
   const lineItems: Item[] = [];
@@ -824,13 +896,15 @@ function pageItems(page: PageText): Item[] {
     const near = above[above.length - 1];
     const gap = near ? rule.y - near.lines[near.lines.length - 1].y : Infinity;
     if (near && gap <= 1.5 * near.lines[near.lines.length - 1].size) borders.add(near);
-    else lineItems.push({ y: rule.y, entry: lineEntry() });
+    else lineItems.push({ y: rule.y, entry: lineEntry(ratio) });
   }
   const items: Item[] = paras.flatMap((para, i) => {
     const origin = para.bullet ? textStarts.get(para)! : left;
+    const own = paraRatio(para, ratio);
     const node = nodeOf(para, {
       align: para.bullet ? undefined : alignOf(para.lines[0], left, right),
-      spaceBefore: spaceBeforeOf(paras[i - 1], para),
+      spaceBefore: spaceBeforeOf(paras[i - 1], para, own),
+      lineHeight: lineHeightOf(own),
       border: borders.has(para),
       tabStops: tabStopsOf(para, origin),
     });
@@ -863,13 +937,20 @@ function bulletTextStarts(paras: Para[]): Map<Para, number> {
 
 function nodeOf(
   para: Para,
-  opts: { align: ParagraphAttrs["textAlign"]; spaceBefore: number | undefined; border: boolean; tabStops: TabStop[] | undefined },
+  opts: {
+    align: ParagraphAttrs["textAlign"];
+    spaceBefore: number | undefined;
+    lineHeight: number | undefined;
+    border: boolean;
+    tabStops: TabStop[] | undefined;
+  },
 ): DocParagraph | null {
   const content = inlineOf(para.pieces);
   if (!content.length) return null;
   const attrs: ParagraphAttrs = { id: newId() };
   if (opts.align) attrs.textAlign = opts.align;
   if (opts.spaceBefore) attrs.spaceBefore = opts.spaceBefore;
+  if (opts.lineHeight !== undefined) attrs.lineHeight = opts.lineHeight;
   if (opts.border) attrs.borderBottom = true;
   if (opts.tabStops) attrs.tabStops = opts.tabStops;
   return { type: "paragraph", attrs, content };
@@ -921,8 +1002,11 @@ function inlineOf(pieces: Piece[]): DocInline[] {
 }
 
 /** A horizontal line drawn on the page: an empty paragraph with a bottom border (the editor's representation). */
-function lineEntry(): FlatEntry {
-  return { node: { type: "paragraph", attrs: { id: newId(), borderBottom: true } }, listType: null, depth: 0, bullet: false };
+function lineEntry(ratio: number): FlatEntry {
+  const lineHeight = lineHeightOf(ratio);
+  const attrs: ParagraphAttrs = { id: newId(), borderBottom: true };
+  if (lineHeight !== undefined) attrs.lineHeight = lineHeight;
+  return { node: { type: "paragraph", attrs }, listType: null, depth: 0, bullet: false };
 }
 
 /**
