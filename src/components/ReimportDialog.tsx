@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef } from "react";
 import type { Resume } from "@/lib/types";
 import { ResumeImport, type ImportSource } from "@/components/ResumeImport";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 /**
  * Re-import the master resume in a centered dialog, so the page behind keeps its place. A successful import hands
@@ -17,6 +18,7 @@ export function ReimportDialog({
 }) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   // A text selection dragged out of the paste box ends on the overlay; that must not count as a click outside.

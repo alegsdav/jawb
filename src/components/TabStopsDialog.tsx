@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { MAX_TAB_STOPS, type TabStop, type TabStopAlign } from "@/lib/doc/types";
 import { TAB_STOP_MAX_IN, TAB_STOP_STEP_IN, nextStopRow, rowsFromStops, stopsFromRows, type StopRow } from "@/lib/tabStopsUi";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 const ALIGN_LABELS: Record<TabStopAlign, string> = { left: "Left", center: "Center", right: "Right" };
 
@@ -23,6 +24,8 @@ export function TabStopsDialog({
   const [error, setError] = useState<string | null>(null);
   const titleId = useId();
   const firstInput = useRef<HTMLInputElement>(null);
+  const panel = useRef<HTMLFormElement>(null);
+  useFocusTrap(panel);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -59,7 +62,7 @@ export function TabStopsDialog({
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:items-center"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <form onSubmit={submit} noValidate className="w-full max-w-md space-y-4 rounded-xl border border-border bg-bg p-5 shadow-xl">
+      <form ref={panel} onSubmit={submit} noValidate className="w-full max-w-md space-y-4 rounded-xl border border-border bg-bg p-5 shadow-xl">
         <div>
           <h2 id={titleId} className="font-semibold">Tab stops</h2>
           <p className="text-xs text-muted">

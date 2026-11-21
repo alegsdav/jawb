@@ -332,7 +332,8 @@ export default function TrackerPage() {
   const showFollowUp = shown.some((j) => j.follow_up_date);
   const tableCols = 4 + [showDeadline, showApplied, showFollowUp].filter(Boolean).length;
 
-  if (!ready) return <PageLoader />;
+  // Wait for the first jobs read too: painting the greeting and empty sections first made the page jump when the rows came in.
+  if (!ready || loading) return <PageLoader />;
 
   const noJobs = !loading && !loadError && jobs.length === 0;
   const allChips: { value: Filter; label: string }[] = [
@@ -403,7 +404,7 @@ export default function TrackerPage() {
 
             {/* Phones: one card per job */}
             <div className="sm:hidden space-y-2">
-              {loading ? null : shown.length === 0 ? (
+              {shown.length === 0 ? (
                 <p className="text-[13px] text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
               ) : (
                 shown.map((j) => {
@@ -462,9 +463,7 @@ export default function TrackerPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {loading ? (
-                    <tr><td className="h-12 p-3" colSpan={tableCols} /></tr>
-                  ) : shown.length === 0 ? (
+                  {shown.length === 0 ? (
                     <tr>
                       <td className="py-2.5 pr-4 text-muted" colSpan={tableCols}>{jobs.length ? "No jobs match this filter." : ""}</td>
                     </tr>

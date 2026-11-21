@@ -52,6 +52,13 @@ type Props = {
 
 const SEVERITY: Record<string, string> = { high: "text-bad", medium: "text-ok", low: "text-muted" };
 
+/**
+ * The daily analysis limit (a 429 from /api/analyze). Its sentence comes from limitMessage in src/lib/aiBudget.ts,
+ * and friendlyError passes it through unchanged. Retrying can't work until the window reopens, so no Retry for it.
+ */
+const ANALYSIS_LIMIT_RE = /^You've used all \d+ of your analyses for the last 24 hours\b|^AI analyses are turned off for your account\./;
+const isAnalysisLimit = (message: string) => ANALYSIS_LIMIT_RE.test(message);
+
 /** "5 minutes ago", "2 days ago". */
 function timeAgo(iso: string, now = Date.now()): string {
   const secs = Math.round((new Date(iso).getTime() - now) / 1000);
@@ -201,9 +208,11 @@ export function AnalysisPanel(p: Props) {
         {p.error && !p.analyzing && !p.quiet && (
           <div role="alert" className="space-y-2 text-[13px]">
             <p className="text-bad">{p.error}</p>
-            <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={p.onAnalyze} disabled={!!p.disabledReason}>
-              Retry
-            </button>
+            {!isAnalysisLimit(p.error) && (
+              <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={p.onAnalyze} disabled={!!p.disabledReason}>
+                Retry
+              </button>
+            )}
           </div>
         )}
         {p.quiet ? null : p.disabledReason ? (

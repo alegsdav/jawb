@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { type PageSetup } from "@/lib/doc/types";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import {
   MARGIN_RANGE_IN,
   MARGIN_SIDES,
@@ -35,6 +36,8 @@ export function PageSetupDialog({
   const [invalid, setInvalid] = useState(false);
   const titleId = useId();
   const firstInput = useRef<HTMLInputElement>(null);
+  const panel = useRef<HTMLFormElement>(null);
+  useFocusTrap(panel);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -66,6 +69,7 @@ export function PageSetupDialog({
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <form
+        ref={panel}
         onSubmit={submit}
         noValidate
         className="w-full max-w-md space-y-4 rounded-xl border border-border bg-bg p-5 shadow-xl"

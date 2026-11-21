@@ -48,6 +48,26 @@ export function FactsPanel({
     <section id="facts" className="space-y-3 scroll-mt-16" aria-label="Facts">
       <p className="text-[13px] text-muted">True things about you the AI uses. Never printed.</p>
 
+      {/* Above the list: a new fact lands at the top of the list, right under this box. */}
+      {status !== "missing" && (
+        <div className="space-y-2">
+          <textarea
+            id="fact-new"
+            aria-label="Add facts"
+            className="input w-full min-h-20"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void add();
+            }}
+            placeholder={"e.g. Automated a weekly Excel report with Python, saving ~4 hrs/week\nOne fact per line"}
+          />
+          <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" onClick={() => void add()} disabled={!draft.trim() || busy}>
+            {busy ? "Adding…" : `Add fact${draft.trim().includes("\n") ? "s" : ""}`}
+          </button>
+        </div>
+      )}
+
       {status === "missing" && <p role="status" className="text-[13px]">{FACTS_MIGRATION_HINT}</p>}
       {error && status !== "missing" && <p role="alert" className="text-[13px] text-bad">{error}</p>}
 
@@ -100,25 +120,6 @@ export function FactsPanel({
             ),
           )}
         </ul>
-      )}
-
-      {status !== "missing" && (
-        <div className="space-y-2">
-          <textarea
-            id="fact-new"
-            aria-label="Add facts"
-            className="input w-full min-h-20"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void add();
-            }}
-            placeholder={"e.g. Automated a weekly Excel report with Python, saving ~4 hrs/week\nOne fact per line"}
-          />
-          <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" onClick={() => void add()} disabled={!draft.trim() || busy}>
-            {busy ? "Adding…" : `Add fact${draft.trim().includes("\n") ? "s" : ""}`}
-          </button>
-        </div>
       )}
     </section>
   );
