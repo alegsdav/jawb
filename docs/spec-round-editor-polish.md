@@ -337,3 +337,37 @@ Local dev server against the real Supabase with the test account (see the QA bri
 above in a real browser at 1440×900 and 390×844, with screenshots, plus the import fidelity check: import the docx and
 PDF fixtures the QA brief names, and compare page fill against a LibreOffice rendering of the same docx
 (`soffice --headless --convert-to pdf`). Report defects with exact repro, file and suspected cause; do not fix code.
+
+---
+
+## R2. QA fixes (round 2)
+
+**Files:** `src/components/EditorSkeleton.tsx`, `src/app/(app)/loading.tsx`, `src/app/(app)/jobs/[id]/page.tsx` (only
+for item 3, and only if the cause is there), `src/components/ZoomFrame.tsx` (read-only unless needed).
+
+1. **Skeleton page 20px too high.** In the EditorSkeleton / BlankDocument, the blank `.doc-page` top is flush under the
+   toolbar (y=94 at 1440×900), but the real page's `.doc-page` sits at y≈114 (the real `EditorCanvas` gives the page a
+   top gap). The blank page must sit at exactly the same x/y/width as the real page at every zoom (Fit, 100%) and at
+   phone width. Fix by rendering the blank page through the same `EditorCanvas` + `ZoomFrame` path the real editor uses
+   (with a blank `.doc-page` child at the same classes/padding as ResumeDocument's page wrapper — read
+   ResumeDocument.tsx to copy the exact wrapper markup), instead of an approximation. Also the skeleton's font-size box
+   shows "11" where the real one shows "18" when the cursor isn't anywhere: make the skeleton's FormatToolbar show
+   whatever the real editor shows before any selection (check what `fmtState` the real ResumeDocument passes before
+   the editor has a selection; probably the first paragraph's format — if that can't be known without the document,
+   show an empty value in BOTH, i.e. make the disabled toolbar show no size when there's no selection; pick the
+   smaller change and say which).
+2. **Generic loader on first visit.** On a client navigation to an editor route whose `loading.tsx` the router hasn't
+   fetched yet, the parent `(app)/loading.tsx` shows `PageLoader`, blanking the whole content panel. Make
+   `(app)/loading.tsx` a client component that picks by `usePathname()`: `/jobs/…` → `<EditorSkeleton kind="job" />`,
+   `/resume…` → `<EditorSkeleton kind="master" />`, anything else → `<PageLoader />`. (Check which pathname is current
+   while the fallback shows; if it's the OLD path, this still beats the generic loader for editor→editor moves —
+   note what you observed in code/docs.)
+3. **Transient "Unsaved changes" after a job loads** (no edits made; settles to "Saved"). Find out whether it's caused
+   by the new effect in the job page that resets `resume`/`docLatest` on `[id]` (added this round) or by how the
+   autosave baseline is set when the tailored copy arrives. Fix only if this round caused it (compare with
+   `git show 695d8e6:"src/app/(app)/jobs/[id]/page.tsx"`, which is before the loader change); otherwise report the
+   cause and leave it.
+
+**Acceptance:** blank page and real page boxes identical (state the numbers you derived from the CSS/markup); first
+visit to an editor route shows the editor skeleton, not the generic loader; item 3 explained (and fixed if ours).
+tsc + eslint + `npx vitest run tests/loader.test.ts` clean.
