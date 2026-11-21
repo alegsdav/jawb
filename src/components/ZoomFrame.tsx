@@ -83,9 +83,13 @@ export function EditorCanvas({
   const reflow = reflowsAt(viewport);
   return (
     <div ref={ref} className={`overflow-x-auto ${plain ? "" : "bg-[#f1f3f4]"} ${className}`}>
-      <ZoomFrame scale={reflow ? 1 : pageScale(zoom, width)} reflow={reflow}>
-        {children}
-      </ZoomFrame>
+      {/* Until the canvas is measured (the server's HTML, before hydration) the page would draw at 100% and then
+          jump to its fitted size, or from the desktop page to the phone reflow; keep it invisible for that frame. */}
+      <div style={viewport ? undefined : { visibility: "hidden" }}>
+        <ZoomFrame scale={reflow ? 1 : pageScale(zoom, width)} reflow={reflow}>
+          {children}
+        </ZoomFrame>
+      </div>
       {footer}
     </div>
   );

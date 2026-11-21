@@ -194,6 +194,8 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   const [visits, setVisits] = useState<Visits>({});
   const [pins, setPins] = useState<string[]>([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  // False until the first read: the job list stays empty instead of flashing "Jobs you add show up here."
+  const [loaded, setLoaded] = useState(false);
   // Mirrors renamingId for handlers: Enter unmounts the input, and that blur must not save a second time.
   const renamingRef = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -285,13 +287,19 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       if (!alive) return;
       if (jobsRes.error) return console.warn("Sidebar: loading jobs failed:", jobsRes.error.message);
       const list = ((jobsRes.data ?? []) as unknown as Record<string, unknown>[]).map(navJob);
-      setJobs(list);
+      // The jobs go on screen together with the account's pins and visits, so the Pinned section doesn't pop in
+      // above the recent list a moment later (and push it down).
+      const showJobs = () => {
+        setJobs(list);
+        setLoaded(true);
+      };
 
       if (navRes.error) {
         if (!isMissingRelation(navRes.error)) return console.warn("Sidebar: loading the job order failed:", navRes.error.message);
         // Migration 0009 isn't run yet: visits and pins stay on this device, as before.
         if (navMode.current !== false) console.info("Sidebar: pins and visit order stay on this device until migration 0009 is run.");
         navMode.current = false;
+        showJobs();
         const pending = pendingOpens.current;
         pendingOpens.current = {};
         if (Object.keys(pending).length) {
@@ -343,8 +351,10 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       }
 
       // Skip the apply if any write overlapped this read: the write's own state is already on screen.
-      if (!alive || !quiet || navInFlight.current > 0 || navWrites.current !== writes) return;
+      if (!alive) return;
+      if (!quiet || navInFlight.current > 0 || navWrites.current !== writes) return showJobs();
       const state = navStateFromRows(rows);
+      showJobs();
       setVisits(state.visits);
       setPins(state.pins);
     };
@@ -602,11 +612,11 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
                     </ul>
                   </section>
                 )}
-                <section>
+                <section hidden={!loaded}>
                   <h2 className="px-2 pt-1 text-[13px] font-medium text-fg">{heading}</h2>
                   <ul className="space-y-px" aria-label={heading}>
                     {recent.map(row)}
-                    {!recent.length && !pinned.length && <li className="px-2 text-[13px] text-muted">Jobs you add show up here.</li>}
+                    {loaded && !recent.length && !pinned.length && <li className="px-2 text-[13px] text-muted">Jobs you add show up here.</li>}
                   </ul>
                 </section>
               </>
