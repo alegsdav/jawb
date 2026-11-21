@@ -1266,7 +1266,7 @@ export default function JobPage() {
 
         {/* Side panel: the comment card of the selected bullet at the top (only when there is one), then job details
             and the coach/facts/analysis panels. Its own scroll on lg+. Phones: the details come first; the panels show on the Analysis tab. */}
-        <aside className={`relative order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l ${resumeTab ? "max-lg:border-b-0 max-lg:p-0" : ""}`}>
+        <aside className={`relative order-first space-y-3 border-b border-border p-4 lg:order-none lg:space-y-4 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-l ${resumeTab ? "max-lg:space-y-0 max-lg:border-b-0 max-lg:p-0" : ""}`}>
           {/* Header block: the selected bullet's comment card is an overlay under it on desktop (absolute, so the
               rows above and the panel below never move). On phones it is a bottom sheet above the tab bar, so its
               slot stays shown on the Resume tab, where the header is hidden. */}
