@@ -135,6 +135,32 @@ ${args.answers || "(none)"}
 """`;
 }
 
+/**
+ * One light read of a fetched job link: is the page one open posting, closed, or something else (a list of
+ * openings, a careers home page)? Also returns the company, title and location as written in the posting.
+ */
+export function checkJobPagePrompt(pageText: string, pageTitle: string) {
+  return `You are checking a web page that a student gave as a link to a job posting.
+Decide whether the page is ONE specific job posting that is still open for applications.
+
+Answer "closed" if the page says the job is no longer available or accepting applications, has been filled or has
+expired, or shows an error such as "job not found".
+Answer "not_a_posting" if the page is a list of many openings, a company careers or home page, a search page, a login
+page, or anything other than a single job posting.
+Otherwise answer "open". When unsure, answer "open".
+
+Also extract the hiring company's name as people write it (e.g. "Belvedere Trading", not "belvederetrading"), the job
+title and the location, from the posting only. Use "" for anything not stated.
+
+Return ONLY JSON: {"status": "open" | "closed" | "not_a_posting", "company": "", "title": "", "location": ""}
+
+PAGE TITLE: ${pageTitle.slice(0, 200) || "(none)"}
+PAGE TEXT:
+"""
+${pageText.slice(0, 6000)}
+"""`;
+}
+
 export function extractJobMetaPrompt(text: string) {
   return `From this job posting, extract the company name, job title and location.
 Return ONLY JSON: {"company": "", "title": "", "location": ""}. Use "" for anything not stated.

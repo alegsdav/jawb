@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/server";
-import { fetchJobFromUrl, JobFetchError, parseJobUrl } from "@/lib/fetch-job";
+import {
+  CLOSED_MESSAGE,
+  cleanCompany,
+  cleanField,
+  fetchJobFromUrl,
+  JobClosedError,
+  JobFetchError,
+  LISTING_MESSAGE,
+  parseJobUrl,
+} from "@/lib/fetch-job";
 import { geminiJSON } from "@/lib/gemini";
-import { extractJobMetaPrompt } from "@/lib/prompts";
+import { checkJobPagePrompt, extractJobMetaPrompt } from "@/lib/prompts";
 import { pasteOnlySite } from "@/lib/jobsites";
 import { dbErrorMessage } from "@/lib/db";
 import { findDuplicateJob } from "@/lib/status";
@@ -13,6 +22,9 @@ export const maxDuration = 120;
 
 const bad = (error: string, status = 400, extra: Record<string, unknown> = {}) =>
   NextResponse.json({ error, ...extra }, { status });
+
+/** The AI's answer to checkJobPagePrompt. Every field is optional: a partial answer still counts. */
+type JobPageCheck = { status?: string; company?: string; title?: string; location?: string };
 
 /**
  * Create a job from a URL and/or pasted description. Returns { id }.
@@ -76,13 +88,38 @@ export async function POST(req: Request) {
   if (sameLink) return sameLink;
 
   try {
+    // Set when the AI page check ran; it replaces the meta call below for these links.
+    let checked = false;
     if (url && !description) {
       const f = await fetchJobFromUrl(url);
       description = f.description;
       meta = { company: f.company, title: f.title, location: f.location };
+      // Scraped or schema.org pages may be closed or be a list of openings. One light AI read decides that
+      // and fills gaps. Over the limit or failing, the job is still added with the fetched fields.
+      if (f.source === "jsonld" || f.source === "page") {
+        checked = true;
+        const check = await withAiBudget(supabase, { action: "intake_meta" }, (meter) =>
+          geminiJSON<JobPageCheck>(checkJobPagePrompt(description, f.title), { onUsage: meter.add }),
+        ).catch(() => null);
+        if (check?.status === "closed") return bad(CLOSED_MESSAGE, 410, { closed: true });
+        if (check?.status === "not_a_posting") return bad(LISTING_MESSAGE, 410, { closed: true });
+        if (check) {
+          const ai = {
+            company: cleanCompany(check.company ?? ""),
+            title: cleanField(check.title ?? ""),
+            location: cleanField(check.location ?? ""),
+          };
+          // A scraped page's "title" is its browser-tab title ("Software Engineer | Acme Careers"): the AI's reading of
+          // the posting wins there. Schema.org fields are the site's own, so they win and the AI only fills gaps.
+          meta =
+            f.source === "page"
+              ? { company: ai.company || meta.company, title: ai.title || meta.title, location: ai.location || meta.location }
+              : { company: meta.company || ai.company, title: meta.title || ai.title, location: meta.location || ai.location };
+        }
+      }
     }
     if (!description) return bad("Paste a job description or a job link.");
-    if (!meta.company || !meta.title) {
+    if (!checked && (!meta.company || !meta.title)) {
       // Light AI call. Over the limit (or any failure), the job is still added; the user fills in the details.
       const m = await withAiBudget(supabase, { action: "intake_meta" }, (meter) =>
         geminiJSON<typeof meta>(extractJobMetaPrompt(description), { onUsage: meter.add }),
@@ -96,6 +133,7 @@ export async function POST(req: Request) {
       }
     }
   } catch (e) {
+    if (e instanceof JobClosedError) return bad(e.message, 410, { closed: true });
     console.error("intake failed:", e);
     const message =
       e instanceof JobFetchError ? e.message : "Couldn't read that page. Paste the job description and keep the link.";
