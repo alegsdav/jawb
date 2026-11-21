@@ -8,6 +8,11 @@ export type FetchedJob = {
   company: string;
   location: string;
   description: string;
+  /**
+   * Where it came from. "board": a job-board API (Greenhouse, Lever) answered for this exact job, so it's an open
+   * posting and its fields are reliable. "jsonld": the page's schema.org JobPosting. "page": scraped page text.
+   */
+  source: "board" | "jsonld" | "page";
 };
 
 /**
@@ -15,6 +20,12 @@ export type FetchedJob = {
  * Anything else that goes wrong while fetching is shown as a generic "couldn't read that page".
  */
 export class JobFetchError extends Error {}
+
+/** The link is a posting that's closed (or a list of openings, not one job). Nothing should be saved. */
+export class JobClosedError extends JobFetchError {}
+
+export const CLOSED_MESSAGE = "This posting isn't open anymore, so it wasn't added.";
+export const LISTING_MESSAGE = "That link goes to a list of openings, not one job. Open the job you want and copy its link.";
 
 /** Time allowed for reading a job link, all redirects and API calls included. */
 export const FETCH_TIMEOUT_MS = 15000;
@@ -243,6 +254,7 @@ async function tryKnownBoards(u: URL, signal: AbortSignal): Promise<FetchedJob |
         signal,
       );
       return {
+        source: "board",
         title: j.title ?? "",
         company: j.company_name ?? board,
         location: j.location?.name ?? "",
@@ -258,6 +270,7 @@ async function tryKnownBoards(u: URL, signal: AbortSignal): Promise<FetchedJob |
       .map((l: { text: string; content: string }) => `${l.text}\n${htmlToText(l.content)}`)
       .join("\n\n");
     return {
+      source: "board",
       title: j.text ?? "",
       company: parts[0],
       location: j.categories?.location ?? "",
@@ -282,6 +295,7 @@ function fromJsonLd(html: string): FetchedJob | null {
         const loc = Array.isArray(jp.jobLocation) ? jp.jobLocation[0] : jp.jobLocation;
         const a = loc?.address ?? {};
         return {
+          source: "jsonld",
           title: jp.title ?? "",
           company: jp.hiringOrganization?.name ?? "",
           location: [a.addressLocality, a.addressRegion].filter(Boolean).join(", ") ||
@@ -333,5 +347,5 @@ export async function fetchJobFromUrl(rawUrl: string, timeoutMs = FETCH_TIMEOUT_
     throw new JobFetchError(pasteMessage(pasteOnlySite(finalUrl.href)));
   }
   const title = html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
-  return { title, company: "", location: "", description: text.slice(0, 20000) };
+  return { source: "page", title, company: "", location: "", description: text.slice(0, 20000) };
 }

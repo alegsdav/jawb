@@ -11,6 +11,8 @@ export type ApiResult<T> = {
   pasteOnly?: string;
   /** Set when the intake API found this job already on the list (resend with `force: true` to add it anyway). */
   duplicate?: { id: string; created_at: string };
+  /** Set when the intake API found the link's posting closed (or a list of openings): nothing was added. */
+  closed?: true;
 };
 
 /** Fired on `window` after any POST to our API, so the AI usage meter can refresh itself. */
@@ -56,6 +58,7 @@ async function readApi<T>(res: Response): Promise<ApiResult<T>> {
         error: friendlyError(json.error, fallback),
         ...(json.pasteOnly ? { pasteOnly: String(json.pasteOnly) } : {}),
         ...(dup && typeof dup.id === "string" ? { duplicate: { id: dup.id, created_at: String(dup.created_at ?? "") } } : {}),
+        ...(json.closed === true ? { closed: true as const } : {}),
       };
     }
     if (res.status === 504) return { error: "The AI took too long to respond. Try again in a moment." };
