@@ -236,6 +236,24 @@ export default function TrackerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The sidebar renamed or deleted a job: patch the list in place, so it updates without a reload.
+  useEffect(() => {
+    const onRenamed = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; title: string }>).detail;
+      if (d) setJobs((cur) => cur.map((j) => (j.id === d.id ? { ...j, title: d.title } : j)));
+    };
+    const onChanged = (e: Event) => {
+      const d = (e as CustomEvent<{ id?: string }>).detail;
+      if (d?.id) setJobs((cur) => cur.filter((j) => j.id !== d.id));
+    };
+    window.addEventListener("jawb:job-renamed", onRenamed);
+    window.addEventListener("jawb:jobs-changed", onChanged);
+    return () => {
+      window.removeEventListener("jawb:job-renamed", onRenamed);
+      window.removeEventListener("jawb:jobs-changed", onChanged);
+    };
+  }, []);
+
   useEffect(() => {
     if (!undo) return;
     const t = setTimeout(() => setUndo(null), 8000);

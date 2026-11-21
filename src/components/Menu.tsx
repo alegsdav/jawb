@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const CloseCtx = createContext<() => void>(() => {});
 
@@ -10,16 +11,23 @@ const CloseCtx = createContext<() => void>(() => {});
  * focus/blur, which iOS Safari doesn't give buttons) and flips to stay on screen at phone widths.
  */
 export function Menu({
-  label, children, buttonClassName = "btn btn-sm", title,
+  label, children, buttonClassName = "btn btn-sm", title, portal = false,
 }: {
   label: React.ReactNode;
   children: React.ReactNode;
   buttonClassName?: string;
   /** Accessible name when `label` isn't text (e.g. "⋯"). */
   title?: string;
+  /**
+   * Render the popup in document.body at a fixed position under the button, so a scrolling or clipping container
+   * (the sidebar's job list) can't cut it off. It closes when anything scrolls or the window resizes.
+   */
+  portal?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [alignLeft, setAlignLeft] = useState(false);
+  /** Portal mode: where the popup goes, in viewport pixels. */
+  const [at, setAt] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -30,7 +38,8 @@ export function Menu({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!wrap.current?.contains(t) && !list.current?.contains(t)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -38,13 +47,23 @@ export function Menu({
         button.current?.focus();
       }
     };
+    // A portalled popup is placed once; if the page or a list under it scrolls, close it rather than leave it behind.
+    const onMove = (e: Event) => {
+      if (!list.current?.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
+    if (portal) {
+      window.addEventListener("scroll", onMove, true);
+      window.addEventListener("resize", onMove);
+    }
     return () => {
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
     };
-  }, [open]);
+  }, [open, portal]);
 
   function toggle(e: React.MouseEvent) {
     if (open) return setOpen(false);
@@ -53,6 +72,13 @@ export function Menu({
     const r = button.current?.getBoundingClientRect();
     const popupWidth = 272;
     setAlignLeft(!r || r.left + popupWidth <= window.innerWidth);
+    if (portal && r) {
+      // Under the button (above it when the bottom of the window is too close), starting at its left edge,
+      // pulled back in so the popup stays on screen.
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - popupWidth - 8));
+      const roomBelow = window.innerHeight - r.bottom;
+      setAt(roomBelow < 200 ? { bottom: window.innerHeight - r.top + 4, left } : { top: r.bottom + 4, left });
+    }
     setOpen(true);
     // Keyboard activation (detail 0): move focus into the menu.
     if (e.detail === 0) requestAnimationFrame(() => items()[0]?.focus());
@@ -80,6 +106,24 @@ export function Menu({
     }
   }
 
+  const popup = open ? (
+    <div
+      ref={list}
+      id={id}
+      data-doc-keep-selection
+      role="menu"
+      onKeyDown={onListKey}
+      style={portal && at ? { position: "fixed", top: at.top, bottom: at.bottom, left: at.left } : undefined}
+      className={`float-dark z-40 min-w-56 max-w-[calc(100vw-1.5rem)] overflow-y-auto p-1 ${
+        portal
+          ? "max-h-[calc(100dvh-2rem)]"
+          : `absolute top-full mt-1 max-h-[calc(100dvh-8rem-56px)] lg:max-h-[calc(100dvh-8rem)] ${alignLeft ? "left-0" : "right-0"}`
+      }`}
+    >
+      <CloseCtx.Provider value={() => setOpen(false)}>{children}</CloseCtx.Provider>
+    </div>
+  ) : null;
+
   return (
     <div ref={wrap} className="relative">
       <button
@@ -96,20 +140,7 @@ export function Menu({
       >
         {label}
       </button>
-      {open && (
-        <div
-          ref={list}
-          id={id}
-          data-doc-keep-selection
-          role="menu"
-          onKeyDown={onListKey}
-          className={`float-dark absolute top-full z-40 mt-1 min-w-56 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-8rem-56px)] lg:max-h-[calc(100dvh-8rem)] overflow-y-auto p-1 ${
-            alignLeft ? "left-0" : "right-0"
-          }`}
-        >
-          <CloseCtx.Provider value={() => setOpen(false)}>{children}</CloseCtx.Provider>
-        </div>
-      )}
+      {portal && popup ? createPortal(popup, document.body) : popup}
     </div>
   );
 }

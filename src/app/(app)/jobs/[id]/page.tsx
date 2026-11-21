@@ -509,6 +509,19 @@ export default function JobPage() {
     };
   }, [refresh]);
 
+  // The sidebar renamed this job: take the saved row in as a server copy (not a local edit), so autosave doesn't write it back.
+  useEffect(() => {
+    const onRenamed = (e: Event) => {
+      if ((e as CustomEvent<{ id: string }>).detail?.id !== id) return;
+      serial(async () => {
+        const server = await readJob(supabase, id);
+        if (server) applyServerJob(server);
+      }).catch((err) => console.warn("Showing the renamed job failed:", err));
+    };
+    window.addEventListener("jawb:job-renamed", onRenamed);
+    return () => window.removeEventListener("jawb:job-renamed", onRenamed);
+  }, [serial, supabase, id, applyServerJob]);
+
   // Browser tab title: the job's name once it has loaded (the layout's "Jawb" until then).
   useEffect(() => {
     if (!job) return;
