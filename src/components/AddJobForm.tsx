@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { pasteOnlySite } from "@/lib/jobsites";
 import { postApi } from "@/lib/api";
 import { findDuplicateJob } from "@/lib/status";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import type { Job } from "@/lib/types";
 import { PlusIcon } from "./icons";
 
@@ -62,6 +63,44 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
     el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
   }, [input, mode]);
 
+  // The "Oops" window for a closed posting (or a list of openings): nothing was added, and closing it clears the box.
+  const [closedMsg, setClosedMsg] = useState<string | null>(null);
+  const closedOpen = closedMsg !== null;
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const okRef = useRef<HTMLButtonElement>(null);
+  /** Set on close, so focus goes back to the box once it's rendered again. */
+  const restoreFocus = useRef(false);
+  useFocusTrap(panel, closedOpen);
+
+  const closeOops = useCallback(() => {
+    setClosedMsg(null);
+    setMode("one");
+    setInput("");
+    setLink("");
+    setDesc("");
+    setReason(null);
+    setError("");
+    setDup(null);
+    restoreFocus.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!closedOpen) {
+      if (restoreFocus.current) {
+        restoreFocus.current = false;
+        box.current?.focus();
+      }
+      return;
+    }
+    okRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeOops();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [closedOpen, closeOops]);
+
   function toPaste(url: string, why: NonNullable<typeof reason>) {
     setError("");
     setMode("paste");
@@ -94,6 +133,11 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
       return;
     }
     setBusy(false);
+    if (r.closed) {
+      // Closed, or a list of openings: nothing was saved. Said in the window, not the line under the button.
+      setClosedMsg(r.error ?? "This link doesn't lead to an open job posting.");
+      return;
+    }
     if (r.duplicate) {
       setDup({ ...r.duplicate, body, fromUrl });
     } else if (r.pasteOnly) {
@@ -291,6 +335,34 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
       )}
 
       <JobMatchesPreview />
+
+      {closedOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={(e) => e.target === e.currentTarget && closeOops()}
+        >
+          <div ref={panel} className="mx-4 w-full max-w-sm space-y-4 rounded-xl border border-border bg-surface p-5 shadow-xl">
+            <div className="space-y-1.5">
+              <h2 id={titleId} className="text-[15px] font-semibold">
+                {/* LISTING_MESSAGE (fetch-job.ts): the link is a list of openings rather than a closed job. */}
+                {closedMsg?.startsWith("That link goes to a list") ? "Oops, that's not one job" : "Oops, this posting is closed"}
+              </h2>
+              <p className="text-[13px] text-muted">{closedMsg}</p>
+            </div>
+            <button
+              ref={okRef}
+              type="button"
+              className="flex h-10 w-full cursor-pointer items-center justify-center rounded-lg bg-fg text-[13px] font-medium text-surface transition-opacity hover:opacity-90 motion-reduce:transition-none"
+              onClick={closeOops}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
