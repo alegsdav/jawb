@@ -10,15 +10,14 @@ import { keepMineVersion, mergeResumes, sameJson, saveMasterDocument, type Merge
 import { PAGE_DEFAULTS } from "@/lib/doc/types";
 import type { Fact, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
-import { EditorSkeleton } from "@/components/EditorSkeleton";
+import { EditorSkeleton, MASTER_PANEL_TABS, MASTER_TABS } from "@/components/EditorSkeleton";
 import { EMPTY_FORMAT_STATE, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { FormatMenu } from "@/components/FormatMenus";
 import { CoachPanel } from "@/components/CoachPanel";
-import { SideTabs } from "@/components/SideTabs";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
 import { useResumeActions } from "@/components/ResumeActions";
 import {
-  countWords, DocToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, useEditorShortcuts, useZoom,
+  countWords, DocToolbar, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, ToolbarSep, useEditorShortcuts, useZoom,
 } from "@/components/DocToolbar";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
 import { PageSetupDialog } from "@/components/PageSetupDialog";
@@ -30,6 +29,7 @@ import { FlashToast } from "@/components/FlashToast";
 import { resumePlainText } from "@/lib/importReview";
 import { postApi } from "@/lib/api";
 import { FactsPanel } from "@/components/FactsPanel";
+import { MasterOverview } from "@/components/MasterOverview";
 import { Builder } from "@/components/Builder";
 import { Onboarding } from "@/components/Onboarding";
 import { UndoToast } from "@/components/UndoToast";
@@ -72,6 +72,8 @@ type Conflict = { server: Resume; serverUpdatedAt: string; conflicts: MergeConfl
  * the facts it added (Undo removes them). Shown as a toast with an Undo button for a few seconds.
  */
 type ImportReviewState = { fileName: string; before: Resume; addedFacts: Fact[]; rebuilt: boolean };
+
+type Tab = "resume" | "overview" | "facts";
 
 /** "Your master resume was changed elsewhere": autosave is paused until the user picks a side. */
 function ConflictBanner({
@@ -183,9 +185,11 @@ export default function MasterResumePage() {
   /** The entry or bullet the coaching panel is about (follows the selection; "Back" clears it). */
   const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
   const [coachStart, setCoachStart] = useState<"questions" | undefined>(undefined);
-  const [sideTab, setSideTab] = useState<"coach" | "facts">("coach");
-  /** Phones and tablets (below lg): which half is shown. Both stay mounted; the other is only hidden with CSS. */
-  const [phoneView, setPhoneView] = useState<"resume" | "coach">("resume");
+  /**
+   * The right panel's tab, and on phones and tablets (below lg) which half is shown: "resume" is the document,
+   * the others are the panel's tabs. Both halves stay mounted; the hidden one is only hidden with CSS.
+   */
+  const [tab, setTab] = useState<Tab>("resume");
   // Print and save shortcuts, and the File/toolbar actions. Hooks run before the early returns below.
   useEditorShortcuts({ onPrint: () => window.print(), onSave: () => {} });
   const actions = useResumeActions(resume ?? emptyResume(), `${resume?.header.name ?? ""} Resume`);
@@ -203,7 +207,8 @@ export default function MasterResumePage() {
       return cur && cur.entryId === next.entryId && cur.bulletId === next.bulletId ? cur : next;
     });
     setCoachStart(undefined);
-    setSideTab("coach");
+    // A bullet picked from the other tabs shows its Overview; on phones "Resume" stays, with the card as a sheet.
+    setTab((cur) => (cur === "resume" ? cur : "overview"));
   }, []);
 
   useEffect(() => {
@@ -315,8 +320,6 @@ export default function MasterResumePage() {
   if (!resume) return <EditorSkeleton kind="master" />;
 
   const empty = isEmptyResume(resume);
-  /** Onboarding (an empty master) has no switcher: the document view always shows. */
-  const view = empty ? "resume" : phoneView;
   const factCount = facts.facts.length;
   /** Puts an import (or a rebuild) on the master, merged so bullets keep their ids; returns the new master. */
   const takeImport = (r: Resume): Resume => {
@@ -400,99 +403,116 @@ export default function MasterResumePage() {
   const goDeeper = (sectionId: string, entryId: string) => {
     setCoachTarget({ sectionId, entryId, bulletId: null });
     setCoachStart("questions");
-    setSideTab("coach");
-    setPhoneView("coach");
-    document.getElementById("side-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTab("overview");
   };
   const deleteFact = async (f: Fact) => {
     if (await facts.remove([f.id])) setUndo({ message: "Fact deleted", restore: [f] });
   };
-  // The re-import dialog opens over whatever is behind it, so an empty master stays on onboarding under the dialog.
-  const onboarding = empty;
+  /** The first-draft and next-step notices, shown in the Overview above the bullet area. */
+  const notices = built || justImported ? (
+    <>
+      {built && (
+        <section aria-labelledby="built-heading" className="space-y-3 text-[15px]">
+          <h2 id="built-heading" className="font-medium text-fg">Your first draft is ready.</h2>
+          <p className="text-muted">
+            It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
+            a few quick questions help you find numbers worth adding.
+          </p>
+          <div className="flex flex-wrap gap-x-5 gap-y-2 text-[13px]">
+            {built
+              .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
+              .filter((x): x is NonNullable<typeof x> => !!x)
+              .map(({ sec, it }) => (
+                <button key={it.id} type="button" className="text-fg underline underline-offset-2" onClick={() => goDeeper(sec.id, it.id)}>
+                  Go deeper: {it.title || "this experience"}
+                </button>
+              ))}
+            <Link href="/" className="text-fg underline underline-offset-2">Next: add a job →</Link>
+            <button type="button" className="text-muted underline underline-offset-2 hover:text-fg" onClick={() => setBuilt(null)}>
+              Dismiss
+            </button>
+          </div>
+        </section>
+      )}
+      {justImported && (
+        <section aria-label="Next step" className="space-y-2 text-[15px]">
+          <p className="font-medium text-fg">Step 1 done — your master resume is ready.</p>
+          <p className="text-muted">Check it, then add the first job you want to tailor it for.</p>
+          <p className="text-[13px]">
+            <Link href="/" className="text-fg underline underline-offset-2">Next: add a job →</Link>
+          </p>
+        </section>
+      )}
+    </>
+  ) : null;
+
   /** One error toast at a time (until dismissed); the import or rebuild toast; then the notice. Most urgent first. */
   const errorText = error || actions.error;
   const errorToast = !!errorText && errorText !== dismissedError;
 
+  /** A row of quiet text tabs (13px, the active one underlined). */
+  const tabList = (tabs: readonly (readonly [Tab, string])[], current: Tab, className: string) => (
+    <div role="tablist" aria-label="Resume sections" className={className}>
+      {tabs.map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={current === key}
+          onClick={() => setTab(key)}
+          className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-[1.5px] px-0.5 text-[13px] transition-colors ${
+            current === key ? "border-fg text-fg" : "border-transparent text-muted hover:text-fg"
+          }`}
+        >
+          {key === "facts" ? `Facts (${factCount})` : label}
+        </button>
+      ))}
+    </div>
+  );
+
+  /** Fixed width: "Saved" / "Saving…" / "Unsaved changes" never resize the bar beside it. */
+  const saveBox = (
+    <div className="ml-auto flex w-[112px] shrink-0 items-center justify-end pl-2">
+      <SaveStatus status={conflict ? "error" : status} />
+    </div>
+  );
+
+  const topBar = (
+    <DocToolbar>
+      {/* Phones: the menus wrap onto a second line and get smaller padding, so each popup stays on screen. */}
+      <div className="ml-2 whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-44 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
+        <MenuBar>
+          <MenuBarMenu label="File">
+            <MenuItem onSelect={() => void actions.download()} disabled={actions.busy}>
+              Download PDF
+            </MenuItem>
+            <MenuItem onSelect={() => void actions.copy()}>Copy as text</MenuItem>
+            <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
+            <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume}>
+              Page setup…
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem onSelect={() => setImportOpen(true)}>Re-import resume</MenuItem>
+            <MenuItem onSelect={() => void rebuildInTemplate()} disabled={empty || rebuilding}>
+              {rebuilding ? "Rebuilding…" : "Rebuild in a clean template…"}
+            </MenuItem>
+          </MenuBarMenu>
+          <FormatMenu commandsRef={commandsRef} fmt={formatState} />
+        </MenuBar>
+      </div>
+      {saveBox}
+    </DocToolbar>
+  );
+
+  // Onboarding (an empty master isn't a document yet) takes the whole canvas. Otherwise the page is the job page's
+  // split: the document on the left, the panel on the right; phones show one of them at a time.
   return (
-    <div className="flex flex-col lg:h-full lg:min-h-0">
-      <DocToolbar>
-        <h1 className="sr-only">Master resume</h1>
-        {/* Phones: the menus wrap onto a second line and get smaller padding, so each popup stays on screen. */}
-        <div className="ml-1 flex min-w-0 items-center whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-36 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
-          <MenuBar>
-            <MenuBarMenu label="File">
-              <MenuItem onSelect={() => void actions.download()} disabled={actions.busy}>
-                Download PDF
-              </MenuItem>
-              <MenuItem onSelect={() => void actions.copy()}>Copy as text</MenuItem>
-              <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
-              <MenuItem onSelect={() => setPageSetupOpen(true)} disabled={!resume}>
-                Page setup…
-              </MenuItem>
-              <MenuSeparator />
-              <MenuItem onSelect={() => setImportOpen(true)}>Re-import resume</MenuItem>
-              <MenuItem onSelect={() => void rebuildInTemplate()} disabled={empty || rebuilding}>
-                {rebuilding ? "Rebuilding…" : "Rebuild in a clean template…"}
-              </MenuItem>
-            </MenuBarMenu>
-            <FormatMenu commandsRef={commandsRef} fmt={formatState} />
-          </MenuBar>
-        </div>
-        <div className="ml-auto flex min-w-0 items-center gap-2">
-          {/* Phones: the status gets whatever room the menus leave and truncates, so it never covers Help. */}
-          <span className="block min-w-0 max-w-[72px] overflow-hidden text-right sm:max-w-none [&>span]:block [&>span]:truncate">
-            <SaveStatus status={conflict ? "error" : status} />
-          </span>
-          <a
-            href="#side-panel"
-            className="hidden rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg sm:inline-flex xl:hidden"
-            onClick={() => {
-              setSideTab("facts");
-              setPhoneView("coach");
-            }}
-          >
-            Facts ({factCount})
-          </a>
-        </div>
-      </DocToolbar>
-
-      {/* Phones and tablets: switch between the document and the Coach and Facts panel. Hidden on xl+.
-          Above the formatting row, which the Coach view hides, so the tabs never move when you switch. */}
-      {!empty && (
-        <div role="tablist" aria-label="Resume sections" className="flex items-stretch gap-3 border-b border-border px-4 pt-1 xl:hidden">
-          {(["resume", "coach"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              role="tab"
-              aria-selected={view === v}
-              onClick={() => setPhoneView(v)}
-              className={`-mb-px flex shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0.5 py-1.5 text-[13px] transition-colors ${
-                view === v ? "border-fg text-fg" : "border-transparent text-muted hover:text-fg"
-              }`}
-            >
-              {v === "resume" ? "Resume" : "Coach & facts"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {!empty && (
-        // One row: the formatting controls (portalled into the slot), then Download PDF on the right. Phones scroll it sideways.
-        <div data-doc-keep-selection className={`${view === "coach" ? "hidden xl:flex" : "flex"} min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1`}>
-          <div ref={setSlot} className="flex shrink-0 items-center" />
-          <div className="ml-auto shrink-0">
-            <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>
-              <DownloadIcon />
-            </IconButton>
-          </div>
-        </div>
-      )}
-
-      <div className="flex flex-col lg:min-h-0 lg:flex-1 xl:flex-row">
-        {/* Document column: grey Docs canvas (scrolls on lg+), status bar pinned at its bottom. */}
-        <div className={`min-w-0 flex-1 flex-col lg:min-h-0 xl:flex ${view === "coach" ? "hidden" : "flex"}`}>
-          {onboarding ? (
+    // Phones: fill the viewport above the bottom tab bar (header + pb-16 in the app layout), so no grey band shows under the document.
+    <div className="flex min-h-[calc(100dvh-7rem)] flex-col sm:min-h-[calc(100dvh-7.5rem)] lg:h-full lg:min-h-0">
+      {empty ? (
+        <>
+          {topBar}
+          <div className="min-h-0 flex-1 lg:overflow-y-auto">
             <div className="mx-auto w-full max-w-[860px] space-y-3 px-4 pb-6 pt-4 sm:px-8">
               {building ? (
                 <Builder email={email} onBuilt={onBuilt} onCancel={() => setBuilding(false)} />
@@ -500,8 +520,32 @@ export default function MasterResumePage() {
                 <Onboarding onImported={onImported} onBuild={() => setBuilding(true)} />
               )}
             </div>
-          ) : (
-            <>
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
+          <section className={`flex min-w-0 flex-col lg:min-h-0 ${tab === "resume" ? "flex-1" : "max-lg:flex-none"}`}>
+            {/* Sticky together: on phones the tab row sits under the menus. */}
+            <div className="sticky top-0 z-10 shrink-0">
+              {topBar}
+              <div className="flex h-11 items-center border-b border-border bg-surface px-3 lg:hidden">
+                {tabList(MASTER_TABS, tab, "flex h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
+              </div>
+            </div>
+
+            <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${tab === "resume" ? "" : "max-lg:hidden"}`}>
+              <div className="shrink-0">
+                <EditorToolbar>
+                  {/* The formatting controls portal in here. */}
+                  <div ref={setSlot} className="flex shrink-0 items-center" />
+                  <ToolbarSep />
+                  <div className="ml-auto flex shrink-0 items-center gap-1">
+                    <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>
+                      <DownloadIcon />
+                    </IconButton>
+                  </div>
+                </EditorToolbar>
+              </div>
               <EditorCanvas zoom={zoom} className="min-w-0 flex-1 pb-6 lg:min-h-0 lg:overflow-auto">
                 <ResumeDocument
                   value={resume}
@@ -514,103 +558,67 @@ export default function MasterResumePage() {
                   onFormatStateChange={setFormatState}
                 />
               </EditorCanvas>
-              {!empty && (
-                <StatusBar
-                  pages={measure.pages}
-                  words={countWords(resume)}
-                  zoom={zoom}
-                  onZoom={setZoom}
-                />
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Side panel: hairline divider on lg+, its own scroll. Phones: stacked below the document. */}
-        <div
-          id="side-panel"
-          className={`scroll-mt-16 border-border lg:min-h-0 lg:overflow-y-auto xl:relative xl:w-[340px] xl:shrink-0 xl:space-y-4 xl:border-l xl:p-4 ${
-            view === "coach" ? "space-y-4 border-t p-4 lg:max-xl:flex-1 xl:border-t-0" : ""
-          }`}
-        >
-          {/* The selected bullet's comment card. Takes no room in flow: a bottom sheet on phones, an overlay on the panel on lg+.
-              Outside the hidden part below, so it still shows over the document on phones. */}
-          <div
-            ref={setCommentEl}
-            className="empty:hidden fixed inset-x-2 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-30 max-h-[45dvh] overflow-y-auto lg:inset-x-auto lg:right-4 lg:bottom-12 lg:w-[380px] xl:absolute xl:inset-x-4 xl:w-auto xl:bottom-auto xl:top-4 xl:z-20 xl:max-h-[70%]"
-          />
-          <div className={`space-y-4 ${view === "resume" ? "hidden xl:block" : ""}`}>
-            {built && (
-              <section aria-labelledby="built-heading" className="space-y-2 rounded-lg border border-border p-3 text-sm">
-                <h2 id="built-heading" className="font-medium">Your first draft is ready.</h2>
-                <p className="text-muted">
-                  It uses only what you told us. Replace each [placeholder] with a real number, or go deeper on an experience:
-                  a few quick questions help you find numbers worth adding.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {built
-                    .map((eid) => resume.sections.flatMap((sec) => sec.items.map((it) => ({ sec, it }))).find((x) => x.it.id === eid))
-                    .filter((x): x is NonNullable<typeof x> => !!x)
-                    .map(({ sec, it }) => (
-                      <button key={it.id} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => goDeeper(sec.id, it.id)}>
-                        Go deeper: {it.title || "this experience"}
-                      </button>
-                    ))}
-                  <Link href="/" className="btn btn-sm btn-primary min-h-10 sm:min-h-0">Next: add a job →</Link>
-                  <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => setBuilt(null)}>Dismiss</button>
-                </div>
-              </section>
-            )}
-            {justImported && (
-              <section aria-label="Next step" className="space-y-2 rounded-lg border border-border p-3 text-sm">
-                <p className="font-medium">Step 1 done — your master resume is ready.</p>
-                <p className="text-xs text-muted">Check it, then add the first job you want to tailor it for.</p>
-                <Link href="/" className="btn btn-sm btn-primary w-full">Next: add a job →</Link>
-              </section>
-            )}
-            <SideTabs
-              label="Panel"
-              value={sideTab}
-              onChange={setSideTab}
-              tabs={[
-                { key: "coach", label: "Coach" },
-                { key: "facts", label: `Facts (${factCount})` },
-              ]}
-            />
-            {sideTab === "coach" &&
-              (coachTarget ? (
-                <CoachPanel
-                  key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}:${coachStart ?? ""}`}
-                  resume={resume}
-                  resumeId={id}
-                  target={coachTarget}
-                  facts={facts}
-                  startWith={coachStart}
-                  onBack={() => setCoachTarget(null)}
-                  onInsert={insertBullet}
-                />
-              ) : (
-                <section aria-label="Coach">
-                  <p className="text-sm text-muted">Select a bullet to improve it.</p>
-                </section>
-              ))}
-            {sideTab === "facts" && (
-              <FactsPanel
-                facts={facts.facts}
-                status={facts.status}
-                error={facts.error}
-                onAdd={async (lines) => {
-                  const added = await facts.add(lines.map((text) => ({ text, source: "manual" })));
-                  if (added?.length) setNotice(`Saved ${plural(added.length, "fact")}.`);
-                  else if (added) setNotice("You already have that fact.");
-                }}
-                onEdit={facts.edit}
-                onDelete={deleteFact}
+              <StatusBar
+                pages={measure.pages}
+                words={countWords(resume)}
+                zoom={zoom}
+                onZoom={setZoom}
               />
-            )}
-          </div>
+            </div>
+          </section>
+
+          {/* The panel column. Its tab row is desktop only (phones have the row above); on phones it's hidden while the
+              document shows, but kept, so the comment card's sheet can still be portalled into it. */}
+          <section
+            className={`flex min-w-0 flex-col lg:min-h-0 lg:border-l lg:border-border ${
+              tab === "resume" ? "max-lg:invisible max-lg:h-0 max-lg:overflow-hidden" : "max-lg:flex-1"
+            }`}
+          >
+            <div className="hidden h-11 shrink-0 items-stretch border-b border-border px-6 lg:flex">
+              {tabList(MASTER_PANEL_TABS, tab === "resume" ? "overview" : tab, "flex h-full min-w-0 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
+            </div>
+            <div className="min-h-0 flex-1 lg:overflow-y-auto">
+              <div className="mx-auto w-full max-w-[600px] px-4 py-8 sm:px-8">
+                {(tab === "resume" || tab === "overview") && (
+                  <MasterOverview
+                    notices={notices}
+                    commentSheet={tab === "resume"}
+                    onCommentSlot={setCommentEl}
+                    coach={
+                      coachTarget && (
+                        <CoachPanel
+                          key={`${coachTarget.entryId}:${coachTarget.bulletId ?? ""}:${coachStart ?? ""}`}
+                          resume={resume}
+                          resumeId={id}
+                          target={coachTarget}
+                          facts={facts}
+                          startWith={coachStart}
+                          onBack={() => setCoachTarget(null)}
+                          onInsert={insertBullet}
+                        />
+                      )
+                    }
+                  />
+                )}
+                {tab === "facts" && (
+                  <FactsPanel
+                    facts={facts.facts}
+                    status={facts.status}
+                    error={facts.error}
+                    onAdd={async (lines) => {
+                      const added = await facts.add(lines.map((text) => ({ text, source: "manual" })));
+                      if (added?.length) setNotice(`Saved ${plural(added.length, "fact")}.`);
+                      else if (added) setNotice("You already have that fact.");
+                    }}
+                    onEdit={facts.edit}
+                    onDelete={deleteFact}
+                  />
+                )}
+              </div>
+            </div>
+          </section>
         </div>
-      </div>
+      )}
 
       {importOpen && <ReimportDialog onImported={onImported} onClose={() => setImportOpen(false)} />}
       {pageSetupOpen && resume && (

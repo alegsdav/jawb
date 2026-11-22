@@ -40,7 +40,9 @@ export function BulletCommentCard(props: {
       onClick={(e) => e.stopPropagation()}
       onFocus={(e) => e.stopPropagation()}
     >
-      <div className="flex items-start gap-2">
+      {/* Phones only (the sheet): on desktop the Overview's bullet area already shows the text, and clicking
+          elsewhere in the document closes the card, so this row would only hold a lone ×. */}
+      <div className="flex items-start gap-2 lg:hidden">
         <p className={`line-clamp-2 min-w-0 flex-1 text-xs ${muted}`}>{text.trim() || "Empty bullet"}</p>
         <button
           type="button"

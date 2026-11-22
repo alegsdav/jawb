@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode, type Ref } from "react";
 import type { Analysis, Fit, Job } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { SUBMITTED_STATUSES } from "@/lib/outcomes";
@@ -123,6 +123,10 @@ export type OverviewProps = {
   commentSheet: boolean;
   /** Receives the element the selected bullet's comment card is portalled into. */
   onCommentSlot: (el: HTMLDivElement | null) => void;
+  /** Receives the bullet area, so the page can scroll the panel to it when a bullet is selected. */
+  bulletAreaRef: Ref<HTMLDivElement>;
+  /** The selected bullet's text: shown at the top of the bullet area (the comment card drops its copy on desktop). */
+  selectedText: string | null;
   /** The selected bullet's questions (BulletQuestions), already filtered. */
   questions: ReactNode;
   /** The coach panel for the selected entry or bullet. */
@@ -162,14 +166,17 @@ export function JobOverview(p: OverviewProps) {
         style={fadeStyle(play, 120)}
       >
         {!p.applied && p.statusControl}
-        <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => p.onPatch({ deadline: v })} />
+        {/* Borderless like the status control: a hairline only on hover and focus. */}
+        <div className="[&_input]:border-transparent [&_input]:hover:border-border [&_input]:focus:border-fg/40">
+          <DeadlineField compact value={job.deadline ?? null} status={job.status} onChange={(v) => p.onPatch({ deadline: v })} />
+        </div>
         {SUBMITTED_STATUSES.has(job.status) && (
           <label className="inline-flex items-center gap-2">
             <span>Follow up</span>
             <input
               type="date"
               aria-label="Follow-up date"
-              className="ghost-input border-border text-[13px]"
+              className="ghost-input border-transparent hover:border-border focus:border-fg/40 text-[13px]"
               value={job.follow_up_date ?? ""}
               onChange={(e) => p.onPatch({ follow_up_date: e.target.value || null })}
             />
@@ -196,7 +203,7 @@ export function JobOverview(p: OverviewProps) {
       </div>
 
       {/* Fit and verdict. */}
-      <div className="mt-10 space-y-3">
+      <div className="mt-8 space-y-3">
         {p.quiet && (
           <p className="text-xs text-muted">
             {a ? "From before you applied. " : "No analysis was run before you applied. "}Turn on &ldquo;Keep editing&rdquo; to tailor this copy again.
@@ -251,7 +258,7 @@ export function JobOverview(p: OverviewProps) {
 
       {/* Keywords: plain words with a dot, not chips. */}
       {a && (
-        <div className={`mt-12 space-y-3 ${fadeClass(play)}`} style={fadeStyle(play, keywordsMs)}>
+        <div className={`mt-8 space-y-3 ${fadeClass(play)}`} style={fadeStyle(play, keywordsMs)}>
           <p className="text-[13px] font-medium text-fg">
             Missing from your resume <span className="font-normal text-muted">{missing.length}</span>
           </p>
@@ -271,7 +278,7 @@ export function JobOverview(p: OverviewProps) {
             <p className="text-[13px] text-muted">Your resume already covers the posting&apos;s keywords.</p>
           )}
           {matched.length > 0 && (
-            <div className="space-y-3 pt-4">
+            <div className="space-y-3 pt-2">
               <p className="text-[13px] text-muted">
                 Already on your resume <span>{matched.length}</span>
               </p>
@@ -290,7 +297,8 @@ export function JobOverview(p: OverviewProps) {
 
       {/* The bullet area: blank until a bullet is selected. Phones: the comment card is a sheet over the document
           while the Resume tab shows (fixed), otherwise it sits here like everything else. */}
-      <div className="mt-16 space-y-10">
+      <div ref={p.bulletAreaRef} className="mt-12 space-y-10">
+        {p.selectedText && <p className="line-clamp-2 text-[13px] text-muted">{p.selectedText.trim() || "Empty bullet"}</p>}
         <div
           ref={p.onCommentSlot}
           className={`empty:hidden ${

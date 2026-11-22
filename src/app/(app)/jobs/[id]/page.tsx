@@ -786,6 +786,19 @@ export default function JobPage() {
     setTab((cur) => (cur === "resume" ? cur : "overview"));
   }, []);
 
+  /** Desktop: a newly selected bullet brings its area to the top of the panel (never the document, never on phones). */
+  const bulletAreaRef = useRef<HTMLDivElement>(null);
+  const panelScrollRef = useRef<HTMLDivElement>(null);
+  const targetKey = coachTarget ? `${coachTarget.entryId}:${coachTarget.bulletId ?? ""}` : null;
+  useEffect(() => {
+    const box = panelScrollRef.current;
+    const area = bulletAreaRef.current;
+    if (!targetKey || !box || !area || !window.matchMedia("(min-width: 1024px)").matches) return;
+    const top = area.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 24;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    box.scrollTo({ top, behavior: reduce ? "auto" : "smooth" });
+  }, [targetKey]);
+
   /** Put a coached bullet on this tailored copy (an undo step); returns its id. */
   function insertBullet(target: CoachTarget, text: string, mode: "add" | "replace"): string | null {
     const cur = docLatest.current;
@@ -1014,6 +1027,8 @@ export default function JobPage() {
   const panelTab: Tab = tab === "resume" ? "overview" : tab;
   const quietText = "whitespace-nowrap rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg";
   const questionId = coachTarget?.bulletId ?? null;
+  /** The selected bullet's text, shown above its questions (the comment card shows it too, on phones only). */
+  const selectedText = questionId && resume ? (bulletTextMap(resume).get(questionId) ?? null) : null;
 
   /** The bullet's questions: unanswered ones about the selected bullet (none while applied: nothing is edited then). */
   const questions =
@@ -1261,7 +1276,7 @@ export default function JobPage() {
           <div className="hidden h-11 shrink-0 items-stretch border-b border-border px-6 lg:flex">
             {tabList(PANEL_TABS, panelTab, "flex h-full min-w-0 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
           </div>
-          <div className="min-h-0 flex-1 lg:overflow-y-auto">
+          <div ref={panelScrollRef} className="min-h-0 flex-1 lg:overflow-y-auto">
             <div className="mx-auto w-full max-w-[600px] px-4 py-8 sm:px-8">
               {panelTab === "overview" && (
                 <JobOverview
@@ -1282,6 +1297,8 @@ export default function JobPage() {
                   onOpenPosting={() => selectTab("job")}
                   commentSheet={tab === "resume"}
                   onCommentSlot={setCommentEl}
+                  bulletAreaRef={bulletAreaRef}
+                  selectedText={selectedText}
                   questions={questions}
                   coach={coach}
                 />
