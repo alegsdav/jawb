@@ -4,8 +4,9 @@ import type { ReactElement } from "react";
 import { RATING, type BulletInfo } from "./docDecorations";
 
 /**
- * The light Docs-style comment card for the bullet the caret is in, shown in the side panel. Shows the
- * AI's rating and note, the suggested edit, placeholder chips, and the master-resume comparison.
+ * The light Docs-style comment card for the bullet the caret is in. In the Overview on desktop it is plain text
+ * (no box); on phones it's a bottom sheet over the document, so it keeps its card chrome there. Shows the AI's
+ * rating and note, the suggested edit, placeholder chips, and the master-resume comparison.
  */
 export function BulletCommentCard(props: {
   bulletId: string;
@@ -34,12 +35,14 @@ export function BulletCommentCard(props: {
   return (
     <div
       data-comment-for={bulletId}
-      className="doc-ui rounded-lg border border-border bg-surface shadow-sm p-3 text-[13px] text-fg space-y-2"
+      className="doc-ui space-y-2 text-[13px] text-fg max-lg:rounded-lg max-lg:border max-lg:border-border max-lg:bg-surface max-lg:p-3 max-lg:shadow-sm"
       // The card isn't part of the text: clicks and focus inside it must not re-select the entry.
       onClick={(e) => e.stopPropagation()}
       onFocus={(e) => e.stopPropagation()}
     >
-      <div className="flex items-start gap-2">
+      {/* Phones only (the sheet): on desktop the Overview's bullet area already shows the text, and clicking
+          elsewhere in the document closes the card, so this row would only hold a lone ×. */}
+      <div className="flex items-start gap-2 lg:hidden">
         <p className={`line-clamp-2 min-w-0 flex-1 text-xs ${muted}`}>{text.trim() || "Empty bullet"}</p>
         <button
           type="button"

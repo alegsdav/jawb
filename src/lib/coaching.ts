@@ -272,32 +272,6 @@ export function validateQuestions(raw: unknown): CoachQuestion[] {
     .slice(0, 5);
 }
 
-// ---------- the job tab's priority list ----------
-
-export type PriorityItem = { bulletId: string; entry: string; text: string; rewrite: string; rating: "weak" | "ok"; note: string };
-
-/**
- * Suggested rewrites to review first on a job tab: weak bullets, then "okay" bullets that have a
- * rewrite, each with the full rewrite. Built from the page's bulletFeedback, so rejected, stale and
- * accepted suggestions are already gone. Document order within each group.
- */
-export function priorityItems(
-  resume: Resume,
-  feedback: Record<string, { state: string; rating: "strong" | "ok" | "weak"; note: string; suggestion: string }>,
-): PriorityItem[] {
-  const out: PriorityItem[] = [];
-  for (const sec of resume.sections) {
-    for (const it of sec.items) {
-      for (const b of it.bullets) {
-        const fb = feedback[b.id];
-        if (!fb?.suggestion || fb.rating === "strong") continue;
-        out.push({ bulletId: b.id, entry: it.title || it.subtitle || sec.title, text: b.text, rewrite: fb.suggestion, rating: fb.rating, note: fb.note });
-      }
-    }
-  }
-  return [...out.filter((p) => p.rating === "weak"), ...out.filter((p) => p.rating === "ok")];
-}
-
 // ---------- coaching requests ----------
 
 /**

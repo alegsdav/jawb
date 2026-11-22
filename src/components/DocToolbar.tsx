@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Resume } from "@/lib/types";
-import { Menu, Popover } from "./Menu";
+import { Menu } from "./Menu";
 import { RedoIcon, UndoIcon } from "./icons";
-import { RATING } from "./docDecorations";
+import { useSidebar } from "./sidebarState";
 
 /**
  * Editable document targets: the legacy field inputs, and the resume editor's contentEditable root
@@ -247,8 +247,15 @@ export function DocToolbar({
   /** Kept for compatibility. Selection actions now float inside the document, so nothing renders here. */
   onSlot?: (el: HTMLDivElement | null) => void;
 }) {
+  // Collapsed, the sidebar's expand button sits in the canvas's top-left corner (8px in, 28px wide): the bar starts
+  // clear of it, on lg and up only.
+  const { collapsed } = useSidebar();
   return (
-    <div className="doc-toolbar sticky top-0 z-10 flex h-11 shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-3">
+    <div
+      className={`doc-toolbar sticky top-0 z-10 flex h-11 shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-3 ${
+        collapsed ? "lg:pl-11" : ""
+      }`}
+    >
       {children}
     </div>
   );
@@ -316,34 +323,6 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
 /** "Feedback: On" / "Feedback: Off": the same words on the toolbar toggle and in the phone's More menu. */
 const toggleLabel = (label: string, on: boolean) => `${label}: ${on ? "On" : "Off"}`;
 
-
-/** "?" next to the document: what the dots, bars and highlights mean (kept off the page itself to save room). */
-/** A tint swatch: the same class the page uses, so the legend matches the text. */
-const Swatch = ({ tint }: { tint: string }) => <span className={`inline-block h-3 w-5 shrink-0 rounded-sm border border-border ${tint}`} />;
-
-export function FeedbackLegend({ analyzed, changedCount }: { analyzed: boolean; changedCount: number }) {
-  return (
-    <Popover label="?" title="What the colors mean" buttonClassName="btn btn-sm w-9 border-transparent bg-transparent sm:w-auto" panelClassName="w-72">
-      <ul className="space-y-1.5 text-xs">
-        {analyzed && (
-          <>
-            <li className="flex items-center gap-2"><Swatch tint={RATING.strong.tint} /> Strong bullet for this job</li>
-            <li className="flex items-center gap-2"><Swatch tint={RATING.ok.tint} /> Okay: could be stronger</li>
-            <li className="flex items-center gap-2"><Swatch tint={RATING.weak.tint} /> Weak: worth rewriting</li>
-          </>
-        )}
-        <li className="flex items-center gap-2">
-          <span className="inline-block h-3 w-[3px] shrink-0 rounded bg-[#2f5bd3]" /> Changed from your master resume
-          {changedCount ? ` (${changedCount})` : ""}
-        </li>
-        <li className="flex items-center gap-2">
-          <span className="shrink-0 rounded bg-[#ffd84d] px-1 text-[#3d2c00]">[N]</span> Placeholder: put your real number in
-        </li>
-      </ul>
-      <p className="mt-2 text-xs text-muted">Tap a bullet to see its feedback and suggested edits.</p>
-    </Popover>
-  );
-}
 
 /** "3 placeholders left": jumps to the first [placeholder] still in the document. Hidden at zero. */
 export function PlaceholderCount({ count, onClick }: { count: number; onClick: () => void }) {

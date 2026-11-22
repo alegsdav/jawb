@@ -4,7 +4,7 @@ import { buildDoc, findParagraph, flattenDoc, paragraph, type FlatEntry } from "
 import type { DocMark } from "@/lib/doc/types";
 import { emptyResume, resumeDoc, withDoc } from "@/lib/resume";
 import {
-  coachedFactPlan, coachRequest, exampleSegments, initialChoices, insertCoachedBullet, parseCoachRequest, priorityItems, resolveBlanks,
+  coachedFactPlan, coachRequest, exampleSegments, initialChoices, insertCoachedBullet, parseCoachRequest, resolveBlanks,
   validateExamples, validateQuestions, type CoachExample,
 } from "@/lib/coaching";
 import { factRow } from "@/lib/facts";
@@ -301,20 +301,5 @@ describe("questions and the priority list", () => {
     expect(qs).toHaveLength(5);
     expect(qs[0]).toEqual({ id: "cq0", question: "How many?", why: "Scope", tip: "Estimate" });
     expect(validateQuestions({})).toEqual([]);
-  });
-
-  it("priorityItems: weak first, then okay with a rewrite; strong and no-suggestion bullets left out", () => {
-    const r = resume();
-    r.sections[0].items[1].bullets = [{ id: "b3", text: "Built robots" }, { id: "b4", text: "Went to meetings" }];
-    const fb = {
-      b1: { state: "current", rating: "ok" as const, note: "Add scope", suggestion: "Tutored 30 calculus students" },
-      b2: { state: "current", rating: "strong" as const, note: "", suggestion: "x" },
-      b3: { state: "current", rating: "weak" as const, note: "Vague", suggestion: "Built [N] robots" },
-      b4: { state: "stale", rating: "weak" as const, note: "", suggestion: "" },
-    };
-    expect(priorityItems(r, fb).map((p) => [p.bulletId, p.rating, p.entry])).toEqual([
-      ["b3", "weak", "Robotics Club"],
-      ["b1", "ok", "Learning Center"],
-    ]);
   });
 });
