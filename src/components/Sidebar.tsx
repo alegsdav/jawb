@@ -12,7 +12,7 @@ import {
   saveVisits, searchJobs, sidebarJobs, visitsToUpload, withPin, withVisit, withoutPin, withoutVisit,
   type NavJob, type NavRow, type Visits,
 } from "@/lib/jobNav";
-import { SIDEBAR_COOKIE } from "@/lib/sidebar";
+import { useSidebar } from "./sidebarState";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { UsageMeter } from "./UsageMeter";
 import { DocIcon, HomeIcon, LineIcon, Logo, LogoutIcon, MoreIcon, PlusIcon, SearchIcon, SidebarIcon, UserIcon } from "./icons";
@@ -33,65 +33,11 @@ const ROW_IDLE = "text-muted hover:bg-fg/[0.04] hover:text-fg";
 const ROW_ACTIVE = "bg-fg/[0.05] font-medium text-fg";
 const ICON = "h-[15px] w-[15px] shrink-0";
 /**
- * A label beside an icon. Collapsing fades it out quickly while the shrinking width covers it; opening fades it in a
- * beat after the width starts growing. The icons never move: the same rows are drawn open and collapsed.
- */
-const fade = (collapsed: boolean) =>
-  `transition-opacity motion-reduce:transition-none ${collapsed ? "opacity-0 duration-100" : "opacity-100 duration-150 delay-100"}`;
-
-/**
- * A row's icon and label, laid out at the open row's inner width (208px minus the 8px padding each side) whatever the
- * row's current width: while the sidebar animates, the row (and its highlight) narrows and clips this, so the text
- * never re-flows or re-truncates frame by frame.
- */
-function RowInner({ children }: { children: React.ReactNode }) {
-  return <span className="flex w-[192px] shrink-0 items-center gap-2.5">{children}</span>;
-}
-/**
  * The row's ⋯ button (24px). Hidden until the row is hovered or focused, or its menu is open; always
  * shown on touch screens, which have no hover.
  */
 const MORE_BTN =
   "flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted opacity-0 transition-opacity duration-150 hover:bg-fg/[0.06] hover:text-fg focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none";
-
-/**
- * Save the choice in a cookie (a year), so the server renders the sidebar at the right width from the
- * first paint: no flash of the expanded sidebar on reload. Blocked cookies just mean it lasts this page view.
- */
-function saveCollapsed(collapsed: boolean) {
-  try {
-    document.cookie = `${SIDEBAR_COOKIE}=${collapsed ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`;
-  } catch {
-    /* blocked cookies */
-  }
-}
-
-/**
- * The name of a collapsed row, shown beside it on hover or keyboard focus (the label is hidden then).
- * The tooltip is position: fixed, so no overflow container can clip it (the jobs list scrolls, and an overflow-y
- * scroll box always clips on x too). Its top comes from the row's rect, written on mouse enter or focus.
- */
-function Tip({ label, show, children }: { label: string; show: boolean; children: React.ReactNode }) {
-  const tip = useRef<HTMLSpanElement>(null);
-  const place = (e: React.SyntheticEvent<HTMLSpanElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    if (tip.current) tip.current.style.top = `${r.top + r.height / 2}px`;
-  };
-  return (
-    <span className="group/tip relative block" onMouseEnter={place} onFocus={place}>
-      {children}
-      {show && (
-        <span
-          ref={tip}
-          aria-hidden
-          className="pointer-events-none fixed left-16 z-50 -translate-y-1/2 whitespace-nowrap rounded bg-fg px-2 py-1 text-[12px] leading-none text-surface opacity-0 transition-opacity duration-150 group-hover/tip:opacity-100 group-has-[:focus-visible]/tip:opacity-100 motion-reduce:transition-none"
-        >
-          {label}
-        </span>
-      )}
-    </span>
-  );
-}
 
 /** What a job row can ask the sidebar to do. */
 type RowActions = {
@@ -103,8 +49,8 @@ type RowActions = {
 };
 
 function JobRow({
-  j, active, pinned, renaming, collapsed, a,
-}: { j: NavJob; active: boolean; pinned: boolean; renaming: boolean; collapsed: boolean; a: RowActions }) {
+  j, active, pinned, renaming, a,
+}: { j: NavJob; active: boolean; pinned: boolean; renaming: boolean; a: RowActions }) {
   const title = j.title || "Untitled role";
   return (
     <li data-job-id={j.id} className="group relative">
@@ -128,26 +74,21 @@ function JobRow({
           className={`${ROW_BASE} w-full bg-fg/[0.06] px-2 text-fg outline-none ring-1 ring-fg/25`}
         />
       ) : (
-        <Tip label={j.company ? `${title} · ${j.company}` : title} show={collapsed}>
-          <Link
-            href={`/jobs/${j.id}`}
-            onClick={() => a.open(j.id)}
-            aria-current={active ? "page" : undefined}
-            className={`${JOB_ROW} overflow-hidden ${active ? ROW_ACTIVE : ROW_IDLE}`}
-          >
-            {/* The open width minus the padding and the ⋯ button's room: the title truncates once, not every frame. */}
-            <span className="flex w-[168px] shrink-0 items-center gap-2.5">
-              <LineIcon className={`${ICON} ${active ? "text-fg" : "text-muted"}`} />
-              <span className={`min-w-0 flex-1 truncate ${fade(collapsed)}`}>{title}</span>
-            </span>
-            <span className="sr-only">
-              {j.company ? `, ${j.company}` : ""}, {STATUS_LABEL[j.status]}
-              {pinned ? ", pinned" : ""}
-            </span>
-          </Link>
-        </Tip>
+        <Link
+          href={`/jobs/${j.id}`}
+          onClick={() => a.open(j.id)}
+          aria-current={active ? "page" : undefined}
+          className={`${JOB_ROW} overflow-hidden ${active ? ROW_ACTIVE : ROW_IDLE}`}
+        >
+          <LineIcon className={`${ICON} ${active ? "text-fg" : "text-muted"}`} />
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+          <span className="sr-only">
+            {j.company ? `, ${j.company}` : ""}, {STATUS_LABEL[j.status]}
+            {pinned ? ", pinned" : ""}
+          </span>
+        </Link>
       )}
-      {!renaming && !collapsed && (
+      {!renaming && (
         // The popup is portalled (fixed, in document.body): the sidebar's nav and scrolling job list would clip it.
         <div className="absolute right-1 top-1/2 -translate-y-1/2">
           <Menu label={<MoreIcon className="h-4 w-4" />} title={`More options for ${title}`} buttonClassName={MORE_BTN} portal>
@@ -174,16 +115,16 @@ function rowTops(nav: HTMLElement | null): Map<string, number> {
 /**
  * Desktop (lg and up) navigation, drawn on the grey window chrome: Dashboard, the master resume and
  * Add job; a search and the jobs (pinned ones first, then recent, or matching ones); then the usage meter
- * (only when running low), Account and Sign out. It collapses to a 56px icon rail (remembered in a cookie
- * the layout reads, so reloads don't flash). Phones and tablets keep the header and bottom tab bar instead.
+ * (only when running low), Account and Sign out. AppShell renders it only while open: collapsing removes it
+ * and the canvas takes the window. Phones and tablets keep the header and bottom tab bar instead.
  */
-export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boolean }) {
+export function Sidebar() {
   const supabase = useMemo(() => createClient(), []);
   const path = usePathname();
   const router = useRouter();
+  const { setCollapsed } = useSidebar();
   const [jobs, setJobs] = useState<NavJob[]>([]);
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState(initialCollapsed);
   // Per-device memory (localStorage): when each job was last opened, and the pinned job ids, newest pin first.
   const [visits, setVisits] = useState<Visits>({});
   const [pins, setPins] = useState<string[]>([]);
@@ -192,7 +133,6 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   const [loaded, setLoaded] = useState(false);
   // Mirrors renamingId for handlers: Enter unmounts the input, and that blur must not save a second time.
   const renamingRef = useRef<string | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
   const navRef = useRef<HTMLElement>(null);
   // Row tops captured by a click, so the reorder it causes can slide each row from where it was.
   const flipFrom = useRef<Map<string, number> | null>(null);
@@ -206,11 +146,6 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   const navInFlight = useRef(0);
   // The job a click just recorded, so the path change that click causes doesn't record it again.
   const clickedId = useRef<string | null>(null);
-
-  const setCollapsedAndSave = (next: boolean) => {
-    setCollapsed(next);
-    saveCollapsed(next);
-  };
 
   // Load this device's visits and pins (storage is not read during render: the server has none).
   useEffect(() => {
@@ -356,7 +291,8 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
   useLayoutEffect(() => {
     const from = flipFrom.current;
     flipFrom.current = null;
-    if (!from || !navRef.current) return;
+    // Hidden (display:none, sidebar collapsed): every rect reads 0, so there is nothing to slide from.
+    if (!from || !navRef.current || navRef.current.getClientRects().length === 0) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     navRef.current.querySelectorAll<HTMLElement>("li[data-job-id]").forEach((el) => {
       const old = from.get(el.dataset.jobId ?? "");
@@ -454,24 +390,18 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
 
   const actions: RowActions = { open: openJob, pin: togglePin, rename: startRename, endRename, remove: deleteJob };
 
-  // Only an open sidebar searches (collapsed, the box is just its icon); the query is kept for when it opens.
-  const searching = !collapsed && query.trim().length > 0;
+  const searching = query.trim().length > 0;
   const { pinned, recent } = sidebarJobs(jobs, pins, visits);
   const pinnedIds = new Set(pins);
   const shown = searching ? searchJobs(jobs, query, 20, visits) : recent;
   const heading = searching ? `Results (${shown.length})` : "Recent jobs";
-  const label = fade(collapsed);
 
-  /** A nav row: icon, then its label. Collapsed, only the icon shows (the label fades) and hovering names it. */
+  /** A nav row: icon, then its label. */
   const link = (href: string, text: string, active: boolean, icon: React.ReactNode) => (
-    <Tip label={text} show={collapsed}>
-      <Link href={href} aria-current={active ? "page" : undefined} className={`${ROW} overflow-hidden ${active ? ROW_ACTIVE : ROW_IDLE}`}>
-        <RowInner>
-          {icon}
-          <span className={label}>{text}</span>
-        </RowInner>
-      </Link>
-    </Tip>
+    <Link href={href} aria-current={active ? "page" : undefined} className={`${ROW} overflow-hidden ${active ? ROW_ACTIVE : ROW_IDLE}`}>
+      {icon}
+      <span>{text}</span>
+    </Link>
   );
 
   const row = (j: NavJob) => (
@@ -481,48 +411,28 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       active={path === `/jobs/${j.id}`}
       pinned={pinnedIds.has(j.id)}
       renaming={renamingId === j.id}
-      collapsed={collapsed}
       a={actions}
     />
   );
   const sectionHeading = (text: string) => (
-    <h2 className={`overflow-hidden whitespace-nowrap px-2 pt-1 text-[13px] font-medium text-fg ${label}`}>{text}</h2>
+    <h2 className="overflow-hidden whitespace-nowrap px-2 pt-1 text-[13px] font-medium text-fg">{text}</h2>
   );
 
   return (
-    <nav
-      ref={navRef}
-      aria-label="Workspace"
-      // One set of rows, open or collapsed: only the width animates. Rows are nowrap and left-aligned, so the icons
-      // stay exactly where they are while the edge slides over the (fading) labels.
-      className={`flex h-dvh flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px] transition-[width] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${collapsed ? "w-14" : "w-[232px]"}`}
-    >
-      {/* Top bar: the logo stays put. Open, the toggle sits on the right; collapsed, it sits over the logo and shows
-          when hovered or focused (the logo steps aside), like other apps' collapsed sidebars. */}
-      <div className="group/top relative flex h-8 items-center">
-        <Link
-          href="/"
-          tabIndex={collapsed ? -1 : undefined}
-          aria-hidden={collapsed || undefined}
-          className={`flex h-8 min-w-0 items-center gap-2 px-2 text-[13px] font-semibold text-fg transition-opacity duration-150 motion-reduce:transition-none ${
-            collapsed ? "group-has-[button:hover]/top:opacity-0 group-has-[button:focus-visible]/top:opacity-0" : ""
-          }`}
-        >
+    <nav ref={navRef} aria-label="Workspace" className="flex h-dvh w-[232px] flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[13px]">
+      <div className="flex h-8 items-center">
+        <Link href="/" className="flex h-8 min-w-0 items-center gap-2 px-2 text-[13px] font-semibold text-fg">
           <span className="shrink-0">
             <Logo size={18} />
           </span>
-          <span className={`overflow-hidden whitespace-nowrap ${label}`}>Jawb</span>
+          <span className="overflow-hidden whitespace-nowrap">Jawb</span>
         </Link>
         <button
           type="button"
-          onClick={() => setCollapsedAndSave(!collapsed)}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-expanded={!collapsed}
-          className={`flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg ${
-            collapsed
-              ? "absolute left-0.5 top-0.5 opacity-0 transition-opacity duration-150 hover:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
-              : `ml-auto ${label}`
-          }`}
+          onClick={() => setCollapsed(true)}
+          aria-label="Collapse sidebar"
+          aria-expanded
+          className="ml-auto flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg"
         >
           <SidebarIcon className={ICON} />
         </button>
@@ -536,29 +446,17 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
 
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         <label htmlFor="job-search" className="sr-only">Search jobs</label>
-        <Tip label="Search jobs" show={collapsed}>
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-            {/* Its own placeholder, so it fades with the labels (a native placeholder can't). */}
-            {!query && (
-              <span className={`pointer-events-none absolute left-7 top-1/2 -translate-y-1/2 whitespace-nowrap text-[13px] text-muted ${label}`}>
-                Search jobs
-              </span>
-            )}
-            <input
-              ref={searchRef}
-              id="job-search"
-              type="search"
-              // Collapsed, the box is just its icon: clicking it opens the sidebar with the caret already in the box.
-              onFocus={() => collapsed && setCollapsedAndSave(false)}
-              className={`h-7 w-full rounded-md border border-transparent bg-fg/[0.06] pl-7 pr-2 text-[13px] outline-none focus:border-fg/20 ${
-                collapsed ? "cursor-pointer text-transparent" : ""
-              }`}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-        </Tip>
+        <div className="relative">
+          <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+          <input
+            id="job-search"
+            type="search"
+            placeholder="Search jobs"
+            className="h-7 w-full rounded-md border border-transparent bg-fg/[0.06] pl-7 pr-2 text-[13px] outline-none focus:border-fg/20"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
 
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden">
           {searching ? (
@@ -584,7 +482,7 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
                 <ul className="space-y-px" aria-label={heading}>
                   {recent.map(row)}
                   {loaded && !recent.length && !pinned.length && (
-                    <li className={`whitespace-nowrap px-2 text-[13px] text-muted ${label}`}>Jobs you add show up here.</li>
+                    <li className="whitespace-nowrap px-2 text-[13px] text-muted">Jobs you add show up here.</li>
                   )}
                 </ul>
               </section>
@@ -594,23 +492,15 @@ export function Sidebar({ initialCollapsed = false }: { initialCollapsed?: boole
       </div>
 
       <div className="space-y-3">
-        {/* Laid out at the open width and faded when collapsed, so it never re-wraps into a tall column and the rows
-            below it stay put. */}
-        <div aria-hidden={collapsed || undefined} className={`w-[208px] ${label} ${collapsed ? "pointer-events-none" : ""}`}>
-          <UsageMeter />
-        </div>
+        <UsageMeter />
         <div className="space-y-px">
           {link("/account", "Account", path.startsWith("/account"), <UserIcon className={ICON} />)}
-          <Tip label="Sign out" show={collapsed}>
-            <form action={signOut}>
-              <button className={`${ROW} ${ROW_IDLE} cursor-pointer overflow-hidden`}>
-                <RowInner>
-                  <LogoutIcon className={ICON} />
-                  <span className={label}>Sign out</span>
-                </RowInner>
-              </button>
-            </form>
-          </Tip>
+          <form action={signOut}>
+            <button className={`${ROW} ${ROW_IDLE} cursor-pointer overflow-hidden`}>
+              <LogoutIcon className={ICON} />
+              <span>Sign out</span>
+            </button>
+          </form>
         </div>
       </div>
     </nav>

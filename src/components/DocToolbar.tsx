@@ -5,6 +5,7 @@ import type { Resume } from "@/lib/types";
 import { Menu, Popover } from "./Menu";
 import { RedoIcon, UndoIcon } from "./icons";
 import { RATING } from "./docDecorations";
+import { useSidebar } from "./sidebarState";
 
 /**
  * Editable document targets: the legacy field inputs, and the resume editor's contentEditable root
@@ -247,8 +248,15 @@ export function DocToolbar({
   /** Kept for compatibility. Selection actions now float inside the document, so nothing renders here. */
   onSlot?: (el: HTMLDivElement | null) => void;
 }) {
+  // Collapsed, the sidebar's expand button sits in the canvas's top-left corner (8px in, 28px wide): the bar starts
+  // clear of it, on lg and up only.
+  const { collapsed } = useSidebar();
   return (
-    <div className="doc-toolbar sticky top-0 z-10 flex h-11 shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-3">
+    <div
+      className={`doc-toolbar sticky top-0 z-10 flex h-11 shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-3 ${
+        collapsed ? "lg:pl-11" : ""
+      }`}
+    >
       {children}
     </div>
   );
