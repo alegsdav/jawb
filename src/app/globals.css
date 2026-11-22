@@ -227,8 +227,15 @@ body {
   from { opacity: 0; transform: translateX(-10px); }
   to { opacity: 1; transform: none; }
 }
+/* The job Overview's entrance (JobOverview, FlowText): blocks rise in once per analysis. */
+.ai-fade { animation: ai-fade-in 420ms cubic-bezier(0.2, 0, 0, 1) both; }
+@keyframes ai-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 @media (prefers-reduced-motion: reduce) {
   .editor-kind-slide { animation: none; }
+  .ai-fade { animation: none; }
 }
 
 /* The blank page shown while a document loads (BlankDocument): the real page's paper, with no text. On phones the
