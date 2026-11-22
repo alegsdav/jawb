@@ -110,9 +110,6 @@ export const AlignRightIcon = ({ className }: P) => (
 export const AlignJustifyIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
 );
-export const LineIcon = ({ className }: P) => (
-  <svg {...base} className={className}><path d="M5 8h14M5 12h14M5 16h9" /></svg>
-);
 export const BriefcaseIcon = ({ className }: P) => (
   <svg {...base} className={className}><rect x="3.5" y="7" width="17" height="12" rx="2.5" /><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" /></svg>
 );

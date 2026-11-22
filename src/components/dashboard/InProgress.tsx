@@ -5,7 +5,6 @@ import type { Job } from "@/lib/types";
 import { shortDate } from "@/lib/dates";
 import { inProgress, jobProgress, sortInProgress } from "@/lib/progress";
 import { deadlineUrgency } from "../DeadlineField";
-import { CompanyMark } from "../CompanyMark";
 
 function ProgressBar({ job }: { job: Job }) {
   const p = jobProgress(job);
@@ -49,19 +48,16 @@ export function InProgress({ jobs, today, loading }: { jobs: Job[]; today: strin
                   href={`/jobs/${j.id}`}
                   className="grid gap-2 py-2.5 hover:bg-surface-2/60 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-center sm:gap-4 rounded-md"
                 >
-                  <div className="min-w-0 flex items-center gap-3">
-                    <CompanyMark name={j.company} className="h-8 w-8 text-xs" />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium truncate">{j.title || "Untitled role"}</div>
-                      <p className="text-[13px] text-muted truncate">
-                        {j.company || "—"}
-                        {j.deadline && (
-                          <span className={urgency ? (urgency === "overdue" ? "text-bad" : "text-ok font-medium") : ""}>
-                            {" · "}Deadline {shortDate(j.deadline)}
-                          </span>
-                        )}
-                      </p>
-                    </div>
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{j.title || "Untitled role"}</div>
+                    <p className="text-[13px] text-muted truncate">
+                      {j.company || "—"}
+                      {j.deadline && (
+                        <span className={urgency ? (urgency === "overdue" ? "text-bad" : "text-ok font-medium") : ""}>
+                          {" · "}Deadline {shortDate(j.deadline)}
+                        </span>
+                      )}
+                    </p>
                   </div>
                   <ProgressBar job={j} />
                 </Link>
