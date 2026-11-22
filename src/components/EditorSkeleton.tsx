@@ -1,18 +1,14 @@
 "use client";
 
 import { PAGE_DEFAULTS } from "@/lib/doc/types";
-import { useKindSlide, type EditorKind } from "@/lib/editorKind";
 import { DocToolbar, EditorToolbar, IconButton, MenuBar, ToolbarSep, useZoom } from "./DocToolbar";
 import { FormatToolbar } from "./FormatToolbar";
-import { EMPTY_FORMAT_STATE, NOOP_COMMANDS, type FormatState } from "./editorTypes";
+import { EMPTY_FORMAT_STATE, NOOP_COMMANDS } from "./editorTypes";
 import { DownloadIcon } from "./icons";
 import { EditorCanvas } from "./ZoomFrame";
 
-/**
- * The toolbar's format state with no selection. The real editor shows the size of the text under its caret, which
- * the skeleton can't know, so the size box stays empty here rather than showing a size that's wrong.
- */
-const BLANK_FORMAT: FormatState = { ...EMPTY_FORMAT_STATE, fontSize: null };
+/** The two editor pages: a tailored job copy, or the master resume. */
+export type EditorKind = "job" | "master";
 
 /**
  * The job page's tabs. The page and its loading state both read them from here, so they can't drift apart.
@@ -65,15 +61,14 @@ export function StatusBarFrame() {
 
 /** A tab row as the real page draws it (same labels, same underline), with no clicks: the loading state's tabs. */
 function SkeletonTabs({
-  tabList, active, className, slide,
+  tabList, active, className,
 }: {
   tabList: readonly (readonly [string, string])[];
   active: string;
   className: string;
-  slide: ReturnType<typeof useKindSlide>;
 }) {
   return (
-    <div className={`${className} ${slide.className}`} style={slide.style}>
+    <div className={className}>
       {tabList.map(([key, label]) => (
         <span
           key={key}
@@ -88,10 +83,16 @@ function SkeletonTabs({
   );
 }
 
-/** Shell of the job editor: the same frame as the page (document column, panel column), with no data. */
-function JobSkeleton() {
-  const slide = useKindSlide("job");
-  const [zoom] = useZoom("job");
+/**
+ * Shell of an editor page: the same frame as the real page (document column, panel column), with no data. The job and
+ * master pages share it; only the tab lists and the document's zoom key differ, and the zoom key is shared too.
+ */
+function SkeletonFrame({ tabs, panelTabs, active }: {
+  tabs: readonly (readonly [string, string])[];
+  panelTabs: readonly (readonly [string, string])[];
+  active: string;
+}) {
+  const [zoom] = useZoom("doc");
   return (
     <div className="flex min-h-[calc(100dvh-7rem)] flex-col sm:min-h-[calc(100dvh-7.5rem)] lg:h-full lg:min-h-0">
       <div className="flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
@@ -106,12 +107,11 @@ function JobSkeleton() {
               </div>
               <div className="ml-auto w-[112px] shrink-0 items-center justify-end flex" />
             </DocToolbar>
-            <div className="flex h-11 items-center border-b border-border bg-surface px-3 lg:hidden">
+            <div className="flex h-9 items-center border-b border-border bg-surface px-3 lg:hidden">
               <SkeletonTabs
-                tabList={JOB_TABS}
-                active="resume"
+                tabList={tabs}
+                active={active}
                 className="flex h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                slide={slide}
               />
             </div>
           </div>
@@ -120,68 +120,10 @@ function JobSkeleton() {
             <div className="shrink-0">
               <EditorToolbar>
                 <div className="flex shrink-0 items-center">
-                  <FormatToolbar fmt={BLANK_FORMAT} commands={NOOP_COMMANDS} />
+                  <FormatToolbar fmt={EMPTY_FORMAT_STATE} commands={NOOP_COMMANDS} />
                 </div>
                 <ToolbarSep />
-                <div className={`ml-auto flex shrink-0 items-center gap-1 ${slide.className}`} style={slide.style}>
-                  <IconButton label="Download PDF" onClick={noop} disabled>
-                    <DownloadIcon />
-                  </IconButton>
-                </div>
-              </EditorToolbar>
-            </div>
-            <BlankDocument zoom={zoom} className="min-w-0 flex-1 lg:overflow-auto" />
-            <StatusBarFrame />
-          </div>
-        </section>
-
-        {/* The panel's frame: its tab row (desktop only; phones have the row above) and an empty column. */}
-        <section className="hidden min-w-0 flex-col border-l border-border lg:flex lg:min-h-0">
-          <div className="flex h-11 shrink-0 items-stretch border-b border-border px-6">
-            <SkeletonTabs tabList={PANEL_TABS} active="overview" className="flex h-full min-w-0 items-stretch gap-4 overflow-hidden" slide={slide} />
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-/** Shell of the master resume editor: the same frame as the page (document column, panel column), with no data. */
-function MasterSkeleton() {
-  const slide = useKindSlide("master");
-  const [zoom] = useZoom("resume");
-  return (
-    <div className="flex min-h-[calc(100dvh-7rem)] flex-col sm:min-h-[calc(100dvh-7.5rem)] lg:h-full lg:min-h-0">
-      <div className="flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
-        <section className="flex min-w-0 flex-col max-lg:flex-1 lg:min-h-0">
-          <div className="sticky top-0 z-10 shrink-0">
-            <DocToolbar>
-              <div className="ml-2 whitespace-normal sm:whitespace-nowrap [&>div]:gap-0 [&_button[aria-haspopup]]:px-1.5 [&_[role=menu]]:min-w-44 sm:[&>div]:gap-0.5 sm:[&_button[aria-haspopup]]:px-2 sm:[&_[role=menu]]:min-w-56">
-                <MenuBar>
-                  <MenuLabel>File</MenuLabel>
-                  <MenuLabel>Format</MenuLabel>
-                </MenuBar>
-              </div>
-              <div className="ml-auto w-[112px] shrink-0 items-center justify-end flex" />
-            </DocToolbar>
-            <div className="flex h-11 items-center border-b border-border bg-surface px-3 lg:hidden">
-              <SkeletonTabs
-                tabList={MASTER_TABS}
-                active="resume"
-                className="flex h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                slide={slide}
-              />
-            </div>
-          </div>
-
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col max-lg:hidden lg:flex">
-            <div className="shrink-0">
-              <EditorToolbar>
-                <div className="flex shrink-0 items-center">
-                  <FormatToolbar fmt={BLANK_FORMAT} commands={NOOP_COMMANDS} />
-                </div>
-                <ToolbarSep />
-                <div className={`ml-auto flex shrink-0 items-center gap-1 ${slide.className}`} style={slide.style}>
+                <div className="ml-auto flex shrink-0 items-center gap-1">
                   <IconButton label="Download PDF" onClick={noop} disabled>
                     <DownloadIcon />
                   </IconButton>
@@ -195,8 +137,8 @@ function MasterSkeleton() {
 
         {/* The panel's frame: its tab row (desktop only; phones have the row above) and an empty column. */}
         <section className="hidden min-w-0 flex-col border-l border-border lg:flex lg:min-h-0">
-          <div className="flex h-11 shrink-0 items-stretch border-b border-border px-6">
-            <SkeletonTabs tabList={MASTER_PANEL_TABS} active="overview" className="flex h-full min-w-0 items-stretch gap-4 overflow-hidden" slide={slide} />
+          <div className="flex h-9 shrink-0 items-stretch border-b border-border px-6">
+            <SkeletonTabs tabList={panelTabs} active="overview" className="flex h-full min-w-0 items-stretch gap-4 overflow-hidden" />
           </div>
         </section>
       </div>
@@ -206,5 +148,9 @@ function MasterSkeleton() {
 
 /** The loading state of either editor page, with the chrome the real page shows. Nothing in it is data. */
 export function EditorSkeleton({ kind }: { kind: EditorKind }) {
-  return kind === "job" ? <JobSkeleton /> : <MasterSkeleton />;
+  return kind === "job" ? (
+    <SkeletonFrame tabs={JOB_TABS} panelTabs={PANEL_TABS} active="resume" />
+  ) : (
+    <SkeletonFrame tabs={MASTER_TABS} panelTabs={MASTER_PANEL_TABS} active="resume" />
+  );
 }

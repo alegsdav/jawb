@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE_PT, DEFAULT_LINE_HEIGHT, type TabStop } from "@/lib/doc/types";
+import { DEFAULT_LINE_HEIGHT, type TabStop } from "@/lib/doc/types";
 
 /**
  * Contract between the resume editor (ResumeDocument) and the pages that host it.
@@ -46,10 +46,13 @@ export type DocCommands = {
 };
 
 /**
- * Formatting state at the selection, for the toolbar and the menus.
- * active: the editor has the selection (focused, or last focused and not dismissed).
+ * Formatting state at the selection, for the toolbar and the menus. The editor keeps it current while it is blurred,
+ * so the toolbar can show the selection's marks, font and size without the editor focused.
+ * active: the editor has the selection (focused, or last focused and not dismissed). Only the Format menu reads it, to
+ * disable its items; the formatting toolbar never disables a control.
  * bold/italic/underline: on for the whole selection (with a caret: what typing would produce).
- * fontFamily / fontSize: null when the selection mixes values. Text without a mark has the document defaults.
+ * fontFamily / fontSize: null when the selection mixes values, and before the editor exists (EMPTY_FORMAT_STATE), when
+ * the toolbar's selects are empty. Text without a mark has the document defaults.
  * align, list, lineHeight, borderBottom, tabStops: of the paragraph the selection starts in.
  */
 export type FormatState = {
@@ -71,13 +74,14 @@ export type FormatState = {
   canRedo: boolean;
 };
 
+/** The formatting state before the editor exists: inactive, the marks off, and empty font selects. */
 export const EMPTY_FORMAT_STATE: FormatState = {
   active: false,
   bold: false,
   italic: false,
   underline: false,
-  fontFamily: DEFAULT_FONT_FAMILY,
-  fontSize: DEFAULT_FONT_SIZE_PT,
+  fontFamily: null,
+  fontSize: null,
   align: "left",
   list: null,
   lineHeight: DEFAULT_LINE_HEIGHT,
