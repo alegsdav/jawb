@@ -115,8 +115,8 @@ function rowTops(nav: HTMLElement | null): Map<string, number> {
 /**
  * Desktop (lg and up) navigation, drawn on the grey window chrome: Dashboard, the master resume and
  * Add job; a search and the jobs (pinned ones first, then recent, or matching ones); then the usage meter
- * (only when running low), Account and Sign out. AppShell renders it only while open: collapsing removes it
- * and the canvas takes the window. Phones and tablets keep the header and bottom tab bar instead.
+ * (only when running low), Account and Sign out. AppShell hides it (display:none) while collapsed, so it stays
+ * mounted and keeps recording visits. Phones and tablets keep the header and bottom tab bar instead.
  */
 export function Sidebar() {
   const supabase = useMemo(() => createClient(), []);
