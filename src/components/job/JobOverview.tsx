@@ -4,7 +4,6 @@ import { useEffect, useRef, type CSSProperties, type ReactNode, type Ref } from 
 import type { Analysis, Fit, Job } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { SUBMITTED_STATUSES } from "@/lib/outcomes";
-import { plural } from "@/lib/facts";
 import { DeadlineField } from "../DeadlineField";
 import { Menu, MenuItem } from "../Menu";
 import { FlowText, flowEndMs } from "../FlowText";
@@ -108,8 +107,6 @@ export type OverviewProps = {
   analyzeError: string;
   /** Why analysis can't run yet (no resume loaded, or an empty master). */
   disabledReason?: string;
-  /** Suggested edits still waiting (stale ones excluded). */
-  pendingCount: number;
   /** Notices (migration hint, errors, applied state, pull-from-master plan), shown above the title. */
   notices: ReactNode;
   /** The quiet status control, shown while the job isn't applied. */
@@ -117,7 +114,6 @@ export type OverviewProps = {
   onPatch: (p: Partial<Job>) => void;
   onDelete: () => void;
   onAnalyze: () => void;
-  onAcceptAll: () => void;
   onOpenPosting: () => void;
   /** On phones the selected bullet's comment card is a sheet over the document; then its slot must stay fixed. */
   commentSheet: boolean;
@@ -232,14 +228,6 @@ export function JobOverview(p: OverviewProps) {
         {a?.analyzed_at && (
           <p className="text-xs text-muted" title={new Date(a.analyzed_at).toLocaleString()}>
             Analyzed {timeAgo(a.analyzed_at)}
-            {!p.quiet && p.pendingCount > 0 && (
-              <>
-                {" · "}
-                <button type="button" className="underline underline-offset-2 hover:text-fg" onClick={p.onAcceptAll}>
-                  Accept all {plural(p.pendingCount, "suggested edit")}
-                </button>
-              </>
-            )}
           </p>
         )}
         {!a && !p.analyzing && !p.analyzeError && !p.quiet && p.disabledReason && (
@@ -256,43 +244,30 @@ export function JobOverview(p: OverviewProps) {
         )}
       </div>
 
-      {/* Keywords: plain words with a dot, not chips. */}
-      {a && (
-        <div className={`mt-8 space-y-3 ${fadeClass(play)}`} style={fadeStyle(play, keywordsMs)}>
-          <p className="text-[13px] font-medium text-fg">
-            Missing from your resume <span className="font-normal text-muted">{missing.length}</span>
-          </p>
-          {missing.length > 0 ? (
-            <>
-              <ul className="flex flex-wrap gap-x-5 gap-y-2">
-                {missing.map((k) => (
-                  <li key={k} className="flex items-center gap-2 text-[15px] text-fg">
-                    <span aria-hidden className="size-1.5 rounded-full bg-bad" />
-                    {k}
-                  </li>
-                ))}
-              </ul>
-              <p className="text-xs text-muted">Add one only if it&apos;s true for you.</p>
-            </>
-          ) : (
-            <p className="text-[13px] text-muted">Your resume already covers the posting&apos;s keywords.</p>
-          )}
-          {matched.length > 0 && (
-            <div className="space-y-3 pt-2">
-              <p className="text-[13px] text-muted">
-                Already on your resume <span>{matched.length}</span>
-              </p>
-              <ul className="flex flex-wrap gap-x-4 gap-y-1.5">
-                {matched.map((k) => (
-                  <li key={k} className="flex items-center gap-2 text-[13px] text-muted">
-                    <span aria-hidden className="size-1.5 rounded-full bg-good" />
-                    {k}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
+      {/* Keywords: one wrapping row of pills, missing first. Spans, not buttons: nothing happens on click. */}
+      {a && missing.length + matched.length > 0 && (
+        <ul
+          aria-label="Keywords from the posting"
+          className={`mt-6 flex flex-wrap gap-1.5 ${fadeClass(play)}`}
+          style={fadeStyle(play, keywordsMs)}
+        >
+          {missing.map((k) => (
+            <li key={`missing:${k}`}>
+              <span title="Missing from your resume" className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[13px] text-fg border-bad/30 bg-bad/[0.07]">
+                <span className="sr-only">Missing from your resume: </span>
+                {k}
+              </span>
+            </li>
+          ))}
+          {matched.map((k) => (
+            <li key={`matched:${k}`}>
+              <span title="On your resume" className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[13px] text-fg border-good/30 bg-good/[0.07]">
+                <span className="sr-only">On your resume: </span>
+                {k}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
 
       {/* The bullet area: blank until a bullet is selected. Phones: the comment card is a sheet over the document
