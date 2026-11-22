@@ -53,7 +53,7 @@ export function AppShell({ initialCollapsed, children }: { initialCollapsed: boo
                 onClick={() => setCollapsed(false)}
                 aria-label="Expand sidebar"
                 aria-expanded={false}
-                className="absolute left-4 top-4 z-20 hidden h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg lg:flex"
+                className="absolute left-4 top-3 z-20 hidden h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-fg/[0.04] hover:text-fg lg:flex"
               >
                 <SidebarIcon className="h-[15px] w-[15px] shrink-0" />
               </button>

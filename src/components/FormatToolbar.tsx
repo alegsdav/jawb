@@ -13,18 +13,25 @@ const MARKS: { name: MarkName; title: string; glyph: string; glyphClass: string 
 
 const Sep = () => <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />;
 
-/** A toolbar button: stays enabled only with a selection; keeps the editor's focus on press. */
+/**
+ * A toolbar button. Never disabled: it keeps the editor's focus on press, so its command applies to the editor's
+ * selection, and `aria-pressed` shows the marks at that selection.
+ */
 const btnClass = "icon-btn shrink-0 aria-pressed:bg-surface-2 aria-pressed:text-fg";
 
 /**
  * The formatting toolbar: undo/redo, font, size, bold/italic/underline/link, lists. Alignment, indent, spacing,
  * tab stops and clear formatting live in the Format menu. One row that scrolls sideways on phones, never wraps.
+ *
+ * It always looks enabled, whether or not the editor has focus. The selects show the font and size of the selection
+ * (`fmt.fontFamily`, `fmt.fontSize`), which stay current while the editor is blurred. Every control runs a command
+ * from ResumeDocument's commandsFor, and each of those starts with `chain().focus()`: that refocuses the editor and
+ * applies the change to the selection it kept. Before the editor exists the pages pass EMPTY_FORMAT_STATE and
+ * NOOP_COMMANDS, so the same row shows with empty selects.
  */
 export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: DocCommands }) {
-  const on = fmt.active;
-  // Without a focused editor the marks describe nothing, so the selects go blank and nothing shows pressed.
-  const font = on ? fmt.fontFamily : null;
-  const size = on ? fmt.fontSize : null;
+  const font = fmt.fontFamily;
+  const size = fmt.fontSize;
   const families = font && !(FONT_CHOICES as readonly string[]).includes(font)
     ? [...FONT_CHOICES, font]
     : FONT_CHOICES;
@@ -34,12 +41,11 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
 
   return (
     <div role="toolbar" aria-label="Formatting" className="flex min-w-0 flex-nowrap items-center gap-1">
-      <UndoRedo undo={commands.undo} redo={commands.redo} canUndo={fmt.canUndo} canRedo={fmt.canRedo} />
+      <UndoRedo undo={commands.undo} redo={commands.redo} />
       <Sep />
       <select
         aria-label="Font"
-        className="h-8 w-36 max-w-full shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
-        disabled={!on}
+        className="h-8 w-32 max-w-full shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
         value={font ?? ""}
         onChange={(e) => commands.setFontFamily(e.target.value)}
       >
@@ -51,7 +57,6 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
       <select
         aria-label="Font size"
         className="h-8 w-[4.5rem] shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
-        disabled={!on}
         value={size === null ? "" : String(size)}
         onChange={(e) => commands.setSize(Number(e.target.value))}
       >
@@ -68,8 +73,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
           className={btnClass}
           title={b.title}
           aria-label={b.title}
-          aria-pressed={on && fmt[b.name]}
-          disabled={!on}
+          aria-pressed={fmt[b.name]}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => commands.toggleMark(b.name)}
         >
@@ -81,8 +85,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         className={btnClass}
         title="Insert link (Ctrl+K)"
         aria-label="Insert link"
-        aria-pressed={on && fmt.link !== null}
-        disabled={!on}
+        aria-pressed={fmt.link !== null}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => commands.openLink()}
       >
@@ -94,8 +97,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         className={btnClass}
         title="Bulleted list"
         aria-label="Bulleted list"
-        aria-pressed={on && fmt.list === "bullet"}
-        disabled={!on}
+        aria-pressed={fmt.list === "bullet"}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => commands.toggleList("bullet")}
       >
@@ -106,8 +108,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
         className={btnClass}
         title="Numbered list"
         aria-label="Numbered list"
-        aria-pressed={on && fmt.list === "ordered"}
-        disabled={!on}
+        aria-pressed={fmt.list === "ordered"}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => commands.toggleList("ordered")}
       >

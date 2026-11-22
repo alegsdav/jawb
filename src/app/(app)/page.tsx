@@ -20,7 +20,6 @@ import { deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
 import { Greeting, StatStrip } from "@/components/dashboard/Overview";
-import { CompanyMark } from "@/components/CompanyMark";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
@@ -416,7 +415,6 @@ export default function TrackerPage() {
                       className={`card p-3 space-y-2 ${urgency === "overdue" ? "border-l-4 border-l-bad" : urgency === "soon" ? "border-l-4 border-l-ok" : ""}`}
                     >
                       <div className="flex items-start gap-3">
-                        <CompanyMark name={j.company} className="h-8 w-8 text-xs" />
                         <Link href={`/jobs/${j.id}`} className="flex-1 min-w-0">
                           <div className="font-medium truncate">{j.title || "Untitled role"}</div>
                           <div className="text-[13px] text-muted truncate">
@@ -473,14 +471,11 @@ export default function TrackerPage() {
                       return (
                         <tr key={j.id} className="align-middle">
                           <td className="py-2.5 pr-4">
-                            <div className="flex min-w-60 items-center gap-3">
-                              <CompanyMark name={j.company} className="h-8 w-8 text-xs" />
-                              <div className="min-w-0">
-                                <Link href={`/jobs/${j.id}`} className="font-medium hover:underline">
-                                  {j.title || "Untitled role"}
-                                </Link>
-                                <div className="text-muted">{j.company}</div>
-                              </div>
+                            <div className="min-w-60">
+                              <Link href={`/jobs/${j.id}`} className="font-medium hover:underline">
+                                {j.title || "Untitled role"}
+                              </Link>
+                              <div className="text-muted">{j.company}</div>
                             </div>
                           </td>
                           <td className="py-2.5 pr-4 hidden 2xl:table-cell text-muted">{j.location}</td>

@@ -176,7 +176,7 @@ export default function MasterResumePage() {
   const commandsRef = useRef<DocCommands | null>(null);
   /** Formatting state of the caret's line (drives the Format menu's check marks and enabled states). */
   const [formatState, setFormatState] = useState<FormatState>(EMPTY_FORMAT_STATE);
-  const [zoom, setZoom] = useZoom("resume");
+  const [zoom, setZoom] = useZoom("doc");
   const facts = useFacts(supabase);
   const mirrorRef = useRef(facts.mirror);
   mirrorRef.current = facts.mirror;
@@ -528,7 +528,7 @@ export default function MasterResumePage() {
             {/* Sticky together: on phones the tab row sits under the menus. */}
             <div className="sticky top-0 z-10 shrink-0">
               {topBar}
-              <div className="flex h-11 items-center border-b border-border bg-surface px-3 lg:hidden">
+              <div className="flex h-9 items-center border-b border-border bg-surface px-3 lg:hidden">
                 {tabList(MASTER_TABS, tab, "flex h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
               </div>
             </div>
@@ -574,11 +574,11 @@ export default function MasterResumePage() {
               tab === "resume" ? "max-lg:invisible max-lg:h-0 max-lg:overflow-hidden" : "max-lg:flex-1"
             }`}
           >
-            <div className="hidden h-11 shrink-0 items-stretch border-b border-border px-6 lg:flex">
+            <div className="hidden h-9 shrink-0 items-stretch border-b border-border px-6 lg:flex">
               {tabList(MASTER_PANEL_TABS, tab === "resume" ? "overview" : tab, "flex h-full min-w-0 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
             </div>
             <div className="min-h-0 flex-1 lg:overflow-y-auto">
-              <div className="mx-auto w-full max-w-[600px] px-4 py-8 sm:px-8">
+              <div className="mx-auto w-full max-w-[760px] px-4 py-6 sm:px-6">
                 {(tab === "resume" || tab === "overview") && (
                   <MasterOverview
                     notices={notices}

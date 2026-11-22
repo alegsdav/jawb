@@ -120,7 +120,7 @@ export default function JobPage() {
   /** Side-panel slot for the selected bullet's comment card (like a Docs comment). */
   const [commentEl, setCommentEl] = useState<HTMLDivElement | null>(null);
   /** Document zoom (0 = Fit), remembered per document. */
-  const [zoom, setZoom] = useZoom("job");
+  const [zoom, setZoom] = useZoom("doc");
   useEditorShortcuts({ onPrint: () => window.print(), onSave: () => {} });
   /** Page-level problem, always plain language. Cleared by the next successful action or a tab change. */
   const [error, setError] = useState("");
@@ -564,7 +564,8 @@ export default function JobPage() {
   }
   const quiet = applied && !reapply;
   const feedback = useMemo(() => bulletFeedback(analysis, resume, loadedTexts), [analysis, resume, loadedTexts]);
-  // Document order, for "Review" and "Accept all". Stale or rejected suggestions are already left out.
+  // Open suggestions in document order: their count is saved as the job's tailoring progress (see progressFields).
+  // Stale or rejected suggestions are already left out.
   const pending = useMemo(() => {
     if (!resume || quiet) return [];
     return [...bulletTextMap(resume).keys()].filter((bid) => feedback[bid]?.suggestion).map((bid) => ({ id: bid, rewrite: feedback[bid].suggestion }));
@@ -671,24 +672,9 @@ export default function JobPage() {
     setError("");
   }
 
-  function acceptAll() {
-    if (!resume || !pending.length) return;
-    let next = resume;
-    for (const p of pending) next = replaceBullet(next, p.id, p.rewrite);
-    setResume(next);
-    showFlash(`Accepted ${plural(pending.length, "suggested edit")} (Undo to go back)`);
-  }
-
   /** Phones show one column at a time: bring the document up. Desktop always shows it, so the panel stays put. */
   function showDocument() {
     if (!window.matchMedia("(min-width: 1024px)").matches) selectTab("resume");
-  }
-
-  function reviewNext() {
-    const next = pending[0];
-    if (!next) return;
-    showDocument();
-    setReveal({ id: next.id, n: Date.now() });
   }
 
   /** Jump to the first [placeholder] in the document and select it, ready to type over. */
@@ -1176,7 +1162,7 @@ export default function JobPage() {
           {/* Sticky together: on phones the tab row sits under the menus. */}
           <div className="sticky top-0 z-10 shrink-0">
             {topBar}
-            <div className="flex h-11 items-center border-b border-border bg-surface px-3 lg:hidden">
+            <div className="flex h-9 items-center border-b border-border bg-surface px-3 lg:hidden">
               {tabList(JOB_TABS, tab, "flex h-full min-w-0 flex-1 items-stretch gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
             </div>
           </div>
@@ -1187,18 +1173,15 @@ export default function JobPage() {
                 <EditorToolbar>
                   {/* Document actions (add, move, delete) and the formatting controls portal in here: one fixed group. */}
                   <div ref={setSlot} className="flex shrink-0 items-center">
-                    {/* Until the copy loads, the same toolbar shows disabled, so it doesn't appear later. */}
+                    {/* Until the copy loads, the same toolbar shows, with empty selects, so it doesn't appear later. */}
                     {!resume && <FormatToolbar fmt={EMPTY_FORMAT_STATE} commands={NOOP_COMMANDS} />}
                   </div>
                   <ToolbarSep />
+                  {docBar && !quiet && <Toggle on={showFeedback} onChange={setShowFeedback} label="Highlights" />}
                   <div className="ml-auto flex shrink-0 items-center gap-1">
                     {docBar && (
                       <>
-                        {quiet ? null : pending.length > 0 ? (
-                          <button type="button" className={quietText} onClick={reviewNext}>
-                            <span>Review<span className="sm:hidden"> {pending.length}</span></span>
-                          </button>
-                        ) : analyzing ? (
+                        {quiet ? null : analyzing ? (
                           <span className="px-1 text-xs whitespace-nowrap text-muted">
                             Analyzing<span className="hidden sm:inline"> against the job</span>…
                           </span>
@@ -1209,7 +1192,6 @@ export default function JobPage() {
                         ) : null}
                         {!quiet && <PlaceholderCount count={placeholderCount} onClick={goToPlaceholder} />}
                         <span className="hidden md:inline-flex"><PageCount {...measure} /></span>
-                        {!quiet && <Toggle on={showFeedback} onChange={setShowFeedback} label="Highlights" />}
                       </>
                     )}
                     <IconButton label={pdfBusy ? "Building PDF…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy || !resume}>
@@ -1231,12 +1213,12 @@ export default function JobPage() {
               </div>
             ) : !resume ? (
               <>
-                <BlankDocument zoom={zoom} className="min-w-0 flex-1 lg:overflow-auto" />
+                <BlankDocument zoom={zoom} className="min-w-0 flex-1 pb-6 lg:min-h-0 lg:overflow-auto" />
                 <StatusBarFrame />
               </>
             ) : (
               <>
-                <EditorCanvas zoom={zoom} className="min-w-0 flex-1 lg:overflow-auto">
+                <EditorCanvas zoom={zoom} className="min-w-0 flex-1 pb-6 lg:min-h-0 lg:overflow-auto">
                   <ResumeDocument
                     value={resume}
                     onChange={setResume}
@@ -1273,11 +1255,11 @@ export default function JobPage() {
             tab === "resume" ? "max-lg:invisible max-lg:h-0 max-lg:overflow-hidden" : "max-lg:flex-1"
           }`}
         >
-          <div className="hidden h-11 shrink-0 items-stretch border-b border-border px-6 lg:flex">
+          <div className="hidden h-9 shrink-0 items-stretch border-b border-border px-6 lg:flex">
             {tabList(PANEL_TABS, panelTab, "flex h-full min-w-0 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
           </div>
           <div ref={panelScrollRef} className="min-h-0 flex-1 lg:overflow-y-auto">
-            <div className="mx-auto w-full max-w-[600px] px-4 py-8 sm:px-8">
+            <div className="mx-auto w-full max-w-[760px] px-4 py-6 sm:px-6">
               {panelTab === "overview" && (
                 <JobOverview
                   job={job}
@@ -1287,13 +1269,11 @@ export default function JobPage() {
                   analyzing={analyzing}
                   analyzeError={analyzeError}
                   disabledReason={needsMaster ? "Import your resume first, then the analysis runs automatically." : !resume ? "Loading your resume…" : undefined}
-                  pendingCount={pending.length}
                   notices={notices}
                   statusControl={statusQuiet}
                   onPatch={patch}
                   onDelete={deleteJob}
                   onAnalyze={analyze}
-                  onAcceptAll={acceptAll}
                   onOpenPosting={() => selectTab("job")}
                   commentSheet={tab === "resume"}
                   onCommentSlot={setCommentEl}

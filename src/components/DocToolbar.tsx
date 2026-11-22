@@ -101,7 +101,7 @@ export function MenuBarMenu({ label, children }: { label: React.ReactNode; child
 /** Formatting-style toolbar row under the top bar. One row: phones scroll it sideways instead of wrapping. */
 export function EditorToolbar({ children }: { children: React.ReactNode }) {
   return (
-    <div data-doc-keep-selection className="flex min-h-10 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-1">
+    <div data-doc-keep-selection className="flex min-h-9 flex-nowrap items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-0.5">
       {children}
     </div>
   );
@@ -237,7 +237,7 @@ export function useZoom(key: string): [number, (z: number) => void] {
 }
 
 /**
- * Slim top bar for editor pages: h-11, hairline bottom border, children laid out left to right.
+ * Slim top bar for editor pages: h-9 (36px), hairline bottom border, children laid out left to right.
  * Use `<div className="ml-auto flex items-center gap-1">` for the right-hand group.
  */
 export function DocToolbar({
@@ -247,12 +247,12 @@ export function DocToolbar({
   /** Kept for compatibility. Selection actions now float inside the document, so nothing renders here. */
   onSlot?: (el: HTMLDivElement | null) => void;
 }) {
-  // Collapsed, the sidebar's expand button sits in the canvas's top-left corner (8px in, 28px wide): the bar starts
-  // clear of it, on lg and up only.
+  // Collapsed, the sidebar's expand button sits in the canvas's top-left corner (16px in, 28px wide, centred on the
+  // bar in AppShell): the bar starts clear of it, on lg and up only.
   const { collapsed } = useSidebar();
   return (
     <div
-      className={`doc-toolbar sticky top-0 z-10 flex h-11 shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-3 ${
+      className={`doc-toolbar sticky top-0 z-10 flex h-9 shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-2 ${
         collapsed ? "lg:pl-11" : ""
       }`}
     >
@@ -281,13 +281,14 @@ export function IconButton({
   );
 }
 
-export function UndoRedo({ undo, redo, canUndo, canRedo }: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean }) {
+/** Undo and redo, never greyed out: with nothing to undo the click does nothing (the editor's history decides). */
+export function UndoRedo({ undo, redo }: { undo: () => void; redo: () => void }) {
   return (
     <div className="flex items-center gap-0.5">
-      <IconButton label="Undo (Ctrl/⌘+Z)" onClick={undo} disabled={!canUndo}>
+      <IconButton label="Undo (Ctrl/⌘+Z)" onClick={undo}>
         <UndoIcon />
       </IconButton>
-      <IconButton label="Redo (Ctrl/⌘+Shift+Z)" onClick={redo} disabled={!canRedo}>
+      <IconButton label="Redo (Ctrl/⌘+Shift+Z)" onClick={redo}>
         <RedoIcon />
       </IconButton>
     </div>
@@ -306,23 +307,19 @@ export function PageCount({ pages, overflowLines }: { pages: number; overflowLin
 
 /** Small text toggle that says its state ("Feedback: On"). */
 export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
+  // Pressed like the B/I/U buttons, so it stays one short word in a crowded row; the title says On/Off.
   return (
     <button
       type="button"
       onClick={() => onChange(!on)}
       aria-pressed={on}
-      className={`rounded-md px-2 py-1 text-xs transition-colors hover:bg-surface-2 hover:text-fg ${
-        on ? "font-medium text-fg" : "text-muted"
-      }`}
+      title={`${label}: ${on ? "On" : "Off"}`}
+      className="h-8 shrink-0 whitespace-nowrap rounded-md px-2 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg aria-pressed:bg-surface-2 aria-pressed:font-medium aria-pressed:text-fg"
     >
-      {toggleLabel(label, on)}
+      {label}
     </button>
   );
 }
-
-/** "Feedback: On" / "Feedback: Off": the same words on the toolbar toggle and in the phone's More menu. */
-const toggleLabel = (label: string, on: boolean) => `${label}: ${on ? "On" : "Off"}`;
-
 
 /** "3 placeholders left": jumps to the first [placeholder] still in the document. Hidden at zero. */
 export function PlaceholderCount({ count, onClick }: { count: number; onClick: () => void }) {

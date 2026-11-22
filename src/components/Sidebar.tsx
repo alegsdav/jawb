@@ -15,7 +15,7 @@ import {
 import { useSidebar } from "./sidebarState";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { UsageMeter } from "./UsageMeter";
-import { DocIcon, HomeIcon, LineIcon, Logo, LogoutIcon, MoreIcon, PlusIcon, SearchIcon, SidebarIcon, UserIcon } from "./icons";
+import { DocIcon, HomeIcon, Logo, LogoutIcon, MoreIcon, PlusIcon, SearchIcon, SidebarIcon, UserIcon } from "./icons";
 
 /** Module-wide: the one-time upload of this device's local pins and visits is running (dev StrictMode and a focus
  *  reload can start a second load meanwhile; that one skips the upload). */
@@ -80,7 +80,6 @@ function JobRow({
           aria-current={active ? "page" : undefined}
           className={`${JOB_ROW} overflow-hidden ${active ? ROW_ACTIVE : ROW_IDLE}`}
         >
-          <LineIcon className={`${ICON} ${active ? "text-fg" : "text-muted"}`} />
           <span className="min-w-0 flex-1 truncate">{title}</span>
           <span className="sr-only">
             {j.company ? `, ${j.company}` : ""}, {STATUS_LABEL[j.status]}
