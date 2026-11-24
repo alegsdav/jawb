@@ -54,6 +54,8 @@ type Props = {
   commandsRef?: React.RefObject<DocCommands | null>;
   /** Called when the caret's formatting state changes. */
   onFormatStateChange?: (s: FormatState) => void;
+  /** Paragraph id to outline in blue: the bullet (or entry's title line) the coaching panel is on. Editor only, never saved or printed. */
+  focusId?: string | null;
 };
 
 /** Transaction meta: the change came from the page (an accepted rewrite, a pull, an import), not from typing. */
@@ -254,7 +256,7 @@ const EMPTY_FMT: Omit<FormatState, "active"> = {
 
 export function ResumeDocument({
   value, onChange, feedback, showHighlights = true, baseline, showChanges = true, onReject, onMeasure, actionsSlot,
-  commentSlot, reveal, quiet = false, onSelectionChange, commandsRef, onFormatStateChange,
+  commentSlot, reveal, quiet = false, onSelectionChange, commandsRef, onFormatStateChange, focusId = null,
 }: Props) {
   // Whether the document counts as selected: on while the editor or its toolbar/card is in use.
   const [selActive, setSelActive] = useState(false);
@@ -381,11 +383,11 @@ export function ResumeDocument({
   // (arrow keys) and ProseMirror reading it, and would put the caret back.
   const lastHighlights = useRef<HighlightOptions | null>(null);
   useEffect(() => {
-    const opts: HighlightOptions = { feedback, showHighlights, baseline, showChanges, quiet };
+    const opts: HighlightOptions = { feedback, showHighlights, baseline, showChanges, quiet, focusId };
     if (!editor || (lastHighlights.current && sameOptions(lastHighlights.current, opts))) return;
     lastHighlights.current = opts;
     editor.commands.setHighlightOptions(opts);
-  }, [editor, feedback, showHighlights, baseline, showChanges, quiet]);
+  }, [editor, feedback, showHighlights, baseline, showChanges, quiet, focusId]);
 
   // Selection is cleared by a pointer or focus outside the document, its toolbar and the comment card.
   // Menus and toolbars marked data-doc-keep-selection don't count as outside.
@@ -525,7 +527,6 @@ export function ResumeDocument({
       ? createPortal(
           <BulletCommentCard
             bulletId={cardId}
-            text={caret.text}
             info={bulletInfo(cardId, caret.text, { feedback, baseline })}
             showChanges={showChanges}
             quiet={quiet}

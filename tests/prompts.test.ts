@@ -38,6 +38,12 @@ describe("analyzePrompt: resume review rubric", () => {
     expect(analysis).toContain('This is the ONE exception');
   });
 
+  it("asks each bullet for a why: one sentence on what the rewrite changes, for this job", () => {
+    expect(analysis).toContain('"why": "one sentence, at most 25 words, to the student');
+    expect(analysis).toContain("why a recruiter for THIS job will care");
+    expect(analysis).toContain("or empty string when rewrite is empty");
+  });
+
   it("asks for XYZ rewrites and rates duties as weak", () => {
     expect(analysis).toContain("XYZ formula");
     expect(analysis).toContain("Accomplished X as measured by Y, by doing Z");

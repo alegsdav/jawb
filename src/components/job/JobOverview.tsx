@@ -121,8 +121,6 @@ export type OverviewProps = {
   onCommentSlot: (el: HTMLDivElement | null) => void;
   /** Receives the bullet area, so the page can scroll the panel to it when a bullet is selected. */
   bulletAreaRef: Ref<HTMLDivElement>;
-  /** The selected bullet's text: shown at the top of the bullet area (the comment card drops its copy on desktop). */
-  selectedText: string | null;
   /** The selected bullet's questions (BulletQuestions), already filtered. */
   questions: ReactNode;
   /** The coach panel for the selected entry or bullet. */
@@ -205,7 +203,7 @@ export function JobOverview(p: OverviewProps) {
             {a ? "From before you applied. " : "No analysis was run before you applied. "}Turn on &ldquo;Keep editing&rdquo; to tailor this copy again.
           </p>
         )}
-        {p.analyzing && <p className="animate-pulse text-[13px] text-muted">Reading the posting against your resume…</p>}
+        {p.analyzing && <p className="ai-shimmer text-[13px]">Reading the posting against your resume…</p>}
         {p.analyzeError && !p.analyzing && !p.quiet && (
           <p role="alert" className="text-[13px]">
             <span className="text-bad">{p.analyzeError}</span>
@@ -253,7 +251,7 @@ export function JobOverview(p: OverviewProps) {
         >
           {missing.map((k) => (
             <li key={`missing:${k}`}>
-              <span title="Missing from your resume" className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[13px] text-fg border-bad/30 bg-bad/[0.07]">
+              <span title="Missing from your resume" className="inline-flex items-center rounded-[4px] px-2 py-0.5 text-[13px] text-fg bg-bad/[0.07]">
                 <span className="sr-only">Missing from your resume: </span>
                 {k}
               </span>
@@ -261,7 +259,7 @@ export function JobOverview(p: OverviewProps) {
           ))}
           {matched.map((k) => (
             <li key={`matched:${k}`}>
-              <span title="On your resume" className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[13px] text-fg border-good/30 bg-good/[0.07]">
+              <span title="On your resume" className="inline-flex items-center rounded-[4px] px-2 py-0.5 text-[13px] text-fg bg-good/[0.07]">
                 <span className="sr-only">On your resume: </span>
                 {k}
               </span>
@@ -273,7 +271,6 @@ export function JobOverview(p: OverviewProps) {
       {/* The bullet area: blank until a bullet is selected. Phones: the comment card is a sheet over the document
           while the Resume tab shows (fixed), otherwise it sits here like everything else. */}
       <div ref={p.bulletAreaRef} className="mt-12 space-y-10">
-        {p.selectedText && <p className="line-clamp-2 text-[13px] text-muted">{p.selectedText.trim() || "Empty bullet"}</p>}
         <div
           ref={p.onCommentSlot}
           className={`empty:hidden ${

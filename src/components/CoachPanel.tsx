@@ -12,6 +12,7 @@ import {
 import type { FactsApi } from "@/lib/useFacts";
 import { markPlaceholders } from "./PlaceholderTextarea";
 import { UndoToast } from "./UndoToast";
+import { CHOICES, choiceClass, choiceOfStage, rowGapClass, type ChoiceMode } from "@/lib/coachChoice";
 
 const PART_LABEL: Record<AnatomyPart, string> = { verb: "Verb", scope: "Scope", tool: "Tool", result: "Result" };
 const PART_CLS: Record<AnatomyPart, string> = {
@@ -26,6 +27,7 @@ type Stage =
   | { kind: "examples" }
   | { kind: "resolve"; example: CoachExample }
   | { kind: "questions" };
+
 
 /** The entry (and bullet) the panel is about, from the current resume. */
 function describe(resume: Resume, target: CoachTarget) {
@@ -167,7 +169,7 @@ function BlankResolver({
  * Examples and their values are kept only in this component's state.
  */
 export function CoachPanel({
-  resume, resumeId, jobId, target, facts, onBack, onInsert, startWith, disabledReason,
+  resume, resumeId, jobId, target, facts, onInsert, startWith, disabledReason,
 }: {
   resume: Resume;
   /** The resume being coached (the master, or this job's tailored copy): new facts link to it. */
@@ -176,15 +178,15 @@ export function CoachPanel({
   jobId?: string | null;
   target: CoachTarget;
   facts: FactsApi;
-  onBack: () => void;
   /** Put the bullet on the resume; returns its id (null if the entry is gone). */
   onInsert: (target: CoachTarget, text: string, mode: "add" | "replace") => string | null;
-  /** "Go deeper" from the builder opens the questions straight away. */
+  /** "Go deeper" from the builder opens the questions straight away (already zoomed). */
   startWith?: "questions";
   disabledReason?: string;
 }) {
   const { item, bullet, name } = describe(resume, target);
   const [stage, setStage] = useState<Stage>({ kind: "choose" });
+  const [zoom, setZoom] = useState<ChoiceMode | null>(startWith === "questions" ? "questions" : null);
   const [examples, setExamples] = useState<CoachExample[]>([]);
   const [round, setRound] = useState(0);
   const [questions, setQuestions] = useState<CoachQuestion[]>([]);
@@ -198,14 +200,21 @@ export function CoachPanel({
 
   const effectiveTarget = useMemo(() => ({ ...target, bulletId: bullet ? target.bulletId : null }), [target, bullet]);
 
+  // Picking a choice zooms it in at once; if the request fails the zoom goes back to the stage's own choice
+  // (or to the two side by side, before anything loaded), so the error sits where the user can retry.
   async function loadExamples(next: number, replace: boolean) {
     const body = coachRequest(resume, effectiveTarget, { jobId, resumeId, round: next });
     if (!body) return setError("This entry no longer exists.");
+    const back = choiceOfStage(stage.kind);
+    setZoom("examples");
     setBusy("examples");
     setError("");
     const { data, error: e } = await postApi<{ examples: CoachExample[] }>("/api/coach/examples", body);
     setBusy("");
-    if (e || !data) return setError(e ?? "The examples didn't come back. Try again.");
+    if (e || !data) {
+      setZoom(back);
+      return setError(e ?? "The examples didn't come back. Try again.");
+    }
     setRound(next);
     setExamples((cur) => (replace ? data.examples : [...cur, ...data.examples]));
     setStage({ kind: "examples" });
@@ -214,11 +223,16 @@ export function CoachPanel({
   async function loadQuestions() {
     const body = coachRequest(resume, effectiveTarget, { jobId, resumeId });
     if (!body) return setError("This entry no longer exists.");
+    const back = choiceOfStage(stage.kind);
+    setZoom("questions");
     setBusy("questions");
     setError("");
     const { data, error: e } = await postApi<{ questions: CoachQuestion[] }>("/api/coach/questions", body);
     setBusy("");
-    if (e || !data) return setError(e ?? "The questions didn't come back. Try again.");
+    if (e || !data) {
+      setZoom(back);
+      return setError(e ?? "The questions didn't come back. Try again.");
+    }
     setQuestions(data.questions);
     setAnswers({});
     setAnswered(false);
@@ -272,32 +286,36 @@ export function CoachPanel({
     setStage({ kind: "examples" });
   }
 
-  if (!item) {
-    return (
-      <div className="space-y-2">
-        <p className="text-[13px] text-muted">That entry is gone.</p>
-        <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={onBack}>Back</button>
-      </div>
-    );
-  }
+  if (!item) return <p className="text-[13px] text-muted">That entry is gone.</p>;
+
+  const busyText = CHOICES.find((m) => m.mode === busy)?.busyText;
 
   return (
-    <section className="space-y-4" aria-labelledby="coach-heading">
-      <div className="flex items-start gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="label">{jobId ? "Coaching for this job" : "Coaching"}</p>
-          <h2 id="coach-heading" className="text-[13px] font-semibold break-words">{name}</h2>
-          {bullet && <p className="mt-1 text-[13px] text-muted break-words">“{bullet.text}”</p>}
-        </div>
-        <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50 shrink-0" onClick={onBack} aria-label="Back to the overview">
-          ← Back
-        </button>
-      </div>
-
+    <section className="space-y-4" aria-label="Help with this bullet">
       {disabledReason ? (
         <p className="text-[13px] text-muted">{disabledReason}</p>
       ) : (
         <>
+          {/* The two choices side by side. Picking one zooms it into a heading across the full row (the
+              other fades out and collapses, its width and gap go to 0). The collapsed one stays mounted but
+              invisible, so the "instead" links can zoom it back in. */}
+          <div role="group" aria-label="What would help" className={rowGapClass(zoom)}>
+            {CHOICES.map(({ mode, label }) => (
+              <button
+                key={mode}
+                type="button"
+                disabled={zoom !== null || !!busy}
+                onClick={() => (mode === "examples" ? loadExamples(1, true) : loadQuestions())}
+                aria-pressed={zoom === mode || undefined}
+                className={choiceClass(mode, zoom)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {zoom && busy && busyText && <p className="ai-shimmer text-[14px]">{busyText}</p>}
+
           {done && (
             <p role="status" className="text-[13px] text-good">
               {done}
@@ -309,22 +327,9 @@ export function CoachPanel({
             </div>
           )}
 
-          {stage.kind === "choose" && (
-            <div className="space-y-2">
-              <div className="flex flex-col gap-2">
-                <button type="button" className="w-full rounded-lg border border-border px-3 py-2 text-left text-[13px] font-medium hover:bg-surface-2 disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(1, true)}>
-                  {busy === "examples" ? "Writing examples…" : "Show me examples"}
-                </button>
-                <button type="button" className="w-full rounded-lg border border-border px-3 py-2 text-left text-[13px] hover:bg-surface-2 disabled:opacity-50" disabled={!!busy} onClick={loadQuestions}>
-                  {busy === "questions" ? "Thinking of questions…" : "Ask me questions first"}
-                </button>
-              </div>
-              <p className="text-xs text-muted">
-                Nothing goes on your resume until you choose it.
-              </p>
-            </div>
-          )}
-
+          {stage.kind !== "choose" && (
+          // Results fade in under the heading; keyed by stage so each new stage plays once.
+          <div key={stage.kind} className="ai-fade">
           {stage.kind === "examples" && (
             <div className="space-y-3">
               {examples.map((ex) => (
@@ -350,8 +355,8 @@ export function CoachPanel({
                 <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(round + 1, false)}>
                   {busy === "examples" ? "Writing…" : "More examples"}
                 </button>
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" disabled={!!busy} onClick={loadQuestions}>
-                  Ask me questions instead
+                <button type="button" className="rounded-md px-2 py-1 text-[13px] text-muted underline underline-offset-2 hover:text-fg disabled:opacity-50" disabled={!!busy} onClick={loadQuestions}>
+                  Question me instead
                 </button>
               </div>
             </div>
@@ -397,7 +402,12 @@ export function CoachPanel({
                   </button>
                 </div>
               )}
+              <button type="button" className="rounded-md px-2 py-1 text-[13px] text-muted underline underline-offset-2 hover:text-fg disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(1, true)}>
+                Show examples instead
+              </button>
             </div>
+          )}
+          </div>
           )}
         </>
       )}

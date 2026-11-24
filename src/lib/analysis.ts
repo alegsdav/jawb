@@ -57,6 +57,7 @@ export function normalizeAnalysis(raw: unknown): Analysis {
         rating: rating(b?.rating),
         note: clean(b?.note),
         rewrite: str(b?.rewrite),
+        why: clean(b?.why),
         ...(typeof b?.original === "string" ? { original: b.original } : {}),
       }))
       .filter((b) => b.bullet_id),
@@ -130,6 +131,8 @@ export type BulletFeedback = {
   note: string;
   /** Suggested rewrite still waiting for accept/reject ("" if none). */
   suggestion: string;
+  /** Why the suggested rewrite is stronger ("" if none, or in analyses from before `why`). */
+  why: string;
 };
 
 const same = (a: string, b: string) => a.trim() === b.trim();
@@ -176,7 +179,7 @@ export function bulletFeedback(
       state === "current" && rewrite && !same(text, rewrite) && !dismissed.has(id) && (ref === undefined || same(text, ref))
         ? fb.rewrite
         : "";
-    out[id] = { state, rating: fb.rating, note: fb.note, suggestion };
+    out[id] = { state, rating: fb.rating, note: fb.note, suggestion, why: fb.why ?? "" };
   }
   return out;
 }

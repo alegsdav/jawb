@@ -556,6 +556,7 @@ export default function MasterResumePage() {
                   onSelectionChange={onSelection}
                   commandsRef={commandsRef}
                   onFormatStateChange={setFormatState}
+                  focusId={coachTarget ? (coachTarget.bulletId ?? coachTarget.entryId) : null}
                 />
               </EditorCanvas>
               <StatusBar
@@ -593,7 +594,6 @@ export default function MasterResumePage() {
                           target={coachTarget}
                           facts={facts}
                           startWith={coachStart}
-                          onBack={() => setCoachTarget(null)}
                           onInsert={insertBullet}
                         />
                       )

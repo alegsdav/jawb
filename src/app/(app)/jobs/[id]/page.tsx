@@ -1040,7 +1040,6 @@ export default function JobPage() {
         jobId={id}
         target={coachTarget}
         facts={facts}
-        onBack={() => setCoachTarget(null)}
         onInsert={insertBullet}
         disabledReason={quiet ? "You've applied with this copy. Turn on “Keep editing (for a re-apply)” to coach it again." : undefined}
       />
@@ -1235,6 +1234,7 @@ export default function JobPage() {
                     onSelectionChange={onSelection}
                     commandsRef={commandsRef}
                     onFormatStateChange={setFormatState}
+                    focusId={coachTarget ? (coachTarget.bulletId ?? coachTarget.entryId) : null}
                   />
                 </EditorCanvas>
                 <StatusBar

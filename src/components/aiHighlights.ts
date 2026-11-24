@@ -7,7 +7,8 @@ import { RATING, bulletInfo } from "./docDecorations";
 
 /**
  * The AI's highlights drawn over the resume document, as ProseMirror decorations (never document data):
- * the rating tint for each rated paragraph, the [placeholder] marks, and the "changed vs master" bar.
+ * the rating tint for each rated paragraph, the [placeholder] marks, the "changed vs master" bar and the
+ * blue outline around the paragraph the coaching panel is on.
  */
 
 export type HighlightOptions = {
@@ -16,6 +17,8 @@ export type HighlightOptions = {
   baseline?: Map<string, string> | null;        // paragraph id → text in the master at copy time
   showChanges: boolean;
   quiet: boolean;                               // after Applied: no placeholder tint
+  /** The paragraph the coaching panel is on: drawn with a thin blue outline (class doc-focus). Not document data. */
+  focusId?: string | null;
 };
 
 declare module "@tiptap/core" {
@@ -35,6 +38,7 @@ const highlightKey = new PluginKey<HighlightState>("aiHighlights");
 /** Options that draw the same highlights (the page may pass equal objects that are not the same object). */
 export function sameOptions(a: HighlightOptions, b: HighlightOptions): boolean {
   return a.showHighlights === b.showHighlights && a.showChanges === b.showChanges && a.quiet === b.quiet
+    && (a.focusId ?? null) === (b.focusId ?? null)
     && JSON.stringify(a.feedback ?? null) === JSON.stringify(b.feedback ?? null)
     && JSON.stringify([...(a.baseline ?? [])]) === JSON.stringify([...(b.baseline ?? [])]);
 }
@@ -61,6 +65,10 @@ function paragraphDecorations(node: PMNode, pos: number, opts: HighlightOptions)
   const id = (node.attrs.id as string | null) ?? "";
   const text = paragraphPlainText(node);
   const info = bulletInfo(id, text, opts);
+
+  if (opts.focusId && id === opts.focusId) {
+    out.push(Decoration.node(pos, pos + node.nodeSize, { class: "doc-focus" }));
+  }
 
   // Placeholders win over the rating tint: they must be impossible to miss before applying.
   const placeholder = !opts.quiet && info.placeholders.length > 0;
