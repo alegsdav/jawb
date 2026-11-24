@@ -2,6 +2,7 @@
 
 import { STATUSES, type Fit, type JobStatus } from "@/lib/types";
 import { FIT_LABEL } from "@/lib/fit";
+import { ChevronDownIcon } from "@/components/icons";
 
 /** Dot colour per status (the only colour a status gets). */
 export const STATUS_DOT: Record<JobStatus, string> = {
@@ -26,7 +27,7 @@ export function StatusSelect({ value, onChange, form = false }: { value: JobStat
         className={
           form
             ? "ghost-input h-full w-full border-border pl-6 pr-1 text-[13px] font-medium"
-            : "input rounded-full border-transparent bg-transparent py-1 pl-6 pr-1 text-xs font-medium hover:bg-surface-2"
+            : "input appearance-none cursor-pointer rounded-full border-transparent bg-surface-2 py-1 pl-6 pr-6 text-xs font-medium hover:bg-surface-2/80 motion-reduce:transition-none"
         }
         value={value}
         onChange={(e) => onChange(e.target.value as JobStatus)}
@@ -35,6 +36,7 @@ export function StatusSelect({ value, onChange, form = false }: { value: JobStat
           <option key={s.value} value={s.value}>{s.label}</option>
         ))}
       </select>
+      {!form && <ChevronDownIcon className="pointer-events-none absolute right-2 h-3.5 w-3.5 text-muted" />}
     </span>
   );
 }

@@ -47,6 +47,11 @@ export const LinkIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M10 14a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1" /><path d="M14 10a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1" /></svg>
 );
 
+/** Three bars on a baseline: the pipeline's counts by status. */
+export const ChartIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="M4 20h16" /><rect x="5.5" y="11" width="3" height="9" rx="1" /><rect x="10.5" y="5" width="3" height="15" rx="1" /><rect x="15.5" y="8.5" width="3" height="11.5" rx="1" /></svg>
+);
+
 export const UndoIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M9 7 5 11l4 4" /><path d="M5 11h9a5 5 0 0 1 0 10h-2" /></svg>
 );
@@ -130,3 +135,7 @@ export function Logo({ size = 26 }: { size?: number }) {
     </svg>
   );
 }
+
+export const CheckIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+);
