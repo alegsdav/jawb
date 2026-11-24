@@ -270,7 +270,8 @@ export function JobOverview(p: OverviewProps) {
 
       {/* The bullet area: blank until a bullet is selected. Phones: the comment card is a sheet over the document
           while the Resume tab shows (fixed), otherwise it sits here like everything else. */}
-      <div ref={p.bulletAreaRef} className="mt-12 space-y-10">
+      {/* Working in here (the card, questions, coach) keeps the bullet selected, so the card doesn't close and shift the panel mid-click. */}
+      <div ref={p.bulletAreaRef} data-doc-keep-selection className="mt-12 space-y-10">
         <div
           ref={p.onCommentSlot}
           className={`empty:hidden ${

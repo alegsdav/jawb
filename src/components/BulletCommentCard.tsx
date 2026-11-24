@@ -67,6 +67,8 @@ export function BulletCommentCard(props: {
 
       {suggestion && (
         <div className="space-y-2 pt-0.5">
+          {/* The new wording, once: the document shows the bullet as it is, so this is the only place it appears. */}
+          <p className="text-[14px] leading-relaxed text-fg">{suggestion}</p>
           {why && (
             <p>
               <span className="font-semibold">Why the edit is stronger:</span> {why}

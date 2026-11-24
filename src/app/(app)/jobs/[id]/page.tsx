@@ -1014,7 +1014,6 @@ export default function JobPage() {
   const quietText = "whitespace-nowrap rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg";
   const questionId = coachTarget?.bulletId ?? null;
   /** The selected bullet's text, shown above its questions (the comment card shows it too, on phones only). */
-  const selectedText = questionId && resume ? (bulletTextMap(resume).get(questionId) ?? null) : null;
 
   /** The bullet's questions: unanswered ones about the selected bullet (none while applied: nothing is edited then). */
   const questions =
@@ -1278,7 +1277,6 @@ export default function JobPage() {
                   commentSheet={tab === "resume"}
                   onCommentSlot={setCommentEl}
                   bulletAreaRef={bulletAreaRef}
-                  selectedText={selectedText}
                   questions={questions}
                   coach={coach}
                 />

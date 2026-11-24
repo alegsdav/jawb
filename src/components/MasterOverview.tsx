@@ -49,7 +49,8 @@ export function MasterOverview({ notices, commentSheet, onCommentSlot, coach }: 
 
       {/* The bullet area. Phones: the comment card is a sheet over the document while the Resume tab shows (fixed),
           otherwise it sits here like everything else. */}
-      <div className="mt-16 space-y-10">
+      {/* Working in here (the card, questions, coach) keeps the bullet selected, so the card doesn't close and shift the panel mid-click. */}
+      <div data-doc-keep-selection className="mt-12 space-y-10">
         <div
           ref={onCommentSlot}
           className={`empty:hidden ${
