@@ -64,6 +64,20 @@ describe("normalizeAnalysis", () => {
   });
 });
 
+describe("normalizeAnalysis: why", () => {
+  it("parses and cleans the why of each bullet, like its note", () => {
+    const a = normalizeAnalysis({
+      bullets: [{ bullet_id: "b:b1", rating: "weak", note: "n", rewrite: "Cut hours by [X%]", why: "Leads with the result; names [b:b2] tools." }],
+    });
+    expect(a.bullets[0].why).toBe("Leads with the result; names tools.");
+  });
+
+  it("defaults why to empty for bullets without one (old analyses)", () => {
+    const a = normalizeAnalysis({ bullets: [{ bullet_id: "b1", rating: "ok", note: "", rewrite: "" }, { bullet_id: "b2", rating: "ok", note: "", rewrite: "x", why: null }] });
+    expect(a.bullets.map((b) => b.why)).toEqual(["", ""]);
+  });
+});
+
 describe("mergeAnalysis", () => {
   const fresh = (): Analysis =>
     normalizeAnalysis({

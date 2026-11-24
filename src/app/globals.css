@@ -236,3 +236,34 @@ body {
 @media (max-width: 639px) {
   .doc-page-blank { min-height: 60vh; }
 }
+
+/* The coach's focus: a thin blue outline around the paragraph the coaching panel is on (ResumeDocument focusId).
+   An outline adds no layout, and it is never printed. */
+.doc-focus { outline: 1.5px solid #2f5bd3; outline-offset: 2px; border-radius: 3px; }
+@media print {
+  .doc-focus { outline: none !important; }
+}
+
+/* Text that shimmers while the AI works (the coach's status line, the Overview's "Reading the
+   posting…"). A light band sweeps across muted text; reduced motion keeps plain muted text. */
+.ai-shimmer {
+  background: linear-gradient(90deg, var(--muted) 0%, var(--fg) 50%, var(--muted) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ai-shimmer 1.4s linear infinite;
+}
+@keyframes ai-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer {
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--muted);
+    animation: none;
+  }
+}

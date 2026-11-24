@@ -21,6 +21,7 @@ export type BulletInfo = {
   isNew: boolean;                   // !!baseline && original === undefined
   changed: boolean;                 // !!baseline && original !== undefined && original !== text
   suggestion: string;               // fb?.suggestion ?? ""
+  why: string;                      // fb?.why ?? "" (shown with the suggestion only)
   placeholders: { text: string; start: number }[]; // PLACEHOLDER_RE matches in text (start = char index)
 };
 
@@ -37,6 +38,7 @@ export function bulletInfo(bid: string, text: string, opts: BulletSources): Bull
   const isNew = !!opts.baseline && original === undefined;
   const changed = !!opts.baseline && original !== undefined && original !== text;
   const suggestion = fb?.suggestion ?? "";
+  const why = fb?.why ?? "";
   const placeholders = [...text.matchAll(PLACEHOLDER_RE)].map((m) => ({ text: m[0], start: m.index! }));
-  return { view, fb, original, isNew, changed, suggestion, placeholders };
+  return { view, fb, original, isNew, changed, suggestion, why, placeholders };
 }

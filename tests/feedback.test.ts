@@ -45,6 +45,21 @@ describe("normalizeAnalysis (round 2 fields)", () => {
   });
 });
 
+describe("bulletFeedback: why", () => {
+  it("carries the why with the pending suggestion", () => {
+    const fb = bulletFeedback(
+      analysis([{ bullet_id: "b1", rating: "weak", note: "vague", rewrite: "Built X for [N users]", why: "Names the scale." }]),
+      resume({ b1: "Did stuff" }),
+    );
+    expect(fb.b1).toMatchObject({ suggestion: "Built X for [N users]", why: "Names the scale." });
+  });
+
+  it("is empty when the analysis has no why", () => {
+    const fb = bulletFeedback(analysis([{ bullet_id: "b1", rating: "weak", note: "", rewrite: "Better" }]), resume({ b1: "Did stuff" }));
+    expect(fb.b1.why).toBe("");
+  });
+});
+
 describe("attachOriginals", () => {
   it("stores the text each bullet had when rated", () => {
     const a = attachOriginals(
@@ -64,7 +79,7 @@ describe("bulletFeedback (stale AI feedback)", () => {
 
   it("shows rating and suggestion while the text matches what was rated", () => {
     const out = bulletFeedback(analysis([fb]), resume({ b1: "Did stuff" }));
-    expect(out.b1).toEqual({ state: "current", rating: "weak", note: "vague", suggestion: "Built X for [N users]" });
+    expect(out.b1).toEqual({ state: "current", rating: "weak", note: "vague", suggestion: "Built X for [N users]", why: "" });
   });
 
   it("hides rating and suggestion once the bullet was edited", () => {

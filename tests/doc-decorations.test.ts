@@ -48,6 +48,7 @@ const fb = (rating: BulletFeedback["rating"], over: Partial<BulletFeedback> = {}
   rating,
   note: "note",
   suggestion: "",
+  why: "",
   ...over,
 });
 
@@ -191,6 +192,32 @@ describe("changed vs master", () => {
   });
 });
 
+describe("coach focus", () => {
+  const focusNodes = (set: Decoration[]) => set.filter((x) => cls(x) === "doc-focus");
+
+  it("the focused paragraph gets one doc-focus node decoration and nothing else changes", () => {
+    const without = decos(doc, { feedback: { b1: fb("weak") } });
+    const set = decos(doc, { feedback: { b1: fb("weak") }, focusId: "b1" });
+    const focus = focusNodes(set);
+    expect(focus).toHaveLength(1);
+    expect(focus[0].from).toBe(paraStart(doc, 1));
+    expect(focus[0].to).toBe(paraStart(doc, 1) + doc.child(1).nodeSize);
+    expect(set.length).toBe(without.length + 1);
+  });
+
+  it("works with highlights off, and with no focusId nothing is drawn", () => {
+    expect(focusNodes(decos(doc, { showHighlights: false, focusId: "b2" }))).toHaveLength(1);
+    expect(focusNodes(decos(doc, { focusId: null }))).toEqual([]);
+    expect(focusNodes(decos(doc, { focusId: "missing" }))).toEqual([]);
+  });
+
+  it("the document JSON is not changed by the focus", () => {
+    const before = JSON.stringify(doc.toJSON());
+    decos(doc, { focusId: "b1" });
+    expect(JSON.stringify(doc.toJSON())).toBe(before);
+  });
+});
+
 describe("document is untouched", () => {
   it("decorations are built without changing the document JSON", () => {
     const before = JSON.stringify(doc.toJSON());
@@ -200,6 +227,13 @@ describe("document is untouched", () => {
 });
 
 describe("bulletInfo", () => {
+  it("carries the why of a current suggestion, and nothing without one", () => {
+    expect(bulletInfo("b1", "x", { feedback: { b1: fb("ok", { suggestion: "better", why: "Leads with the result." }) } }).why)
+      .toBe("Leads with the result.");
+    expect(bulletInfo("b1", "x", { feedback: { b1: fb("ok", { suggestion: "" }) } }).why).toBe("");
+    expect(bulletInfo("b1", "x", {}).why).toBe("");
+  });
+
   it("current feedback is shown as fb with its suggestion", () => {
     const info = bulletInfo("b1", "x", { feedback: { b1: fb("ok", { suggestion: "better" }) } });
     expect(info.fb?.rating).toBe("ok");

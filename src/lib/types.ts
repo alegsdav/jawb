@@ -142,6 +142,8 @@ export type Analysis = {
     rating: "strong" | "ok" | "weak";
     note: string;
     rewrite: string;
+    /** One sentence for the student: what the rewrite changes and why a recruiter for this job cares. "" when there is no rewrite or in analyses from before this field. */
+    why?: string;
     /** The bullet's text when it was rated. Feedback is stale once the bullet no longer reads like this. */
     original?: string;
   }[];
