@@ -28,17 +28,6 @@
   --dot-grey: #c4c4c4;
   /* Window chrome behind the white work panel (app shell) */
   --chrome: #f0f0f0;
-  /* Soft tints for the dashboard's stat tiles, icon holders, monograms and pills (bg + readable fg). */
-  --tint-blue: #eaf3fc;
-  --tint-blue-fg: #1f5f99;
-  --tint-orange: #fdf1e6;
-  --tint-orange-fg: #a5530c;
-  --tint-green: #e9f7f0;
-  --tint-green-fg: #156f4b;
-  --tint-violet: #f1eefc;
-  --tint-violet-fg: #5b45b0;
-  --tint-red: #fdeeee;
-  --tint-red-fg: #b3302f;
   color-scheme: light;
 }
 
@@ -59,16 +48,6 @@
   --color-ok-bg: var(--ok-bg);
   --color-bad-bg: var(--bad-bg);
   --font-sans: var(--font-ui);
-  --color-tint-blue: var(--tint-blue);
-  --color-tint-blue-fg: var(--tint-blue-fg);
-  --color-tint-orange: var(--tint-orange);
-  --color-tint-orange-fg: var(--tint-orange-fg);
-  --color-tint-green: var(--tint-green);
-  --color-tint-green-fg: var(--tint-green-fg);
-  --color-tint-violet: var(--tint-violet);
-  --color-tint-violet-fg: var(--tint-violet-fg);
-  --color-tint-red: var(--tint-red);
-  --color-tint-red-fg: var(--tint-red-fg);
 }
 
 body {
@@ -81,8 +60,6 @@ body {
 
 @layer components {
   .card { @apply bg-surface border border-border rounded-2xl; }
-  /* Dashboard panel: a card with a whisper of shadow, so sections sit on the canvas instead of floating in it. */
-  .panel { @apply bg-surface border border-border rounded-2xl; box-shadow: 0 1px 2px rgb(0 0 0 / 0.03), 0 1px 1px rgb(0 0 0 / 0.02); }
   .input {
     @apply bg-surface border border-border rounded-xl px-3 py-2 text-sm outline-none
       focus:border-fg/40 placeholder:text-muted;

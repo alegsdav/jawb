@@ -7,8 +7,7 @@ import { postApi } from "@/lib/api";
 import { findDuplicateJob } from "@/lib/status";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import type { Job } from "@/lib/types";
-import { LinkIcon, PlusIcon, SparkIcon } from "./icons";
-import { Panel, PanelHeader, Pill } from "./dashboard/ui";
+import { PlusIcon } from "./icons";
 
 const URL_RE = /^https?:\/\/\S+$/i;
 
@@ -219,21 +218,18 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
             : "Uses the pasted description.";
 
   return (
-    <Panel
-      as="div"
+    <div
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
-      className={`space-y-3 text-[13px] transition-colors motion-reduce:transition-none ${dragging ? "border-dashed border-fg/30 bg-surface-2/40" : ""}`}
+      className={`rounded-xl bg-surface p-4 space-y-3 border text-[13px] ${dragging ? "border-fg/40" : "border-border"}`}
     >
-      <div className="space-y-1.5">
-        <PanelHeader icon={<LinkIcon />} tint="green" title="Add a job" />
-        {mode === "one" ? (
-          <p className="text-[13px] text-muted">Paste a job link or the full description.</p>
-        ) : reason?.site ? (
+      <div className="space-y-1">
+        <h2 className="text-[15px] font-semibold">Jobs</h2>
+        {mode === "one" ? null : reason?.site ? (
           <p className="text-[13px] text-muted">
             <strong className="text-fg">{reason.site} needs a login</strong>, so the app can&apos;t read that link. Open the
             posting, copy the job description, and paste it below. The link is kept so you can find it again.
@@ -250,7 +246,7 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
         <textarea
           ref={box}
           rows={1}
-          className="input block w-full min-h-[76px] resize-none overflow-y-auto rounded-xl bg-surface-2/50 text-[13px] leading-5 focus:bg-surface max-h-24 sm:max-h-28"
+          className="input block w-full resize-none overflow-y-auto rounded-lg text-[13px] leading-5 max-h-24 sm:max-h-28"
           aria-label="Job link or description"
           placeholder="Job link or description"
           value={input}
@@ -263,13 +259,6 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
           }}
         />
-      ) : null}
-      {mode === "one" ? (
-        <ul aria-label="Supported sources" className="-mt-1 flex flex-wrap gap-1.5 text-[11px] text-muted">
-          {["Greenhouse", "Lever", "Ashby", "any page"].map((s) => (
-            <li key={s} className="rounded-full bg-surface-2 px-2 py-0.5">{s}</li>
-          ))}
-        </ul>
       ) : (
         <div className="space-y-2">
           <label className="block space-y-1">
@@ -374,38 +363,37 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
           </div>
         </div>
       )}
-    </Panel>
+    </div>
   );
 }
 
-/** Placeholder rows for the job matches to come: job-card shapes in waiting (grey, not data, not animated). */
+/** Placeholder rows for the job matches to come: grey bars of varied widths, not data, and not animated. */
 const PREVIEW_ROWS = [
   { title: "w-3/4", sub: "w-1/2" },
   { title: "w-2/3", sub: "w-2/5" },
   { title: "w-4/5", sub: "w-1/3" },
+  { title: "w-3/5", sub: "w-1/2" },
+  { title: "w-2/3", sub: "w-2/5" },
 ];
 
 /** Where matching jobs will be listed. For now a template of empty cards, marked Coming soon. */
 function JobMatchesPreview() {
   return (
-    <section aria-labelledby="job-matches-heading" className="space-y-2.5 border-t border-border pt-4">
-      <PanelHeader
-        id="job-matches-heading"
-        icon={<SparkIcon />}
-        tint="violet"
-        title="Matches for you"
-        action={<Pill tint="violet">Coming soon</Pill>}
-      />
+    <section aria-labelledby="job-matches-heading" className="space-y-2.5 border-t border-border pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 id="job-matches-heading" className="text-[13px] font-medium">Matches for you</h3>
+        <span className="rounded-full bg-fg/[0.06] px-2 py-0.5 text-[11px] text-muted">Coming soon</span>
+      </div>
       <ul aria-hidden className="space-y-2">
         {PREVIEW_ROWS.map((r, i) => (
           // Phones: two cards, so the template doesn't push the real lists far down.
-          <li key={i} className={`items-center gap-3 rounded-xl border border-border p-2.5 ${i < 2 ? "flex" : "hidden lg:flex"}`}>
-            <span className="h-9 w-9 shrink-0 rounded-lg bg-fg/[0.06]" />
+          <li key={i} className={`items-center gap-3 rounded-lg border border-border p-2.5 ${i < 2 ? "flex" : "hidden lg:flex"}`}>
+            <span className="h-8 w-8 shrink-0 rounded-md bg-fg/[0.06]" />
             <span className="min-w-0 flex-1 space-y-1.5">
               <span className={`block h-2.5 rounded-full bg-fg/[0.09] ${r.title}`} />
               <span className={`block h-2 rounded-full bg-fg/[0.05] ${r.sub}`} />
             </span>
-            <span className="h-5 w-12 shrink-0 rounded-full bg-fg/[0.05]" />
+            <span className="h-5 w-10 shrink-0 rounded-full bg-fg/[0.05]" />
           </li>
         ))}
       </ul>

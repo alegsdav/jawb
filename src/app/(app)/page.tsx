@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { STATUSES, type Job, type JobStatus, type Resume } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
@@ -15,15 +15,11 @@ import { useJobWrites, type RowSaveState } from "@/lib/jobWrites";
 import { SaveErrorToast } from "@/lib/useAutosave";
 import { FitBadge, StatusSelect } from "@/components/StatusSelect";
 import { AddJobForm } from "@/components/AddJobForm";
+import { OutcomeStats } from "@/components/OutcomeStats";
 import { deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 import { InProgress } from "@/components/dashboard/InProgress";
-import { GettingStarted } from "@/components/dashboard/GettingStarted";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
 import { Greeting, StatStrip } from "@/components/dashboard/Overview";
-import { PipelineCard } from "@/components/dashboard/PipelineCard";
-import { CompanyMark, Panel, PanelHeader, TINT, type Tint } from "@/components/dashboard/ui";
-import { BriefcaseIcon, SearchIcon } from "@/components/icons";
-import { inProgress } from "@/lib/progress";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
@@ -102,22 +98,6 @@ const dateTone = (urgency: ReturnType<typeof deadlineUrgency>) =>
 
 const RESUME_LOAD_ERROR =
   "Couldn't load your resume to save a copy of what you sent. Check your connection and try again.";
-
-/** Table cell padding: the first and last cells sit on the panel's edge (px-4 sm:px-5), the rest are 12px apart. */
-const CELL = "px-3 first:pl-4 last:pr-4 sm:first:pl-5 sm:last:pr-5";
-
-/** A designed empty state: a tinted icon, a title and one line of help. */
-function EmptyState({ icon, tint, title, children }: { icon: ReactNode; tint: Tint; title: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col items-center px-6 py-10 text-center">
-      <span aria-hidden className={`mb-3 inline-grid h-10 w-10 place-items-center rounded-xl ${TINT[tint]} [&_svg]:h-5 [&_svg]:w-5`}>
-        {icon}
-      </span>
-      <p className="text-[14px] font-medium">{title}</p>
-      <p className="mt-1 max-w-sm text-[13px] text-muted">{children}</p>
-    </div>
-  );
-}
 
 /** The dashboard: needs attention, add a job, in progress, and all applications. */
 export default function TrackerPage() {
@@ -347,6 +327,7 @@ export default function TrackerPage() {
   const showDeadline = !needsMigration && shown.some((j) => j.deadline);
   const showApplied = shown.some((j) => j.date_applied);
   const showFollowUp = shown.some((j) => j.follow_up_date);
+  const tableCols = 4 + [showDeadline, showApplied, showFollowUp].filter(Boolean).length;
 
   // Wait for the first jobs read too: painting the greeting and empty sections first made the page jump when the rows came in.
   // Blank until the jobs are read, then the whole page at once (no loader, nothing filling in).
@@ -364,17 +345,6 @@ export default function TrackerPage() {
   const closing = needsMigration
     ? []
     : jobs.filter((j) => isClosingSoon(j.deadline, j.status, today)).sort((x, y) => (x.deadline ?? "").localeCompare(y.deadline ?? ""));
-  const attention = due.length + closing.length;
-  const toTailor = inProgress(jobs).length;
-  // The greeting's one-line summary, from the same numbers the tiles show.
-  const summaryParts: string[] = [];
-  if (attention > 0) summaryParts.push(`${attention} ${attention === 1 ? "thing needs" : "things need"} you today`);
-  if (toTailor > 0) summaryParts.push(`${toTailor} ${toTailor === 1 ? "job" : "jobs"} to tailor`);
-  const summary = noJobs
-    ? "Add your first job to get started"
-    : summaryParts.length
-      ? summaryParts.join(" · ")
-      : "All caught up";
 
   const migrationBanner = missingCols.size > 0 && (
     <div role="status" className="card border-ok bg-ok-bg p-3 text-[13px]">
@@ -385,211 +355,160 @@ export default function TrackerPage() {
   );
 
   return (
-    <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+    <div className="space-y-6 px-4 sm:px-6 lg:px-10 py-5 sm:py-6">
       {migrationBanner}
-      <Greeting summary={summary} />
-      <StatStrip jobs={jobs} attention={attention} />
+      <Greeting />
+      {!noJobs && <StatStrip jobs={jobs} attention={due.length + closing.length} />}
+      <NeedsAttention followUps={due} closing={closing} today={today} onFollowedUp={followedUp} />
 
-      {/*
-        Phones: Needs attention, Add a job, In progress, All applications, Pipeline.
-        md to xl: Needs attention, then Add a job and Pipeline side by side, then In progress and All applications.
-        xl: two columns (main 8, Add a job and Pipeline 4). The wrappers are `contents` below xl so their children order as one grid.
-      */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[repeat(12,minmax(0,1fr))] xl:items-start">
-        <div className="contents xl:block xl:col-span-4 xl:col-start-9 xl:row-start-1 xl:space-y-6">
-          <div id="add-job" className="order-2 min-w-0 scroll-mt-4">
-            <AddJobForm existing={jobs} />
-          </div>
-          {/* A new account has no pipeline yet: Get started covers it. */}
-          {!noJobs && (
-            <div className="order-5 min-w-0 md:order-3">
-              <PipelineCard jobs={jobs} />
-            </div>
-          )}
+      <div className="grid gap-6 lg:gap-10 lg:grid-cols-12 lg:items-start">
+        {/* The Jobs box (add a job, matches to come). Phones: first. Desktop: the right column. */}
+        <div id="add-job" className="scroll-mt-4 lg:col-span-4 lg:col-start-9 lg:row-start-1">
+          <AddJobForm existing={jobs} />
         </div>
 
-        <div className="contents xl:block xl:col-span-8 xl:col-start-1 xl:row-start-1 xl:space-y-6">
-          {(due.length > 0 || closing.length > 0) && (
-            <div className="order-1 min-w-0 md:col-span-2">
-              <NeedsAttention followUps={due} closing={closing} today={today} onFollowedUp={followedUp} />
-            </div>
-          )}
-          {noJobs ? (
-            // No jobs yet: one guided panel instead of empty In progress and All applications lists.
-            <div className="order-3 min-w-0 md:order-4 md:col-span-2">
-              <GettingStarted />
-            </div>
-          ) : (
-            <div className="order-3 min-w-0 md:order-4 md:col-span-2">
-              <InProgress jobs={jobs} today={today} loading={loading} />
-            </div>
-          )}
+        <div className="min-w-0 space-y-6 lg:col-span-8 lg:col-start-1 lg:row-start-1">
+          <InProgress jobs={jobs} today={today} loading={loading} />
 
-          {!noJobs && <Panel flush as="section" aria-labelledby="all-apps-heading" className="order-4 min-w-0 overflow-hidden md:order-5 md:col-span-2">
-            <div className="px-4 sm:px-5 pt-4 sm:pt-5">
-              <PanelHeader
-                icon={<BriefcaseIcon />}
-                tint="violet"
-                title="All applications"
-                id="all-apps-heading"
-                count={jobs.length}
-              />
-            </div>
+          <section aria-labelledby="all-apps-heading" className="space-y-3">
+            <h2 id="all-apps-heading" className="text-[15px] font-semibold">All applications</h2>
+            <OutcomeStats jobs={jobs} />
 
             {loadError && (
-              <div className="px-4 sm:px-5 pt-4">
-                <div role="alert" className="card border-bad/40 p-3 text-[13px] flex flex-wrap items-center gap-3">
-                  <span className="flex-1 min-w-48 text-bad">{loadError}</span>
-                  <button className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => location.reload()}>Reload</button>
-                </div>
+              <div role="alert" className="card border-bad/40 p-3 text-[13px] flex flex-wrap items-center gap-3">
+                <span className="flex-1 min-w-48 text-bad">{loadError}</span>
+                <button className="btn btn-sm min-h-10 sm:min-h-0" onClick={() => location.reload()}>Reload</button>
               </div>
             )}
-            {error && <p role="alert" className="px-4 sm:px-5 pt-4 text-[13px] text-bad">{error}</p>}
+            {error && <p role="alert" className="text-[13px] text-bad">{error}</p>}
+            {noJobs && <p className="text-[13px] text-muted px-1">Jobs you add show up here, with their status, deadline and follow-ups.</p>}
 
-            {noJobs ? (
-              <EmptyState icon={<BriefcaseIcon />} tint="violet" title="No applications yet">
-                Jobs you add show up here, with their status, deadline and follow-ups.
-              </EmptyState>
-            ) : (
-              <>
-                {/* Segmented filter: a soft track with the active tab raised. Scrolls sideways on phones. */}
-                <div className="mt-4 border-b border-border px-4 sm:px-5 pb-3">
-                  <div
-                    role="group"
-                    aria-label="Filter applications"
-                    className="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-xl bg-surface-2 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                  >
-                    {chips.map((s) => {
-                      const active = filter === s.value;
-                      return (
-                        <button
-                          key={s.value}
-                          type="button"
-                          onClick={() => setFilter(s.value)}
-                          aria-pressed={active}
-                          className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 min-h-9 sm:min-h-8 text-[13px] transition-colors motion-reduce:transition-none ${
-                            active ? "bg-surface font-medium text-fg shadow-sm" : "text-muted hover:text-fg"
-                          }`}
-                        >
-                          {s.label}
-                          <span className={`text-[11px] tabular-nums ${active ? "rounded-full bg-surface-2 px-1.5 text-muted" : "text-muted/80"}`}>
-                            {counts[s.value] ?? 0}
+            <div className="flex min-w-0 items-center gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap pb-1">
+              {chips.map((s) => (
+                <button
+                  key={s.value}
+                  onClick={() => setFilter(s.value)}
+                  aria-pressed={filter === s.value}
+                  className={`chip shrink-0 min-h-10 px-3 sm:min-h-0 sm:px-2 py-0.5 ${
+                    filter === s.value
+                      ? "bg-surface-2 border-transparent text-fg font-medium"
+                      : "text-muted hover:text-fg"
+                  }`}
+                >
+                  {s.label} {counts[s.value] ?? 0}
+                </button>
+              ))}
+            </div>
+
+            {/* Phones: one card per job */}
+            <div className="sm:hidden space-y-2">
+              {shown.length === 0 ? (
+                <p className="text-[13px] text-muted">{jobs.length ? "No jobs match this filter." : ""}</p>
+              ) : (
+                shown.map((j) => {
+                  const urgency = deadlineUrgency(j.deadline, j.status, today);
+                  const fit = fitOf(j.analysis);
+                  const isDue = followUpDue(j, today);
+                  return (
+                    <div
+                      key={j.id}
+                      className={`card p-3 space-y-2 ${urgency === "overdue" ? "border-l-4 border-l-bad" : urgency === "soon" ? "border-l-4 border-l-ok" : ""}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <Link href={`/jobs/${j.id}`} className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{j.title || "Untitled role"}</div>
+                          <div className="text-[13px] text-muted truncate">
+                            {[j.company, j.location].filter(Boolean).join(" · ")}
+                          </div>
+                        </Link>
+                        {fit && <FitBadge fit={fit} />}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
+                        {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
+                        {!needsMigration && j.deadline && (
+                          <span className={`text-xs ${urgency === "overdue" ? "text-bad font-medium" : urgency === "soon" ? "text-ok font-medium" : "text-muted"}`}>
+                            Deadline {shortDate(j.deadline)}
                           </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                        )}
+                        {j.date_applied && <span className="text-xs text-muted">Applied {shortDate(j.date_applied)}</span>}
+                        {j.follow_up_date && j.status === "applied" && (
+                          <span className={`text-xs ${isDue ? "text-ok font-medium" : "text-muted"}`}>
+                            Follow up {shortDate(j.follow_up_date)}
+                          </span>
+                        )}
+                        {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
+                        <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
 
-                {shown.length === 0 ? (
-                  <EmptyState icon={<SearchIcon />} tint="grey" title="No jobs match this filter.">
-                    Try another status, or switch back to All.
-                  </EmptyState>
-                ) : (
-                  <>
-                    {/* Phones: one row per job */}
-                    <ul className="sm:hidden divide-y divide-border border-t border-border">
-                      {shown.map((j) => {
-                        const urgency = deadlineUrgency(j.deadline, j.status, today);
-                        const fit = fitOf(j.analysis);
-                        const isDue = followUpDue(j, today);
-                        return (
-                          <li key={j.id} className="px-4 py-3 space-y-2.5">
-                            <div className="flex items-start gap-3">
-                              <CompanyMark name={j.company} />
-                              <Link href={`/jobs/${j.id}`} className="min-w-0 flex-1">
-                                <div className="font-medium truncate">{j.title || "Untitled role"}</div>
-                                <div className="text-[13px] text-muted truncate">
-                                  {[j.company, j.location].filter(Boolean).join(" · ")}
-                                </div>
+            <div className="overflow-x-auto hidden sm:block">
+              <table className="w-full text-[13px]">
+                <thead className="text-left text-xs text-muted">
+                  <tr className="border-b border-border">
+                    <th className="py-2 pr-4 font-medium">Role</th>
+                    <th className="py-2 pr-4 font-medium hidden 2xl:table-cell">Location</th>
+                    <th className="py-2 pr-4 font-medium">Fit</th>
+                    <th className="py-2 pr-4 font-medium">Status</th>
+                    {showDeadline && <th className="py-2 pr-4 font-medium">Deadline</th>}
+                    {showApplied && <th className="py-2 pr-4 font-medium">Applied</th>}
+                    {showFollowUp && <th className="py-2 pr-4 font-medium hidden md:table-cell">Follow up</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {shown.length === 0 ? (
+                    <tr>
+                      <td className="py-2.5 pr-4 text-muted" colSpan={tableCols}>{jobs.length ? "No jobs match this filter." : ""}</td>
+                    </tr>
+                  ) : (
+                    shown.map((j) => {
+                      const fit = fitOf(j.analysis);
+                      const isDue = followUpDue(j, today);
+                      return (
+                        <tr key={j.id} className="align-middle">
+                          <td className="py-2.5 pr-4">
+                            <div className="min-w-60">
+                              <Link href={`/jobs/${j.id}`} className="font-medium hover:underline">
+                                {j.title || "Untitled role"}
                               </Link>
-                              {fit && <FitBadge fit={fit} />}
+                              <div className="text-muted">{j.company}</div>
                             </div>
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pl-12">
+                          </td>
+                          <td className="py-2.5 pr-4 hidden 2xl:table-cell text-muted">{j.location}</td>
+                          <td className="py-2.5 pr-4">{fit ? <FitBadge fit={fit} /> : <span className="text-muted">–</span>}</td>
+                          <td className="py-2.5 pr-4">
+                            <div className="flex flex-col items-start gap-1">
                               <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
                               {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
-                              {!needsMigration && j.deadline && (
-                                <span className={`text-xs ${urgency === "overdue" ? "text-bad font-medium" : urgency === "soon" ? "text-ok font-medium" : "text-muted"}`}>
-                                  Deadline {shortDate(j.deadline)}
-                                </span>
-                              )}
-                              {j.date_applied && <span className="text-xs text-muted">Applied {shortDate(j.date_applied)}</span>}
-                              {j.follow_up_date && j.status === "applied" && (
-                                <span className={`text-xs ${isDue ? "text-ok font-medium" : "text-muted"}`}>
-                                  Follow up {shortDate(j.follow_up_date)}
-                                </span>
-                              )}
+                              {/* In the status column so it shows at every width (the follow-up column hides below md). */}
                               {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
                               <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
                             </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                          </td>
+                          {showDeadline && (
+                            <td className={`py-2.5 pr-4 ${j.deadline ? dateTone(deadlineUrgency(j.deadline, j.status, today)) : "text-muted"}`}>
+                              {dateText(j.deadline)}
+                            </td>
+                          )}
+                          {showApplied && <td className="py-2.5 pr-4 text-muted">{dateText(j.date_applied)}</td>}
+                          {showFollowUp && (
+                            <td className={`py-2.5 pr-4 hidden md:table-cell ${isDue ? "text-ok font-medium" : "text-muted"}`}>{dateText(j.follow_up_date)}</td>
+                          )}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-                    {/* Desktop: a full-width table inside the panel */}
-                    <div className="hidden overflow-x-auto sm:block">
-                      <table className="w-full text-[13px]">
-                        <thead className="bg-surface-2/50 text-left text-[11px] uppercase tracking-wider text-muted">
-                          <tr className="border-y border-border">
-                            <th scope="col" className={`${CELL} whitespace-nowrap py-2.5 font-medium`}>Role</th>
-                            <th scope="col" className={`${CELL} whitespace-nowrap py-2.5 font-medium hidden 2xl:table-cell`}>Location</th>
-                            <th scope="col" className={`${CELL} whitespace-nowrap py-2.5 font-medium`}>Fit</th>
-                            <th scope="col" className={`${CELL} whitespace-nowrap py-2.5 font-medium`}>Status</th>
-                            {showDeadline && <th scope="col" className={`${CELL} whitespace-nowrap py-2.5 font-medium`}>Deadline</th>}
-                            {showApplied && <th scope="col" className={`${CELL} whitespace-nowrap py-2.5 font-medium`}>Applied</th>}
-                            {showFollowUp && <th scope="col" className={`${CELL} whitespace-nowrap py-2.5 font-medium hidden md:table-cell`}>Follow up</th>}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {shown.map((j) => {
-                            const fit = fitOf(j.analysis);
-                            const isDue = followUpDue(j, today);
-                            return (
-                              <tr key={j.id} className="align-middle transition-colors hover:bg-surface-2/40 motion-reduce:transition-none">
-                                <td className={`${CELL} py-3`}>
-                                  <div className="flex min-w-48 items-center gap-3 xl:min-w-52">
-                                    <CompanyMark name={j.company} />
-                                    <div className="min-w-0">
-                                      <Link href={`/jobs/${j.id}`} className="font-medium hover:underline">
-                                        {j.title || "Untitled role"}
-                                      </Link>
-                                      <div className="truncate text-muted">{j.company}</div>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className={`${CELL} py-3 hidden 2xl:table-cell text-muted`}>{j.location}</td>
-                                <td className={`${CELL} py-3`}>{fit ? <FitBadge fit={fit} /> : <span className="text-muted">–</span>}</td>
-                                <td className={`${CELL} whitespace-nowrap py-3`}>
-                                  <div className="flex flex-col items-start gap-1.5">
-                                    <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
-                                    {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
-                                    {/* In the status column so it shows at every width (the follow-up column hides below md). */}
-                                    {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
-                                    <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />
-                                  </div>
-                                </td>
-                                {showDeadline && (
-                                  <td className={`${CELL} py-3 ${j.deadline ? dateTone(deadlineUrgency(j.deadline, j.status, today)) : "text-muted"}`}>
-                                    {dateText(j.deadline)}
-                                  </td>
-                                )}
-                                {showApplied && <td className={`${CELL} py-3 text-muted`}>{dateText(j.date_applied)}</td>}
-                                {showFollowUp && (
-                                  <td className={`${CELL} py-3 hidden md:table-cell ${isDue ? "text-ok font-medium" : "text-muted"}`}>{dateText(j.follow_up_date)}</td>
-                                )}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </Panel>}
+          </section>
         </div>
+
       </div>
 
       {undo && <UndoToast message={undo.message} onUndo={undoFollowUp} onClose={() => setUndo(null)} raised={anyFailing} />}
