@@ -247,8 +247,8 @@ export function DocToolbar({
   /** Kept for compatibility. Selection actions now float inside the document, so nothing renders here. */
   onSlot?: (el: HTMLDivElement | null) => void;
 }) {
-  // Collapsed, the sidebar's expand button sits in the canvas's top-left corner (16px in, 28px wide, centred on the
-  // bar in AppShell): the bar starts clear of it, on lg and up only.
+  // Collapsed, the sidebar's expand button sits in this bar's left end (6px in, 32px wide, centred on the bar; see
+  // .expand-btn in globals.css): the bar starts clear of it, on lg and up only.
   const { collapsed } = useSidebar();
   return (
     <div

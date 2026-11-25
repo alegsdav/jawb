@@ -119,14 +119,7 @@ export const SidebarIcon = ({ className }: P) => (
   <svg {...base} className={className}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M9.5 4.5v15" /></svg>
 );
 
-/** The app mark: a small black glyph next to the wordmark, as in the reference. */
-export function Logo({ size = 26 }: { size?: number }) {
-  return (
-    <svg aria-hidden width={size} height={size} viewBox="0 0 24 24" className="text-fg">
-      <circle cx="7" cy="7" r="4" fill="currentColor" />
-      <circle cx="17" cy="7" r="4" fill="currentColor" />
-      <circle cx="7" cy="17" r="4" fill="currentColor" />
-      <rect x="13" y="13" width="8" height="8" rx="2.5" fill="currentColor" />
-    </svg>
-  );
+/** The app's wordmark: "Jawb" set in Young Serif (no glyph). `className` sets its size. */
+export function Wordmark({ className = "text-[24px]" }: { className?: string }) {
+  return <span className={`font-brand leading-none tracking-[-0.01em] text-fg ${className}`}>Jawb</span>;
 }

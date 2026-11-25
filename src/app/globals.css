@@ -48,6 +48,7 @@
   --color-ok-bg: var(--ok-bg);
   --color-bad-bg: var(--bad-bg);
   --font-sans: var(--font-ui);
+  --font-brand: var(--font-young-serif), Georgia, serif;
 }
 
 body {
@@ -57,6 +58,32 @@ body {
 }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Page gutters (lg and up), for pages that line up with the shell: 40px inside the canvas beside the sidebar; with
+   the sidebar collapsed, the page fills the window and lines up with the expand button's glyph (button at 20px,
+   glyph 7px in, its outline 2px more), and starts below the button. */
+.app-main { --page-x: 2.5rem; --page-top: 2.5rem; }
+.app-main[data-collapsed] { --page-x: 29px; --page-top: 76px; }
+
+/* Editor pages: their 36px toolbar runs along the top, so the expand button sits in it, clear of its first tool. */
+.app-canvas:has(.doc-toolbar) > .expand-btn { top: 2px; left: 6px; }
+
+/* The sidebar's peek (AppShell): the rail's contents on the dark glass of the menus. Its colour tokens flip, so the
+   sidebar's own text-fg / text-muted / bg-fg tints read light on dark. */
+.sidebar-peek {
+  --fg: #f4f4f5; --muted: #a1a1a6; --border: rgb(255 255 255 / 0.1);
+  color-scheme: dark;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 0s;
+}
+.sidebar-peek[data-peek="closed"] {
+  opacity: 0; transform: translateX(-8px); visibility: hidden; pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 160ms;
+}
+@keyframes sidebar-rail-in { from { opacity: 0; } to { opacity: 1; } }
+.sidebar-rail-enter { animation: sidebar-rail-in 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-peek, .sidebar-peek[data-peek="closed"] { transition: none; }
+}
 
 @layer components {
   .card { @apply bg-surface border border-border rounded-2xl; }

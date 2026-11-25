@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Young_Serif } from "next/font/google";
 import "./globals.css";
 import "./fonts.css";
 
 const ui = Inter({ variable: "--font-ui", subsets: ["latin"], weight: ["400", "500", "600"] });
+/** The wordmark's face (Wordmark in icons.tsx). */
+const brand = Young_Serif({ variable: "--font-young-serif", subsets: ["latin"], weight: "400" });
 
 export const metadata: Metadata = {
   title: "Jawb",
@@ -13,7 +15,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${ui.variable} antialiased`}>{children}</body>
+      <body className={`${ui.variable} ${brand.variable} antialiased`}>{children}</body>
     </html>
   );
 }

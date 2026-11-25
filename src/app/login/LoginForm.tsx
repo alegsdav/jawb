@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { sendMagicLink, signInWithPassword } from "./actions";
-import { Logo } from "@/components/icons";
+import { Wordmark } from "@/components/icons";
 
 /** Password sign-in with a magic-link fallback. `notice` explains why the user landed here (from `?error=`). */
 export function LoginForm({ notice }: { notice?: string }) {
@@ -16,8 +16,9 @@ export function LoginForm({ notice }: { notice?: string }) {
     <main className="min-h-dvh grid items-start justify-items-center px-4 pt-[18vh]">
       <div className="card w-full max-w-sm p-7 space-y-5">
         <div className="space-y-3">
-          <Logo size={28} />
-          <h1 className="text-2xl font-semibold tracking-tight">Jawb</h1>
+          <h1>
+            <Wordmark className="text-[34px]" />
+          </h1>
           <p className="text-sm text-muted">
             {mode === "password" ? "Sign in to your account." : "Get a one-time sign-in link by email."}
           </p>

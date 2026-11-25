@@ -2,6 +2,7 @@ import type { Job } from "@/lib/types";
 import { SUBMITTED_STATUSES } from "@/lib/outcomes";
 import { inProgress } from "@/lib/progress";
 import { ChatIcon, ClockIcon, PencilIcon, SendIcon } from "../icons";
+import { useAccount } from "../account";
 
 /** "Good morning", from the viewer's clock (rendered after load, so it can't mismatch the server). */
 function greeting(now: Date) {
@@ -9,13 +10,17 @@ function greeting(now: Date) {
   return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
 }
 
-/** The greeting and today's date. */
+/** The greeting ("Good evening, Sam") and today's date. */
 export function Greeting() {
   const now = new Date();
+  const name = useAccount()?.firstName;
   return (
-    <header className="flex items-start justify-between gap-4">
-      <h1 className="text-xl font-semibold tracking-tight">{greeting(now)}</h1>
-      <p className="hidden shrink-0 pt-1 text-[13px] text-muted sm:block">
+    <header className="flex items-end justify-between gap-4">
+      <h1 className="text-[26px] font-semibold leading-tight tracking-tight lg:text-[32px]">
+        {greeting(now)}
+        {name ? `, ${name}` : ""}
+      </h1>
+      <p className="hidden shrink-0 pb-1 text-[13px] text-muted sm:block">
         {now.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}
       </p>
     </header>

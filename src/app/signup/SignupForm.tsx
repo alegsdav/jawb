@@ -1,6 +1,6 @@
 "use client";
 
-import { Logo } from "@/components/icons";
+import { Wordmark } from "@/components/icons";
 import Link from "next/link";
 import { useActionState } from "react";
 import { signUp, type SignupState } from "./actions";
@@ -15,7 +15,7 @@ export function SignupForm({ initialCode = "" }: { initialCode?: string }) {
     <main className="min-h-dvh grid items-start justify-items-center px-4 pt-[18vh]">
       <div className="card w-full max-w-sm p-7 space-y-5">
         <div className="space-y-3">
-          <Logo size={28} />
+          <Wordmark className="block text-[34px]" />
           <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
           <p className="text-sm text-muted">Jawb is invite-only. Use the code you were given.</p>
         </div>

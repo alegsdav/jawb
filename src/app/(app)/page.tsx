@@ -15,7 +15,6 @@ import { useJobWrites, type RowSaveState } from "@/lib/jobWrites";
 import { SaveErrorToast } from "@/lib/useAutosave";
 import { FitBadge, StatusSelect } from "@/components/StatusSelect";
 import { AddJobForm } from "@/components/AddJobForm";
-import { OutcomeStats } from "@/components/OutcomeStats";
 import { deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
@@ -355,7 +354,7 @@ export default function TrackerPage() {
   );
 
   return (
-    <div className="space-y-6 px-4 sm:px-6 lg:px-10 py-5 sm:py-6">
+    <div className="space-y-6 px-4 sm:px-6 lg:px-[var(--page-x)] py-5 sm:py-6 lg:pt-[var(--page-top)] lg:pb-10">
       {migrationBanner}
       <Greeting />
       {!noJobs && <StatStrip jobs={jobs} attention={due.length + closing.length} />}
@@ -372,7 +371,6 @@ export default function TrackerPage() {
 
           <section aria-labelledby="all-apps-heading" className="space-y-3">
             <h2 id="all-apps-heading" className="text-[15px] font-semibold">All applications</h2>
-            <OutcomeStats jobs={jobs} />
 
             {loadError && (
               <div role="alert" className="card border-bad/40 p-3 text-[13px] flex flex-wrap items-center gap-3">
