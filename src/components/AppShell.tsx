@@ -18,8 +18,8 @@ const PEEK_CLOSE_DELAY = 220;
 /**
  * The (app) shell. Desktop (lg and up): the sidebar rail on the grey window chrome beside the white canvas, or,
  * collapsed, a white page filling the whole window with an expand button in its top-left corner. Hovering that
- * button opens the "peek": the same sidebar as a full-height panel over the page, at exactly the window coordinates
- * the rail uses (only its background differs). Its toggle sits where the button is, and clicking it brings the rail
+ * button opens the "peek": the same menu as a full-height dark panel over the page, with the rail's menu at the same
+ * window coordinates (the peek has no Wordmark). Its toggle sits where the button is, and clicking it brings the rail
  * back at once. The sidebar stays mounted throughout (one instance), so its visit and pin state keeps recording and
  * nothing reloads. Below lg: a slim header and the bottom tab bar, no sidebar.
  */
