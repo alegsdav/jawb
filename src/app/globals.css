@@ -69,12 +69,17 @@ body {
    editor toolbar's row (36px) too. The rail's and the peek's toggle sit at this same spot (Sidebar's header row). */
 .expand-btn { left: 6px; top: 2px; }
 
-/* The peek (AppShell): the rail's own contents on the rail's own background, as a full-height panel flush to the
-   window's left edge. Its 1px right edge is an inset shadow (it takes no room, so the layout matches the rail), plus a
-   soft shadow beyond it. Opacity only, 120ms; the panel never moves. */
+/* The peek (AppShell): a full-height panel flush to the window's left edge, square, on the dark glass of the menus
+   (float-dark's colours and blur), with a 1px right edge and a soft shadow. Its colour tokens flip, so the sidebar's
+   own text-fg / text-muted / bg-fg tints read light on dark. Opacity only, 120ms; the panel never moves. */
 .sidebar-peek {
-  background: var(--chrome);
-  box-shadow: inset -1px 0 0 var(--border), 6px 0 24px -6px rgb(0 0 0 / 0.14);
+  --fg: #f4f4f5; --muted: #a1a1a6; --border: rgb(255 255 255 / 0.1);
+  color-scheme: dark;
+  color: #f4f4f5;
+  background: rgb(44 44 46 / 0.94);
+  /* The right edge is an inset line, not a border, so the menu keeps the rail's 248px of width. */
+  box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.08), 8px 0 28px -8px rgb(0 0 0 / 0.35), 2px 0 6px rgb(0 0 0 / 0.15);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
   transition: opacity 120ms ease, visibility 0s linear 0s;
 }
 .sidebar-peek[data-peek="closed"] {
@@ -87,8 +92,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .sidebar-peek, .sidebar-peek[data-peek="closed"] { transition: none; }
 }
-/* The header's toggle and wordmark sit at the panel's top edge: keep their focus rings inside the nav's clip. */
-.sidebar-head :focus-visible { outline-offset: -2px; }
+/* The peek's toggle sits at the panel's top edge: keep its focus ring inside the nav's clip. */
+.sidebar-peek :focus-visible { outline-offset: -2px; }
 
 @layer components {
   .card { @apply bg-surface border border-border rounded-2xl; }

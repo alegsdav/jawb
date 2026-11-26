@@ -113,10 +113,10 @@ const TOGGLE =
  * Desktop (lg and up) navigation: Dashboard, the master resume and Add job; a search and the jobs (pinned ones
  * first, then recent, or matching ones); then the usage meter (only when running low) and the profile button
  * (Account and Sign out). Drawn two ways, by AppShell: the rail on the grey window chrome, or, while collapsed, the
- * same contents in the full-height panel that hovering the expand button opens (the "peek"). Both have the same
- * layout at the same window coordinates; `peek` only changes what the toggle does (it expands the rail instead of
- * collapsing it). It stays mounted either way and keeps recording visits. Phones and tablets keep the header and
- * bottom tab bar instead.
+ * same menu in the full-height panel that hovering the expand button opens (the "peek"). The menu sits at the same
+ * window coordinates in both; the peek has no Wordmark, and its toggle floats over the expand button. `peek` changes
+ * the header (the rail's Wordmark and collapse toggle, or the peek's spacer and expand toggle). It stays mounted
+ * either way and keeps recording visits. Phones and tablets keep the header and bottom tab bar instead.
  */
 export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?: () => void }) {
   const account = useAccount();
@@ -397,26 +397,39 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
   return (
     <nav
       aria-label="Workspace"
-      className={`flex flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[14px] ${peek ? "h-full w-full" : "h-dvh w-[248px]"}`}
+      className={`relative flex flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[14px] ${peek ? "h-full w-full" : "h-dvh w-[248px]"}`}
     >
-      {/* The header row is the same in the rail and the peek. Its toggle sits at window (6px, 2px), where the expand
-          button it replaces is (AppShell): the row starts at the window's top-left corner (the nav's 12px padding is
-          cancelled by the negative margins), 36px tall with the 32px toggle centred. Its bottom margin keeps Dashboard
-          where it was. */}
-      <div className="sidebar-head -ml-1.5 -mt-3 mb-2 flex h-9 items-center gap-2">
-        <button
-          type="button"
-          onClick={peek ? onExpand : () => setCollapsed(true)}
-          aria-label={peek ? "Expand sidebar" : "Collapse sidebar"}
-          aria-expanded={!peek}
-          className={TOGGLE}
-        >
-          <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
-        </button>
-        <Link href="/" className="flex h-8 min-w-0 items-center">
-          <Wordmark />
-        </Link>
-      </div>
+      {peek ? (
+        <>
+          {/* The peek's toggle sits exactly over the collapsed expand button (window 6px, 2px), which the pointer is on. */}
+          <button
+            type="button"
+            onClick={onExpand}
+            aria-label="Expand sidebar"
+            aria-expanded={false}
+            className={`absolute left-[6px] top-[2px] ${TOGGLE}`}
+          >
+            <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
+          </button>
+          {/* Keeps the rail's header height, so the menu sits at the same spot as in the rail. No Wordmark here. */}
+          <div aria-hidden className="h-8 shrink-0" />
+        </>
+      ) : (
+        <div className="flex h-8 items-center">
+          <Link href="/" className="flex h-8 min-w-0 items-center px-2">
+            <Wordmark />
+          </Link>
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            aria-label="Collapse sidebar"
+            aria-expanded
+            className={`ml-auto ${TOGGLE}`}
+          >
+            <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
+          </button>
+        </div>
+      )}
 
       <div className="space-y-px">
         {link("/", "Dashboard", path === "/", <HomeIcon className={ICON} />)}
