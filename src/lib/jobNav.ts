@@ -9,11 +9,12 @@ export type NavJob = {
   location: string;
   status: JobStatus;
   updated_at: string;
+  created_at: string;
   fit: Fit | null;
 };
 
 /** Columns for the sidebar's query: the fit is read straight out of the analysis JSON. */
-export const NAV_JOB_COLS = "id, title, company, location, status, updated_at, fit:analysis->>fit, fit_score:analysis->fit_score";
+export const NAV_JOB_COLS = "id, title, company, location, status, updated_at, created_at, fit:analysis->>fit, fit_score:analysis->fit_score";
 
 /** A row from NAV_JOB_COLS as a NavJob (old analyses only have a 0-100 fit_score). */
 export function navJob(row: Record<string, unknown>): NavJob {
@@ -26,6 +27,7 @@ export function navJob(row: Record<string, unknown>): NavJob {
     location: String(row.location ?? ""),
     status: (row.status as JobStatus) ?? "to_apply",
     updated_at: String(row.updated_at ?? ""),
+    created_at: String(row.created_at ?? ""),
     fit: fitRaw || score !== undefined ? fitOf({ fit: fitRaw as Fit | undefined, fit_score: score }) : null,
   };
 }
@@ -158,18 +160,18 @@ export const withoutPin = (pins: string[], id: string): string[] => pins.filter(
 
 // ---------- ordering ----------
 
-/** When a job last mattered on this device: its last save, or its last visit if that was later. */
-const touched = (j: NavJob, visits: Visits) => Math.max(Date.parse(j.updated_at) || 0, Date.parse(visits[j.id] ?? "") || 0);
+/** Newest created first; the id breaks ties, so the order never changes (not on visits, saves or renames). */
+const newestCreated = (a: NavJob, b: NavJob) =>
+  (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0) || a.id.localeCompare(b.id);
 
-/** The most recently updated or visited jobs, newest first. */
-export const recentJobs = (jobs: NavJob[], n = 8, visits: Visits = {}) =>
-  [...jobs].sort((a, b) => touched(b, visits) - touched(a, visits)).slice(0, n);
+/** The `n` most recently created jobs, newest first. */
+export const recentJobs = (jobs: NavJob[], n = 8): NavJob[] => [...jobs].sort(newestCreated).slice(0, n);
 
-/** Jobs whose title, company or location contain every word of the query (case-insensitive). Pins are ignored. */
-export function searchJobs(jobs: NavJob[], query: string, n = 20, visits: Visits = {}): NavJob[] {
+/** Jobs whose title, company or location contain every word of the query (case-insensitive), newest created first. Pins are ignored. */
+export function searchJobs(jobs: NavJob[], query: string, n = 20): NavJob[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-  return recentJobs(jobs, jobs.length, visits)
+  return recentJobs(jobs, jobs.length)
     .filter((j) => {
       const hay = `${j.title} ${j.company} ${j.location}`.toLowerCase();
       return words.every((w) => hay.includes(w));
@@ -179,11 +181,11 @@ export function searchJobs(jobs: NavJob[], query: string, n = 20, visits: Visits
 
 /**
  * The sidebar's two groups: the pinned jobs (newest pin first) and the recent jobs, which leave out
- * the pinned ones. Pins that point at a job that is gone are skipped.
+ * the pinned ones and are the `n` newest created. Pins that point at a job that is gone are skipped.
  */
-export function sidebarJobs(jobs: NavJob[], pins: string[], visits: Visits, n = 8): { pinned: NavJob[]; recent: NavJob[] } {
+export function sidebarJobs(jobs: NavJob[], pins: string[], n = 8): { pinned: NavJob[]; recent: NavJob[] } {
   const byId = new Map(jobs.map((j) => [j.id, j]));
   const pinned = pins.map((id) => byId.get(id)).filter((j): j is NavJob => !!j);
   const pinnedIds = new Set(pinned.map((j) => j.id));
-  return { pinned, recent: recentJobs(jobs.filter((j) => !pinnedIds.has(j.id)), n, visits) };
+  return { pinned, recent: recentJobs(jobs.filter((j) => !pinnedIds.has(j.id)), n) };
 }

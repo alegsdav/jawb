@@ -34,6 +34,7 @@ import { ResumeDocument } from "@/components/ResumeDocument";
 import { EMPTY_FORMAT_STATE, NOOP_COMMANDS, type DocCommands, type DocSelection, type FormatState } from "@/components/editorTypes";
 import { FormatMenu } from "@/components/FormatMenus";
 import { JobOverview } from "@/components/job/JobOverview";
+import { REVIEW_SPLIT_KEY, ReviewPanelToggle, SplitPane } from "@/components/SplitPane";
 import { BulletQuestions } from "@/components/job/BulletQuestions";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
@@ -1155,7 +1156,7 @@ export default function JobPage() {
   return (
     // Phones: fill the viewport above the bottom tab bar (header + pb-16 in the app layout), so no grey band shows under the document.
     <div className="flex min-h-[calc(100dvh-7rem)] flex-col sm:min-h-[calc(100dvh-7.5rem)] lg:h-full lg:min-h-0">
-      <div className="flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
+      <SplitPane storageKey={REVIEW_SPLIT_KEY}>
         <section className={`flex min-w-0 flex-col lg:min-h-0 ${tab === "resume" ? "flex-1" : "max-lg:flex-none"}`}>
           {/* Sticky together: on phones the tab row sits under the menus. */}
           <div className="sticky top-0 z-10 shrink-0">
@@ -1195,6 +1196,7 @@ export default function JobPage() {
                     <IconButton label={pdfBusy ? "Building PDF…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy || !resume}>
                       <DownloadIcon />
                     </IconButton>
+                    <ReviewPanelToggle placement="editor" />
                   </div>
                 </EditorToolbar>
               </div>
@@ -1250,12 +1252,13 @@ export default function JobPage() {
         {/* The panel column. Its tab row is desktop only (phones have the row above); on phones it's hidden while the
             document shows, but kept, so the comment card's sheet can still be portalled into it. */}
         <section
-          className={`flex min-w-0 flex-col lg:min-h-0 lg:border-l lg:border-border ${
+          className={`flex min-w-0 flex-col lg:min-h-0 ${
             tab === "resume" ? "max-lg:invisible max-lg:h-0 max-lg:overflow-hidden" : "max-lg:flex-1"
           }`}
         >
           <div className="hidden h-9 shrink-0 items-stretch border-b border-border px-6 lg:flex">
             {tabList(PANEL_TABS, panelTab, "flex h-full min-w-0 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
+            <ReviewPanelToggle placement="panel" />
           </div>
           <div ref={panelScrollRef} className="min-h-0 flex-1 lg:overflow-y-auto">
             <div className="mx-auto w-full max-w-[760px] px-4 py-6 sm:px-6">
@@ -1279,6 +1282,7 @@ export default function JobPage() {
                   bulletAreaRef={bulletAreaRef}
                   questions={questions}
                   coach={coach}
+                  resume={resume}
                 />
               )}
               {panelTab === "job" && <PostingTab job={job} onPatch={patch} />}
@@ -1309,7 +1313,7 @@ export default function JobPage() {
             </div>
           </div>
         </section>
-      </div>
+      </SplitPane>
 
       {viewingSubmitted && job.submitted_resume && job.submitted_at && (
         <SubmittedView

@@ -3,6 +3,7 @@
 import { PAGE_DEFAULTS } from "@/lib/doc/types";
 import { DocToolbar, EditorToolbar, IconButton, MenuBar, ToolbarSep, useZoom } from "./DocToolbar";
 import { FormatToolbar } from "./FormatToolbar";
+import { REVIEW_SPLIT_KEY, SplitPane } from "./SplitPane";
 import { EMPTY_FORMAT_STATE, NOOP_COMMANDS } from "./editorTypes";
 import { DownloadIcon } from "./icons";
 import { EditorCanvas } from "./ZoomFrame";
@@ -95,7 +96,7 @@ function SkeletonFrame({ tabs, panelTabs, active }: {
   const [zoom] = useZoom("doc");
   return (
     <div className="flex min-h-[calc(100dvh-7rem)] flex-col sm:min-h-[calc(100dvh-7.5rem)] lg:h-full lg:min-h-0">
-      <div className="flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
+      <SplitPane storageKey={REVIEW_SPLIT_KEY}>
         <section className="flex min-w-0 flex-col max-lg:flex-1 lg:min-h-0">
           <div className="sticky top-0 z-10 shrink-0">
             <DocToolbar>
@@ -136,12 +137,12 @@ function SkeletonFrame({ tabs, panelTabs, active }: {
         </section>
 
         {/* The panel's frame: its tab row (desktop only; phones have the row above) and an empty column. */}
-        <section className="hidden min-w-0 flex-col border-l border-border lg:flex lg:min-h-0">
+        <section className="hidden min-w-0 flex-col lg:flex lg:min-h-0">
           <div className="flex h-9 shrink-0 items-stretch border-b border-border px-6">
             <SkeletonTabs tabList={panelTabs} active="overview" className="flex h-full min-w-0 items-stretch gap-4 overflow-hidden" />
           </div>
         </section>
-      </div>
+      </SplitPane>
     </div>
   );
 }

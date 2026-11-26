@@ -10,8 +10,6 @@ import { SidebarProvider, saveCollapsed } from "./sidebarState";
 import { AccountProvider } from "./account";
 import type { Account } from "@/lib/account";
 
-/** How long the peek takes to fade (ms); expanding waits for it before the rail appears. */
-const PEEK_FADE = 160;
 /** Hovering the expand button this long opens the peek (a pointer just passing by doesn't). */
 const PEEK_OPEN_DELAY = 60;
 /** Leaving the button and the peek this long closes it (time to cross the gap between them). */
@@ -20,32 +18,37 @@ const PEEK_CLOSE_DELAY = 220;
 /**
  * The (app) shell. Desktop (lg and up): the sidebar rail on the grey window chrome beside the white canvas, or,
  * collapsed, a white page filling the whole window with an expand button in its top-left corner. Hovering that
- * button opens the "peek": the same sidebar in a floating glass panel over the page, whose own toggle (white) sits
- * where the button is; clicking it fades the peek away and brings the rail back. The sidebar stays mounted
- * throughout (one instance, restyled), so its visit and pin state keeps recording and nothing reloads.
- * Below lg: a slim header and the bottom tab bar, no sidebar.
+ * button opens the "peek": the same sidebar as a full-height panel over the page, at exactly the window coordinates
+ * the rail uses (only its background differs). Its toggle sits where the button is, and clicking it brings the rail
+ * back at once. The sidebar stays mounted throughout (one instance), so its visit and pin state keeps recording and
+ * nothing reloads. Below lg: a slim header and the bottom tab bar, no sidebar.
  */
 export function AppShell({
   initialCollapsed, account, children,
 }: { initialCollapsed: boolean; account: Account | null; children: React.ReactNode }) {
   const [collapsed, setCollapsedState] = useState(initialCollapsed);
   const [peek, setPeek] = useState(false);
-  // The rail fades in once, right after the peek expanded it.
-  const [railEnter, setRailEnter] = useState(false);
-  const setCollapsed = useCallback((next: boolean) => {
-    setCollapsedState(next);
-    setPeek(false);
-    saveCollapsed(next);
-  }, []);
-  const value = useMemo(() => ({ collapsed, setCollapsed }), [collapsed, setCollapsed]);
-
+  // Whether the peek has opened since the last collapse. Until it has, the hidden peek is applied at once: no fade
+  // from the rail's full opacity, which would flash.
+  const [armed, setArmed] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
+  const expandRef = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The pointer is over the expand button or the peek.
   const hovering = useRef(false);
-  // The peek's toggle was clicked: the peek is fading out and the rail comes next, so hovering can't reopen it.
-  const expanding = useRef(false);
+  // Set by collapsing: the pointer may already rest on the button that just appeared, so the peek waits until the
+  // pointer has left the button and come back. Cleared when it leaves the button (or moves off it).
+  const suppressUntilLeave = useRef(false);
   const path = usePathname();
+
+  const setCollapsed = useCallback((next: boolean) => {
+    setCollapsedState(next);
+    setPeek(false);
+    setArmed(false);
+    suppressUntilLeave.current = next;
+    saveCollapsed(next);
+  }, []);
+  const value = useMemo(() => ({ collapsed, setCollapsed }), [collapsed, setCollapsed]);
 
   const clearTimer = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -72,35 +75,49 @@ export function AppShell({
     }, delay);
   };
 
+  const openPeek = () => {
+    setArmed(true);
+    setPeek(true);
+  };
+
   const enter = (e: React.PointerEvent, delay: number) => {
-    if (e.pointerType !== "mouse" || expanding.current) return;
+    if (e.pointerType !== "mouse") return;
     hovering.current = true;
     clearTimer();
-    if (!peek && delay) timer.current = setTimeout(() => setPeek(true), delay);
+    if (peek || suppressUntilLeave.current || !delay) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      openPeek();
+    }, delay);
   };
   const leave = (e: React.PointerEvent) => {
-    if (e.pointerType !== "mouse" || expanding.current) return;
+    if (e.pointerType !== "mouse") return;
     hovering.current = false;
+    // Not the suppression: collapsing moves the aside's hidden peek out from under the pointer, which fires this
+    // leave too. The suppression ends only when the pointer is seen outside the expand button (see the effect below).
     scheduleClose();
   };
 
-  /** The peek's toggle: fade the peek out, then show the rail. */
+  /** The peek's toggle: the layouts are identical, so the rail simply takes the peek's place, with no fade. */
   const expandFromPeek = () => {
     clearTimer();
-    expanding.current = true;
-    setPeek(false);
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    timer.current = setTimeout(
-      () => {
-        timer.current = null;
-        expanding.current = false;
-        hovering.current = false;
-        setRailEnter(!reduce);
-        setCollapsed(false);
-      },
-      reduce ? 0 : PEEK_FADE,
-    );
+    hovering.current = false;
+    setCollapsed(false);
   };
+
+  // After a collapse the pointer may still rest on the expand button: once it moves off the button, the peek may open.
+  useEffect(() => {
+    if (!collapsed) return;
+    const onMove = (e: PointerEvent) => {
+      if (!suppressUntilLeave.current) return;
+      const r = expandRef.current?.getBoundingClientRect();
+      if (!r || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) {
+        suppressUntilLeave.current = false;
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [collapsed]);
 
   // While open: Escape or a press anywhere outside it (and outside its menus, which sit in document.body) closes it.
   useEffect(() => {
@@ -137,14 +154,14 @@ export function AppShell({
           <aside
             ref={asideRef}
             data-peek={collapsed ? (peek ? "open" : "closed") : undefined}
+            data-instant={collapsed && !armed ? "" : undefined}
             inert={collapsed && !peek}
             onPointerEnter={collapsed ? (e) => enter(e, 0) : undefined}
             onPointerLeave={collapsed ? leave : undefined}
-            onAnimationEnd={() => setRailEnter(false)}
             className={
               collapsed
-                ? "sidebar-peek float-dark hidden lg:fixed lg:bottom-2 lg:left-2 lg:top-2 lg:z-30 lg:block lg:w-[248px] lg:rounded-2xl"
-                : `hidden lg:block lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh ${railEnter ? "sidebar-rail-enter" : ""}`
+                ? "sidebar-peek hidden lg:fixed lg:bottom-0 lg:left-0 lg:top-0 lg:z-30 lg:block lg:w-[248px]"
+                : "hidden lg:block lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh"
             }
           >
             <Sidebar peek={collapsed} onExpand={expandFromPeek} />
@@ -172,13 +189,14 @@ export function AppShell({
               </main>
               {collapsed && (
                 <button
+                  ref={expandRef}
                   type="button"
                   onClick={() => setCollapsed(false)}
                   onPointerEnter={(e) => enter(e, PEEK_OPEN_DELAY)}
                   onPointerLeave={leave}
                   aria-label="Expand sidebar"
                   aria-expanded={false}
-                  className="expand-btn absolute left-5 top-5 z-20 hidden h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted hover:bg-fg/[0.05] hover:text-fg lg:flex"
+                  className="expand-btn absolute z-20 hidden h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted hover:bg-fg/[0.06] hover:text-fg lg:flex"
                 >
                   <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
                 </button>
