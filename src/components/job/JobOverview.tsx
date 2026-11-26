@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef, type CSSProperties, type ReactNode, type Ref } from "react";
-import type { Analysis, Fit, Job } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import type { Analysis, Fit, Job, Resume } from "@/lib/types";
 import { fitOf } from "@/lib/fit";
 import { SUBMITTED_STATUSES } from "@/lib/outcomes";
+import { docPlainText } from "@/lib/doc/model";
+import { resumeDoc } from "@/lib/resume";
+import { liveKeywords, meaningMatches } from "@/lib/keywords";
 import { DeadlineField } from "../DeadlineField";
 import { Menu, MenuItem } from "../Menu";
 import { FlowText, flowEndMs } from "../FlowText";
@@ -125,7 +128,30 @@ export type OverviewProps = {
   questions: ReactNode;
   /** The coach panel for the selected entry or bullet. */
   coach: ReactNode;
+  /** The resume on screen (the tailored copy). The keyword pills re-check it as it is edited. */
+  resume: Resume | null;
 };
+
+/** How long the resume must stand still before the keyword pills re-check it (typing stays smooth). */
+const KEYWORD_SCAN_MS = 250;
+
+/**
+ * The resume text as it was `ms` ago: updates once it has stopped changing for `ms`. The first text (the resume
+ * arriving after the page loads) is used at once, so the pills don't show a moment of red.
+ */
+function useDebouncedText(value: string, ms: number): string {
+  const [shown, setShown] = useState(value);
+  useEffect(() => {
+    if (!shown && value) {
+      setShown(value);
+      return;
+    }
+    const t = setTimeout(() => setShown(value), ms);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `shown` is only read to spot the first text
+  }, [value, ms]);
+  return shown || value;
+}
 
 /**
  * The job's Overview tab: title and company, the fit in one sentence with the verdict, the keywords, then the
@@ -137,8 +163,21 @@ export function JobOverview(p: OverviewProps) {
   const play = useEntrance(a?.analyzed_at ? `${job.id}:${a.analyzed_at}` : null);
   const verdictEnd = a ? flowEndMs(a.verdict, VERDICT_MS) : 0;
   const keywordsMs = verdictEnd + 80;
-  const missing = a?.keywords.missing ?? [];
-  const matched = a?.keywords.matched ?? [];
+  // The resume as plain text, whole document. The pills re-check it, but only once it has been still for a moment.
+  const resumeText = useMemo(() => (p.resume ? docPlainText(resumeDoc(p.resume)) : ""), [p.resume]);
+  const scanText = useDebouncedText(resumeText, KEYWORD_SCAN_MS);
+  // Keywords the AI matched by meaning stay green. Fixed per analysis (and again when the resume first arrives),
+  // not on every edit: the text read here is the one on screen at that moment.
+  const hasResume = !!p.resume;
+  const meaningOnly = useMemo(
+    () => meaningMatches(a?.keywords.matched ?? [], resumeText),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resumeText is read only when the analysis or the resume's arrival changes
+    [a?.keywords, hasResume],
+  );
+  const keywords = useMemo(
+    () => liveKeywords(a?.keywords ?? { missing: [], matched: [] }, scanText, meaningOnly),
+    [a?.keywords, scanText, meaningOnly],
+  );
   const limit = !!p.analyzeError && ANALYSIS_LIMIT_RE.test(p.analyzeError);
 
   return (
@@ -242,27 +281,28 @@ export function JobOverview(p: OverviewProps) {
         )}
       </div>
 
-      {/* Keywords: one wrapping row of pills, missing first. Spans, not buttons: nothing happens on click. */}
-      {a && missing.length + matched.length > 0 && (
+      {/* Keywords: one wrapping row of pills in the analysis's order (missing first), so a pill keeps its place
+          when its colour changes. Red = not on the resume, green = on it (a live scan of the resume).
+          Spans, not buttons: nothing happens on click. */}
+      {a && keywords.length > 0 && (
         <ul
           aria-label="Keywords from the posting"
           className={`mt-6 flex flex-wrap gap-1.5 ${fadeClass(play)}`}
           style={fadeStyle(play, keywordsMs)}
         >
-          {missing.map((k) => (
-            <li key={`missing:${k}`}>
-              <span title="Missing from your resume" className="inline-flex items-center rounded-[4px] px-2 py-0.5 text-[13px] text-fg bg-bad/[0.07]">
-                <span className="sr-only">Missing from your resume: </span>
-                {k}
-              </span>
-            </li>
-          ))}
-          {matched.map((k) => (
-            <li key={`matched:${k}`}>
-              <span title="On your resume" className="inline-flex items-center rounded-[4px] px-2 py-0.5 text-[13px] text-fg bg-good/[0.07]">
-                <span className="sr-only">On your resume: </span>
-                {k}
-              </span>
+          {keywords.map(({ keyword: k, group, found }) => (
+            <li key={`${group}:${k}`}>
+              {found ? (
+                <span title="On your resume" className="inline-flex items-center rounded-[4px] px-2 py-0.5 text-[13px] text-fg bg-good/[0.07]">
+                  <span className="sr-only">On your resume: </span>
+                  {k}
+                </span>
+              ) : (
+                <span title="Missing from your resume" className="inline-flex items-center rounded-[4px] px-2 py-0.5 text-[13px] text-fg bg-bad/[0.07]">
+                  <span className="sr-only">Missing from your resume: </span>
+                  {k}
+                </span>
+              )}
             </li>
           ))}
         </ul>

@@ -119,6 +119,11 @@ export const SidebarIcon = ({ className }: P) => (
   <svg {...base} className={className}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M9.5 4.5v15" /></svg>
 );
 
+/** A panel with a column line on the right: toggles the review panel (the mirror of SidebarIcon). */
+export const PanelRightIcon = ({ className }: P) => (
+  <svg {...base} className={className}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M14.5 4.5v15" /></svg>
+);
+
 /** The app's wordmark: "Jawb" set in Young Serif (no glyph). `className` sets its size. */
 export function Wordmark({ className = "text-[24px]" }: { className?: string }) {
   return <span className={`font-brand leading-none tracking-[-0.01em] text-fg ${className}`}>Jawb</span>;

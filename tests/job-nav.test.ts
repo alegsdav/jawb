@@ -4,11 +4,16 @@ import {
   withPin, withVisit, withoutPin, withoutVisit,
 } from "@/lib/jobNav";
 
-const row = (id: string, title: string, company: string, updated_at: string, extra: Record<string, unknown> = {}) =>
-  navJob({ id, title, company, location: "Boston, MA", status: "to_apply", updated_at, ...extra });
+const row = (id: string, title: string, company: string, created_at: string, extra: Record<string, unknown> = {}) =>
+  navJob({ id, title, company, location: "Boston, MA", status: "to_apply", updated_at: "2026-01-01T00:00:00.000Z", created_at, ...extra });
 
 describe("sidebar jobs", () => {
-  const jobs = Array.from({ length: 10 }, (_, i) => row(`j${i}`, `Role ${i}`, i % 2 ? "Acme" : "Globex", `2026-11-${String(i + 1).padStart(2, "0")}`));
+  const day = (i: number) => `2026-11-${String(i).padStart(2, "0")}T09:00:00.000Z`;
+  // j0 is the oldest and j9 the newest created. updated_at runs the other way, so any sort by it would fail.
+  const jobs = Array.from({ length: 10 }, (_, i) =>
+    row(`j${i}`, `Role ${i}`, i % 2 ? "Acme" : "Globex", day(i + 1), { updated_at: `2026-12-${String(10 - i).padStart(2, "0")}T09:00:00.000Z` }),
+  );
+  const newest8 = ["j9", "j8", "j7", "j6", "j5", "j4", "j3", "j2"];
 
   it("reads the fit from the analysis JSON (and old 0-100 scores)", () => {
     expect(row("a", "", "", "", { fit: "strong" }).fit).toBe("strong");
@@ -16,8 +21,31 @@ describe("sidebar jobs", () => {
     expect(row("a", "", "", "").fit).toBeNull();
   });
 
-  it("recent jobs: the last 8 by updated_at", () => {
-    expect(recentJobs(jobs).map((j) => j.id)).toEqual(["j9", "j8", "j7", "j6", "j5", "j4", "j3", "j2"]);
+  it("maps created_at from the row", () => {
+    expect(row("a", "", "", day(3)).created_at).toBe(day(3));
+  });
+
+  it("recent jobs: the 8 newest created, newest first", () => {
+    expect(recentJobs(jobs).map((j) => j.id)).toEqual(newest8);
+  });
+
+  it("the order is by creation only: saves and renames do not move a job", () => {
+    const saved = jobs.map((j) => (j.id === "j0" ? { ...j, updated_at: "2027-01-01T00:00:00.000Z" } : j));
+    expect(recentJobs(saved).map((j) => j.id)).toEqual(newest8);
+    expect(sidebarJobs(saved, []).recent.map((j) => j.id)).toEqual(newest8);
+  });
+
+  it("opening a job (a visit) does not move it: the visit log is kept, but the order ignores it", () => {
+    const visits = withVisit({}, "j0", "2026-11-30T12:00:00.000Z");
+    expect(visits).toHaveProperty("j0");
+    expect(recentJobs(jobs).map((j) => j.id)).toEqual(newest8);
+    expect(sidebarJobs(jobs, []).recent.map((j) => j.id)).toEqual(newest8);
+  });
+
+  it("jobs created at the same moment are ordered by id, so the order is fixed", () => {
+    const tied = [row("b", "", "", day(5)), row("a", "", "", day(5)), row("c", "", "", day(6))];
+    expect(recentJobs(tied).map((j) => j.id)).toEqual(["c", "a", "b"]);
+    expect(recentJobs([...tied].reverse()).map((j) => j.id)).toEqual(["c", "a", "b"]);
   });
 
   it("search matches every word across title, company and location", () => {
@@ -27,31 +55,28 @@ describe("sidebar jobs", () => {
     expect(searchJobs(jobs, "  ")).toEqual([]);
   });
 
-  it("a visit counts as recent activity, so an opened job moves up", () => {
-    // j0 was last saved on the 1st, but was opened after everything else was saved.
-    const visits = { j0: "2026-11-30T12:00:00.000Z" };
-    expect(recentJobs(jobs, 8, visits).map((j) => j.id)[0]).toBe("j0");
-    // An older visit does not push a job below its own save time.
-    expect(recentJobs(jobs, 8, { j9: "2026-11-01T00:00:00.000Z" }).map((j) => j.id)[0]).toBe("j9");
-    expect(recentJobs(jobs, 8, { j1: "2026-11-02T00:00:00.000Z" }).map((j) => j.id)).not.toContain("j1");
+  it("search results are ordered by created_at, newest first, and are not capped at 8", () => {
+    expect(searchJobs(jobs, "globex").map((j) => j.id)).toEqual(["j8", "j6", "j4", "j2", "j0"]);
+    expect(searchJobs(jobs, "role", 20).map((j) => j.id)).toEqual(["j9", "j8", "j7", "j6", "j5", "j4", "j3", "j2", "j1", "j0"]);
   });
 
-  it("search orders by the same visit-aware recency", () => {
-    const visits = { j2: "2026-11-30T00:00:00.000Z" };
-    expect(searchJobs(jobs, "globex", 20, visits).map((j) => j.id)[0]).toBe("j2");
-  });
-
-  it("pins are excluded from recent, pinned in pin order (newest first)", () => {
+  it("pins are excluded from recent, pinned in pin order (newest pin first)", () => {
     const pins = withPin(withPin([], "j1"), "j0");
     expect(pins).toEqual(["j0", "j1"]);
-    const { pinned, recent } = sidebarJobs(jobs, pins, {});
+    const { pinned, recent } = sidebarJobs(jobs, pins);
     expect(pinned.map((j) => j.id)).toEqual(["j0", "j1"]);
-    expect(recent.map((j) => j.id)).toEqual(["j9", "j8", "j7", "j6", "j5", "j4", "j3", "j2"]);
+    expect(recent.map((j) => j.id)).toEqual(newest8);
     expect(recent.some((j) => pins.includes(j.id))).toBe(false);
   });
 
+  it("a pinned job that is among the newest is shown in the pins, and the recent list fills up to 8 without it", () => {
+    const { pinned, recent } = sidebarJobs(jobs, ["j9"]);
+    expect(pinned.map((j) => j.id)).toEqual(["j9"]);
+    expect(recent.map((j) => j.id)).toEqual(["j8", "j7", "j6", "j5", "j4", "j3", "j2", "j1"]);
+  });
+
   it("pins for jobs that are gone are skipped", () => {
-    const { pinned } = sidebarJobs(jobs, ["gone", "j3"], {});
+    const { pinned } = sidebarJobs(jobs, ["gone", "j3"]);
     expect(pinned.map((j) => j.id)).toEqual(["j3"]);
   });
 
