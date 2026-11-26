@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isMissingRelation } from "@/lib/db";
 import { signOut } from "@/app/login/actions";
@@ -105,14 +105,7 @@ function JobRow({
   );
 }
 
-/** Top of every job row in the sidebar, by job id (read before a reorder, to animate from). */
-function rowTops(nav: HTMLElement | null): Map<string, number> {
-  const tops = new Map<string, number>();
-  nav?.querySelectorAll<HTMLElement>("li[data-job-id]").forEach((el) => tops.set(el.dataset.jobId ?? "", el.getBoundingClientRect().top));
-  return tops;
-}
-
-/** The sidebar's toggle (32px, 18px glyph): collapse in the rail, expand in the peek. */
+/** The sidebar's toggle (32px, 18px glyph): collapses the rail, or expands from the peek (same spot, same look). */
 const TOGGLE =
   "flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted hover:bg-fg/[0.06] hover:text-fg";
 
@@ -120,9 +113,10 @@ const TOGGLE =
  * Desktop (lg and up) navigation: Dashboard, the master resume and Add job; a search and the jobs (pinned ones
  * first, then recent, or matching ones); then the usage meter (only when running low) and the profile button
  * (Account and Sign out). Drawn two ways, by AppShell: the rail on the grey window chrome, or, while collapsed, the
- * same contents in the floating glass "peek" that hovering the expand button opens (`peek`; its toggle is white
- * and expands the rail). It stays mounted either way and keeps recording visits. Phones and tablets keep the
- * header and bottom tab bar instead.
+ * same contents in the full-height panel that hovering the expand button opens (the "peek"). Both have the same
+ * layout at the same window coordinates; `peek` only changes what the toggle does (it expands the rail instead of
+ * collapsing it). It stays mounted either way and keeps recording visits. Phones and tablets keep the header and
+ * bottom tab bar instead.
  */
 export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?: () => void }) {
   const account = useAccount();
@@ -133,16 +127,14 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
   const [jobs, setJobs] = useState<NavJob[]>([]);
   const [query, setQuery] = useState("");
   // Per-device memory (localStorage): when each job was last opened, and the pinned job ids, newest pin first.
-  const [visits, setVisits] = useState<Visits>({});
+  // Visits are recorded (here and on the account) but no longer order the list: jobs stay in creation order.
+  const [, setVisits] = useState<Visits>({});
   const [pins, setPins] = useState<string[]>([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // False until the first read: the job list stays empty instead of flashing "Jobs you add show up here."
   const [loaded, setLoaded] = useState(false);
   // Mirrors renamingId for handlers: Enter unmounts the input, and that blur must not save a second time.
   const renamingRef = useRef<string | null>(null);
-  const navRef = useRef<HTMLElement>(null);
-  // Row tops captured by a click, so the reorder it causes can slide each row from where it was.
-  const flipFrom = useRef<Map<string, number> | null>(null);
   // Which store holds pins and visits: true once the account's job_nav has been read, false when migration
   // 0009 is missing (this device keeps them, as before), null until the first read.
   const navMode = useRef<boolean | null>(null);
@@ -208,7 +200,7 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
       const quiet = navInFlight.current === 0;
       const writes = navWrites.current;
       const [jobsRes, navRes] = await Promise.all([
-        supabase.from("jobs").select(NAV_JOB_COLS).order("updated_at", { ascending: false }),
+        supabase.from("jobs").select(NAV_JOB_COLS).order("created_at", { ascending: false }),
         supabase.from("job_nav").select("job_id, visited_at, pinned_at"),
       ]);
       if (!alive) return;
@@ -293,31 +285,8 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
     };
   }, [supabase, path]);
 
-  // After a click reorders the rows, slide each moved row from its old place to its new one (FLIP).
-  // Runs after every commit, but does nothing unless a click just set flipFrom.
-  useLayoutEffect(() => {
-    const from = flipFrom.current;
-    flipFrom.current = null;
-    // Hidden (display:none, sidebar collapsed): every rect reads 0, so there is nothing to slide from.
-    if (!from || !navRef.current || navRef.current.getClientRects().length === 0) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    navRef.current.querySelectorAll<HTMLElement>("li[data-job-id]").forEach((el) => {
-      const old = from.get(el.dataset.jobId ?? "");
-      if (old === undefined) return;
-      const delta = old - el.getBoundingClientRect().top;
-      if (!delta) return;
-      el.style.transition = "none";
-      el.style.transform = `translateY(${delta}px)`;
-      void el.offsetHeight; // commit the start position before the transition begins
-      el.style.transition = "transform 220ms cubic-bezier(.2,.8,.2,1)";
-      el.style.transform = "";
-      el.addEventListener("transitionend", () => (el.style.transition = ""), { once: true });
-    });
-  });
-
-  /** Clicking a job moves it to the top at once, before the page change finishes. */
+  /** Opening a job records the visit; the list order does not change. */
   function openJob(id: string) {
-    flipFrom.current = rowTops(navRef.current);
     clickedId.current = id;
     recordOpen(id);
   }
@@ -398,10 +367,10 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
   const actions: RowActions = { open: openJob, pin: togglePin, rename: startRename, endRename, remove: deleteJob };
 
   const searching = query.trim().length > 0;
-  const { pinned, recent } = sidebarJobs(jobs, pins, visits);
+  const { pinned, recent } = sidebarJobs(jobs, pins);
   const pinnedIds = new Set(pins);
-  const shown = searching ? searchJobs(jobs, query, 20, visits) : recent;
-  const heading = searching ? `Results (${shown.length})` : "Recent jobs";
+  const shown = searching ? searchJobs(jobs, query, 20) : recent;
+  const heading = searching ? `Results (${shown.length})` : "Jobs";
 
   /** A nav row: icon, then its label. */
   const link = (href: string, text: string, active: boolean, icon: React.ReactNode) => (
@@ -427,36 +396,27 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
 
   return (
     <nav
-      ref={navRef}
       aria-label="Workspace"
       className={`flex flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[14px] ${peek ? "h-full w-full" : "h-dvh w-[248px]"}`}
     >
-      {peek ? (
-        // The toggle sits exactly where the expand button it covers is (AppShell), so the pointer lands on it.
-        <div className="flex h-8 items-center gap-3">
-          <button type="button" onClick={onExpand} aria-label="Expand sidebar" aria-expanded={false} className={TOGGLE}>
-            <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
-          </button>
-          <Link href="/" className="flex h-8 min-w-0 items-center">
-            <Wordmark />
-          </Link>
-        </div>
-      ) : (
-        <div className="flex h-8 items-center">
-          <Link href="/" className="flex h-8 min-w-0 items-center px-2">
-            <Wordmark />
-          </Link>
-          <button
-            type="button"
-            onClick={() => setCollapsed(true)}
-            aria-label="Collapse sidebar"
-            aria-expanded
-            className={`ml-auto ${TOGGLE}`}
-          >
-            <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
-          </button>
-        </div>
-      )}
+      {/* The header row is the same in the rail and the peek. Its toggle sits at window (6px, 2px), where the expand
+          button it replaces is (AppShell): the row starts at the window's top-left corner (the nav's 12px padding is
+          cancelled by the negative margins), 36px tall with the 32px toggle centred. Its bottom margin keeps Dashboard
+          where it was. */}
+      <div className="sidebar-head -ml-1.5 -mt-3 mb-2 flex h-9 items-center gap-2">
+        <button
+          type="button"
+          onClick={peek ? onExpand : () => setCollapsed(true)}
+          aria-label={peek ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!peek}
+          className={TOGGLE}
+        >
+          <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
+        </button>
+        <Link href="/" className="flex h-8 min-w-0 items-center">
+          <Wordmark />
+        </Link>
+      </div>
 
       <div className="space-y-px">
         {link("/", "Dashboard", path === "/", <HomeIcon className={ICON} />)}

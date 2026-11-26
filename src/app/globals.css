@@ -65,25 +65,30 @@ body {
 .app-main { --page-x: 2.5rem; --page-top: 2.5rem; }
 .app-main[data-collapsed] { --page-x: 29px; --page-top: 76px; }
 
-/* Editor pages: their 36px toolbar runs along the top, so the expand button sits in it, clear of its first tool. */
-.app-canvas:has(.doc-toolbar) > .expand-btn { top: 2px; left: 6px; }
+/* The collapsed sidebar's expand button sits in the same window spot on every page: 6px in, 2px down, which is the
+   editor toolbar's row (36px) too. The rail's and the peek's toggle sit at this same spot (Sidebar's header row). */
+.expand-btn { left: 6px; top: 2px; }
 
-/* The sidebar's peek (AppShell): the rail's contents on the dark glass of the menus. Its colour tokens flip, so the
-   sidebar's own text-fg / text-muted / bg-fg tints read light on dark. */
+/* The peek (AppShell): the rail's own contents on the rail's own background, as a full-height panel flush to the
+   window's left edge. Its 1px right edge is an inset shadow (it takes no room, so the layout matches the rail), plus a
+   soft shadow beyond it. Opacity only, 120ms; the panel never moves. */
 .sidebar-peek {
-  --fg: #f4f4f5; --muted: #a1a1a6; --border: rgb(255 255 255 / 0.1);
-  color-scheme: dark;
-  transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 0s;
+  background: var(--chrome);
+  box-shadow: inset -1px 0 0 var(--border), 6px 0 24px -6px rgb(0 0 0 / 0.14);
+  transition: opacity 120ms ease, visibility 0s linear 0s;
 }
 .sidebar-peek[data-peek="closed"] {
-  opacity: 0; transform: translateX(-8px); visibility: hidden; pointer-events: none;
-  transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 160ms;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 120ms ease, visibility 0s linear 120ms;
 }
-@keyframes sidebar-rail-in { from { opacity: 0; } to { opacity: 1; } }
-.sidebar-rail-enter { animation: sidebar-rail-in 180ms ease-out; }
+/* Rail to collapsed: the hidden state applies at once, not as a fade from the rail's full opacity. AppShell sets this
+   until the peek has opened once since the collapse. */
+.sidebar-peek[data-instant] { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-peek, .sidebar-peek[data-peek="closed"] { transition: none; }
 }
+/* The header's toggle and wordmark sit at the panel's top edge: keep their focus rings inside the nav's clip. */
+.sidebar-head :focus-visible { outline-offset: -2px; }
 
 @layer components {
   .card { @apply bg-surface border border-border rounded-2xl; }
