@@ -238,8 +238,8 @@ export function useZoom(key: string): [number, (z: number) => void] {
 
 /**
  * Slim top bar for editor pages: `.app-bar` (36px, globals.css), hairline bottom border, children laid out left to
- * right. With the sidebar collapsed (lg and up) it grows up to the window's top, padded so its contents and divider
- * stay where they are when the sidebar is open. The review panel's tab row uses the same class.
+ * right. It is the same row with the sidebar open or collapsed: the canvas's top bar, its divider 45px down the window.
+ * The review panel's tab row uses the same class.
  * Use `<div className="ml-auto flex items-center gap-1">` for the right-hand group.
  */
 export function DocToolbar({
@@ -249,8 +249,9 @@ export function DocToolbar({
   /** Kept for compatibility. Selection actions now float inside the document, so nothing renders here. */
   onSlot?: (el: HTMLDivElement | null) => void;
 }) {
-  // Collapsed, the sidebar's expand button sits in this bar's left end (6px in, 32px wide, centred on the bar's row;
-  // see .expand-btn in globals.css): the bar starts clear of it, on lg and up only.
+  // Collapsed, the sidebar's expand button sits in this bar's left end (window x 13..45, centred on the bar's row; see
+  // .expand-btn in globals.css). The canvas's inside starts at x 9, so pl-11 (44px) puts the contents 8px past the
+  // button, on lg and up only.
   const { collapsed } = useSidebar();
   return (
     <div

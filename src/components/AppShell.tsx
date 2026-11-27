@@ -17,7 +17,8 @@ const PEEK_CLOSE_DELAY = 220;
 
 /**
  * The (app) shell. Desktop (lg and up): the sidebar rail on the grey window chrome beside the white canvas, or,
- * collapsed, a white page filling the whole window with an expand button in its top-left corner. Hovering that
+ * collapsed, the same canvas extended to the window's left edge (same margins, so its top bar keeps its row), with an
+ * expand button in its top-left corner, in the sidebar icons' column. Hovering that
  * button opens the "peek": the same menu as a full-height dark panel over the page, with the rail's menu at the same
  * window coordinates (the peek has no Wordmark). Its toggle sits where the button is, and clicking it brings the rail
  * back at once. The sidebar stays mounted throughout (one instance), so its visit and pin state keeps recording and
@@ -175,14 +176,13 @@ export function AppShell({
               </div>
             </header>
             {/* The wrapper holds the button that opens a collapsed sidebar: it sits beside <main>, not in it, so it
-                stays put while the page scrolls. */}
+                stays put while the page scrolls. <main> is the same white canvas in both states, inset by --chrome-gap
+                on every side it isn't flush against; collapsed, only its left edge moves out to the window's. */}
             <div className="app-canvas relative flex min-w-0 flex-1 flex-col">
               <main
                 data-collapsed={collapsed ? "" : undefined}
-                className={`app-main min-w-0 flex-1 bg-surface lg:overflow-y-auto lg:flex-none ${
-                  collapsed
-                    ? "lg:h-dvh"
-                    : "lg:my-[var(--chrome-gap)] lg:mr-[var(--chrome-gap)] lg:h-[calc(100dvh-2*var(--chrome-gap))] lg:rounded-xl lg:border lg:border-border lg:shadow-[0_1px_3px_rgb(0_0_0/0.04)]"
+                className={`app-main min-w-0 flex-1 bg-surface lg:overflow-y-auto lg:flex-none lg:my-[var(--chrome-gap)] lg:mr-[var(--chrome-gap)] lg:h-[calc(100dvh-2*var(--chrome-gap))] lg:rounded-xl lg:border lg:border-border lg:shadow-[0_1px_3px_rgb(0_0_0/0.04)] ${
+                  collapsed ? "lg:ml-[var(--chrome-gap)]" : ""
                 }`}
               >
                 {children}

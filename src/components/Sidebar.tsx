@@ -401,13 +401,13 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
     >
       {peek ? (
         <>
-          {/* The peek's toggle sits exactly over the collapsed expand button (window 6px, --toggle-top), which the pointer is on. */}
+          {/* The peek's toggle sits exactly over the collapsed expand button (window --toggle-left, --toggle-top), which the pointer is on. */}
           <button
             type="button"
             onClick={onExpand}
             aria-label="Expand sidebar"
             aria-expanded={false}
-            className={`absolute left-[6px] top-[var(--toggle-top)] ${TOGGLE}`}
+            className={`absolute left-[var(--toggle-left)] top-[var(--toggle-top)] ${TOGGLE}`}
           >
             <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
           </button>
