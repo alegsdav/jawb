@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/supabase/server";
+import { profileNameFromMetadata } from "@/lib/account";
+import { AccountNameForm } from "@/components/AccountNameForm";
 import { PasswordForm } from "@/components/PasswordForm";
 import { UsageCard } from "@/components/UsageMeter";
 import { signOut } from "@/app/login/actions";
@@ -18,6 +20,12 @@ export default async function AccountPage() {
           </p>
         )}
       </div>
+
+      <section className="space-y-2" aria-labelledby="account-name">
+        <h2 id="account-name" className="font-semibold">Name</h2>
+        <p className="text-sm text-muted">Shown in your greeting and the sidebar. Up to 60 characters.</p>
+        <AccountNameForm initialName={profileNameFromMetadata(user?.user_metadata)} />
+      </section>
 
       <PasswordForm />
 

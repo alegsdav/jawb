@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Fact, Resume } from "@/lib/types";
 import { postApi } from "@/lib/api";
 import { LoadingState } from "@/components/ui/loading-state";
+import { useAccount } from "@/components/account";
 import {
   BUILDER_KEY, builderStepErrors, emptyBuilder, EXPERIENCE_TYPES, MIN_WHAT, newExperience, readBuilder, type BuilderState,
   type Experience, type StepErrors,
@@ -93,6 +94,12 @@ export function Builder({
     if (!email) return;
     setS((cur) => (cur.about.email ? cur : { ...cur, about: { ...cur.about, email } }));
   }, [email]);
+  // The account's profile name fills the name field only while it is empty: never over what they typed or a saved draft.
+  const profileName = useAccount()?.profileName ?? "";
+  useEffect(() => {
+    if (!profileName) return;
+    setS((cur) => (cur.about.name ? cur : { ...cur, about: { ...cur.about, name: profileName } }));
+  }, [profileName]);
 
   const about = (k: keyof BuilderState["about"]) => (v: string) => setS((cur) => ({ ...cur, about: { ...cur.about, [k]: v } }));
   const exp = (i: number, patch: Partial<Experience>) =>

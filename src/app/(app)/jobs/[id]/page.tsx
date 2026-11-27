@@ -38,6 +38,7 @@ import { JobOverview } from "@/components/job/JobOverview";
 import { REVIEW_SPLIT_KEY, ReviewPanelToggle, SplitPane } from "@/components/SplitPane";
 import { BulletQuestions } from "@/components/job/BulletQuestions";
 import { AppliedNotice } from "@/components/job/AppliedNotice";
+import { jobLabel } from "@/lib/jobLabel";
 import { CoverLetterTab, PostingTab } from "@/components/job/JobTabs";
 import { CoachPanel } from "@/components/CoachPanel";
 import { FactsPanel } from "@/components/FactsPanel";
@@ -548,11 +549,11 @@ export default function JobPage() {
     return () => window.removeEventListener("jawb:job-renamed", onRenamed);
   }, [serial, supabase, id, applyServerJob]);
 
-  // Browser tab title: the job's name once it has loaded (the layout's "Jawb" until then).
+  // Browser tab title: the server sets it on load (jobs/[id]/layout.tsx); this keeps it current when the name changes here.
+  const tabTitle = job ? `${jobLabel(job)} · Jawb` : null;
   useEffect(() => {
-    if (!job) return;
-    document.title = `${job.title.trim() || job.company.trim() || "Job"} · Jawb`;
-  }, [job]);
+    if (tabTitle) document.title = tabTitle;
+  }, [tabTitle]);
 
   // ---------- derived ----------
 
