@@ -125,6 +125,27 @@ body {
 .sidebar-scroll:hover { scrollbar-color: rgb(127 127 127 / 0.45) transparent; }
 .sidebar-scroll:focus-visible { outline-offset: -2px; }
 
+/*
+ * Long sidebar labels (job names, the profile name) fade out at the right edge instead of ending in "...".
+ * FadeText sets data-overflows only while the text is wider than its box, so short labels are never masked.
+ * A job row whose ⋯ button is showing (hover, focus, menu open, or touch) fades 36px sooner, so the dots
+ * sit on clear space. Masks are colour-independent: they work on the rail's grey and the peek's glass.
+ */
+.row-fade[data-overflows] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+li[data-job-id]:is(:hover, :focus-within, :has([aria-expanded="true"])) .row-fade[data-overflows] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent calc(100% - 36px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent calc(100% - 36px));
+}
+@media (hover: none) {
+  li[data-job-id] .row-fade[data-overflows] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent calc(100% - 36px));
+    mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent calc(100% - 36px));
+  }
+}
+
 @layer components {
   .card { @apply bg-surface border border-border rounded-2xl; }
   .input {

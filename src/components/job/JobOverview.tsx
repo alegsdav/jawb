@@ -34,26 +34,31 @@ function FitInput({ value, placeholder, onChange }: { value: string; placeholder
 const TITLE_TEXT = "text-[28px] font-semibold leading-tight tracking-tight";
 
 /**
- * The job title, in the Overview's h1. A long title wraps onto as many lines as it needs: a hidden copy sets
- * the height and the textarea sits over it. Enter doesn't add a line.
+ * The job's name, in the Overview's h1: "Company – Role". The company is static text; the role is the editable part.
+ * A long role wraps onto as many lines as it needs: a hidden copy sets the size and the textarea fills the same
+ * grid cell over it. Enter doesn't add a line. With no company, only the role shows.
  */
-function TitleField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function TitleField({ company, value, onChange }: { company: string; value: string; onChange: (v: string) => void }) {
+  const co = company.trim();
   return (
-    <h1 className="relative -mx-[5px] min-w-0">
-      <span aria-hidden className={`invisible block whitespace-pre-wrap break-words rounded-lg border border-transparent px-1 py-0.5 ${TITLE_TEXT}`}>
-        {value || "Job title"}{" "}
+    <h1 className={`min-w-0 break-words ${TITLE_TEXT}`}>
+      {co && `${co} – `}
+      <span className="relative -mx-[5px] inline-grid max-w-full align-top">
+        <span aria-hidden className={`invisible col-start-1 row-start-1 block whitespace-pre-wrap break-words rounded-lg border border-transparent px-1 py-0.5 ${TITLE_TEXT}`}>
+          {value || "Job title"}{" "}
+        </span>
+        <textarea
+          rows={1}
+          className={`ghost-input col-start-1 row-start-1 h-full w-full min-w-0 resize-none overflow-hidden ${TITLE_TEXT}`}
+          value={value}
+          placeholder="Job title"
+          aria-label="Job title"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.preventDefault();
+          }}
+          onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
+        />
       </span>
-      <textarea
-        rows={1}
-        className={`ghost-input absolute inset-0 h-full w-full resize-none overflow-hidden ${TITLE_TEXT}`}
-        value={value}
-        placeholder="Job title"
-        aria-label="Job title"
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.preventDefault();
-        }}
-        onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
-      />
     </h1>
   );
 }
@@ -188,12 +193,10 @@ export function JobOverview(p: OverviewProps) {
       {p.notices && <div className="space-y-3 empty:hidden pb-8">{p.notices}</div>}
 
       <div className={fadeClass(play)} style={fadeStyle(play, 0)}>
-        <TitleField value={job.title} onChange={(v) => p.onPatch({ title: v })} />
+        <TitleField company={job.company} value={job.title} onChange={(v) => p.onPatch({ title: v })} />
       </div>
 
       <div className={`mt-2 flex min-w-0 flex-wrap items-center gap-x-1 text-[15px] text-muted ${fadeClass(play)}`} style={fadeStyle(play, 60)}>
-        <FitInput value={job.company} placeholder="Company" onChange={(v) => p.onPatch({ company: v })} />
-        <span aria-hidden>·</span>
         <FitInput value={job.location} placeholder="Location" onChange={(v) => p.onPatch({ location: v })} />
       </div>
 

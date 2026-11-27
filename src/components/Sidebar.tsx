@@ -12,6 +12,7 @@ import {
   saveVisits, searchJobs, sidebarJobs, visitsToUpload, withPin, withVisit, withoutPin, withoutVisit,
   type NavJob, type NavRow, type Visits,
 } from "@/lib/jobNav";
+import { jobLabel } from "@/lib/jobLabel";
 import { useSidebar } from "./sidebarState";
 import { ICON, JOB_ROW, ROW, ROW_ACTIVE, ROW_BASE, ROW_IDLE } from "./sidebarRows";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
@@ -43,10 +44,34 @@ type RowActions = {
   remove: (j: NavJob) => void;
 };
 
+/**
+ * A label on one line that fades out at its right edge when it is wider than its box (no ellipsis). The fade is a
+ * mask, so it works on any background. `data-overflows` is set only while the text really overflows: each label
+ * measures itself (scrollWidth against clientWidth) and again whenever its box is resized.
+ */
+function FadeText({ text, className = "" }: { text: string; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [overflows, setOverflows] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setOverflows(el.scrollWidth > el.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text]);
+  return (
+    <span ref={ref} data-overflows={overflows ? "" : undefined} className={`row-fade min-w-0 overflow-hidden whitespace-nowrap ${className}`}>
+      {text}
+    </span>
+  );
+}
+
 function JobRow({
   j, active, pinned, renaming, a,
 }: { j: NavJob; active: boolean; pinned: boolean; renaming: boolean; a: RowActions }) {
-  const title = j.title || "Untitled role";
+  const label = jobLabel(j);
   return (
     <li data-job-id={j.id} className="group relative">
       {renaming ? (
@@ -75,17 +100,19 @@ function JobRow({
           aria-current={active ? "page" : undefined}
           className={`${JOB_ROW} overflow-hidden ${active ? ROW_ACTIVE : ROW_IDLE}`}
         >
-          <span className="min-w-0 flex-1 truncate">{title}</span>
+          <FadeText text={label} className="flex-1" />
+          {/* The label already says the company, so this only adds the status and pin. */}
           <span className="sr-only">
-            {j.company ? `, ${j.company}` : ""}, {STATUS_LABEL[j.status]}
+            , {STATUS_LABEL[j.status]}
             {pinned ? ", pinned" : ""}
           </span>
         </Link>
       )}
       {!renaming && (
         // The popup is portalled (fixed, in document.body): the sidebar's nav and scrolling job list would clip it.
-        <div className="absolute right-1 top-1/2 -translate-y-1/2">
-          <Menu label={<MoreIcon className="h-4 w-4" />} title={`More options for ${title}`} buttonClassName={MORE_BTN} portal>
+        // z-10: the ⋯ button sits over the label's faded right edge, on its own layer.
+        <div className="absolute right-1 top-1/2 z-10 -translate-y-1/2">
+          <Menu label={<MoreIcon className="h-4 w-4" />} title={`More options for ${label}`} buttonClassName={MORE_BTN} portal>
             <MenuItem onSelect={() => a.pin(j.id)}>{pinned ? "Unpin" : "Pin"}</MenuItem>
             <MenuItem onSelect={() => a.rename(j.id)}>Rename</MenuItem>
             <MenuSeparator />
@@ -525,7 +552,7 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
             label={
               <>
                 <Avatar name={account?.name ?? ""} url={account?.avatarUrl ?? null} />
-                <span className="min-w-0 flex-1 truncate text-left font-medium text-fg">{account?.name ?? "Account"}</span>
+                <FadeText text={account?.name ?? "Account"} className="flex-1 text-left font-medium text-fg" />
               </>
             }
           >
