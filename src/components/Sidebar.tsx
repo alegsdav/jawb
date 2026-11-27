@@ -13,10 +13,12 @@ import {
   type NavJob, type NavRow, type Visits,
 } from "@/lib/jobNav";
 import { useSidebar } from "./sidebarState";
+import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { useAccount } from "./account";
 import { UsageMeter } from "./UsageMeter";
-import { DocIcon, HomeIcon, MoreIcon, PlusIcon, SearchIcon, SidebarIcon, Wordmark } from "./icons";
+import { SidebarAddJob } from "./SidebarAddJob";
+import { DocIcon, HomeIcon, MoreIcon, SearchIcon, SidebarIcon, Wordmark } from "./icons";
 
 /** Module-wide: the one-time upload of this device's local pins and visits is running (dev StrictMode and a focus
  *  reload can start a second load meanwhile; that one skips the upload). */
@@ -27,12 +29,12 @@ const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label]))
 /** One row of the sidebar: 32px tall, 14px text, muted until it is the current page. */
 // leading-5, not leading-none: a 13px line box would cut off descenders (g, y, p) where a title truncates (overflow hidden).
 const ROW_BASE = "flex h-8 w-full items-center gap-2.5 rounded-lg text-[14px] leading-5 whitespace-nowrap";
-const ROW = `${ROW_BASE} px-2`;
+export const ROW = `${ROW_BASE} px-2`;
 /** A job row keeps room on the right for its ⋯ button, so long titles truncate before it. */
 const JOB_ROW = `${ROW_BASE} pl-2 pr-8`;
-const ROW_IDLE = "text-muted hover:bg-fg/[0.04] hover:text-fg";
+export const ROW_IDLE = "text-muted hover:bg-fg/[0.04] hover:text-fg";
 const ROW_ACTIVE = "bg-fg/[0.05] font-medium text-fg";
-const ICON = "h-[17px] w-[17px] shrink-0";
+export const ICON = "h-[17px] w-[17px] shrink-0";
 /**
  * The row's ⋯ button (26px). Hidden until the row is hovered or focused, or its menu is open; always
  * shown on touch screens, which have no hover.
@@ -145,6 +147,26 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
   const navInFlight = useRef(0);
   // The job a click just recorded, so the path change that click causes doesn't record it again.
   const clickedId = useRef<string | null>(null);
+  // The scrolling part of the nav (everything but the header and the profile), its content, and whether more of it is
+  // below the fold: the fade above the profile shows only then.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [fadeBelow, setFadeBelow] = useState(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    const inner = contentRef.current;
+    if (!el || !inner) return;
+    const check = () => setFadeBelow(el.scrollHeight - el.scrollTop - el.clientHeight > 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    ro.observe(inner);
+    el.addEventListener("scroll", check, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", check);
+    };
+  }, []);
 
   // Load this device's visits and pins (storage is not read during render: the server has none).
   useEffect(() => {
@@ -395,117 +417,134 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
   );
 
   return (
+    <>
     <nav
-      aria-label="Workspace"
-      className={`relative flex flex-col gap-4 overflow-hidden px-3 pb-3 pt-[var(--bar-top)] text-[14px] ${peek ? "h-full w-full" : "h-dvh w-[248px]"}`}
-    >
-      {peek ? (
-        <>
-          {/* The peek's toggle sits exactly over the collapsed expand button (window --toggle-left, --toggle-top), which the pointer is on. */}
-          <button
-            type="button"
-            onClick={onExpand}
-            aria-label="Expand sidebar"
-            aria-expanded={false}
-            className={`absolute left-[var(--toggle-left)] top-[var(--toggle-top)] ${TOGGLE}`}
-          >
-            <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
-          </button>
-          {/* Keeps the rail's header row (one 36px bar row, see the rail below), so the menu sits at the same spot as in the rail. No Wordmark here. */}
-          <div aria-hidden className="-mb-px h-[var(--bar-h)] shrink-0" />
-        </>
-      ) : (
-        // The header row is the editor bar's row (9..45 in window y): the toggle is centred on it, at --toggle-top.
-        // -mb-px: the row's last pixel is the bar's divider, so the nav's gap below ends where it did before (Dashboard at 60).
-        <div className="-mb-px flex h-[var(--bar-h)] items-center">
-          <Link href="/" className="flex h-8 min-w-0 items-center px-2">
-            <Wordmark />
-          </Link>
-          <button
-            type="button"
-            onClick={() => setCollapsed(true)}
-            aria-label="Collapse sidebar"
-            aria-expanded
-            className={`ml-auto ${TOGGLE}`}
-          >
-            <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
-          </button>
-        </div>
-      )}
+        aria-label="Workspace"
+        className={`relative flex flex-col gap-4 overflow-hidden px-3 pb-3 pt-[var(--bar-top)] text-[14px] ${peek ? "h-full w-full" : "h-dvh w-[var(--sidebar-w)]"}`}
+      >
+        {peek ? (
+          <>
+            {/* The peek's toggle sits exactly over the collapsed expand button (window --toggle-left, --toggle-top), which the pointer is on. */}
+            <button
+              type="button"
+              onClick={onExpand}
+              aria-label="Expand sidebar"
+              aria-expanded={false}
+              className={`absolute left-[var(--toggle-left)] top-[var(--toggle-top)] ${TOGGLE}`}
+            >
+              <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
+            </button>
+            {/* Keeps the rail's header row (one 36px bar row, see the rail below), so the menu sits at the same spot as in the rail. No Wordmark here. */}
+            <div aria-hidden className="-mb-px h-[var(--bar-h)] shrink-0" />
+          </>
+        ) : (
+          // The header row is the editor bar's row (9..45 in window y): the toggle is centred on it, at --toggle-top.
+          // -mb-px: the row's last pixel is the bar's divider, so the nav's gap below ends where it did before (Dashboard at 60).
+          <div className="-mb-px flex h-[var(--bar-h)] shrink-0 items-center">
+            <Link href="/" className="flex h-8 min-w-0 items-center px-2">
+              <Wordmark />
+            </Link>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse sidebar"
+              aria-expanded
+              className={`ml-auto ${TOGGLE}`}
+            >
+              <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
+            </button>
+          </div>
+        )}
 
-      <div className="space-y-px">
-        {link("/", "Dashboard", path === "/", <HomeIcon className={ICON} />)}
-        {link("/resume", "Master resume", path.startsWith("/resume"), <DocIcon className={ICON} />)}
-        {link("/#add-job", "Add job", false, <PlusIcon className={ICON} />)}
-      </div>
-
-      <div className="flex min-h-0 flex-1 flex-col gap-2">
-        <label htmlFor="job-search" className="sr-only">Search jobs</label>
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <input
-            id="job-search"
-            type="search"
-            placeholder="Search jobs"
-            className="h-8 w-full rounded-lg border border-transparent bg-fg/[0.06] pl-8 pr-2 text-[14px] outline-none placeholder:text-muted focus:border-fg/20"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+        {/* Everything but the header and the profile scrolls together: the links, the search and the jobs. */}
+        <div
+          ref={scrollRef}
+          tabIndex={0}
+          role="region"
+          aria-label="Sidebar contents"
+          className="sidebar-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+        >
+        <div ref={contentRef} className="flex flex-col gap-4">
+        <div className="space-y-px">
+          {link("/", "Dashboard", path === "/", <HomeIcon className={ICON} />)}
+          {link("/resume", "Master resume", path.startsWith("/resume"), <DocIcon className={ICON} />)}
+          <SidebarAddJob />
         </div>
 
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden">
-          {searching ? (
-            <section>
-              {sectionHeading(heading)}
-              <ul className="space-y-px" aria-label={heading}>
-                {shown.map(row)}
-                {!shown.length && <li className="px-2 text-[14px] text-muted">No jobs match.</li>}
-              </ul>
-            </section>
-          ) : (
-            <>
-              {pinned.length > 0 && (
-                <section>
-                  {sectionHeading("Pinned")}
-                  <ul className="space-y-px" aria-label="Pinned jobs">
-                    {pinned.map(row)}
-                  </ul>
-                </section>
-              )}
-              <section hidden={!loaded}>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="job-search" className="sr-only">Search jobs</label>
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              id="job-search"
+              type="search"
+              placeholder="Search jobs"
+              className="h-8 w-full rounded-lg border border-transparent bg-fg/[0.06] pl-8 pr-2 text-[14px] outline-none placeholder:text-muted focus:border-fg/20"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            {searching ? (
+              <section>
                 {sectionHeading(heading)}
                 <ul className="space-y-px" aria-label={heading}>
-                  {recent.map(row)}
-                  {loaded && !recent.length && !pinned.length && (
-                    <li className="whitespace-nowrap px-2 text-[14px] text-muted">Jobs you add show up here.</li>
-                  )}
+                  {shown.map(row)}
+                  {!shown.length && <li className="px-2 text-[14px] text-muted">No jobs match.</li>}
                 </ul>
               </section>
-            </>
-          )}
+            ) : (
+              <>
+                {pinned.length > 0 && (
+                  <section>
+                    {sectionHeading("Pinned")}
+                    <ul className="space-y-px" aria-label="Pinned jobs">
+                      {pinned.map(row)}
+                    </ul>
+                  </section>
+                )}
+                <section hidden={!loaded}>
+                  {sectionHeading(heading)}
+                  <ul className="space-y-px" aria-label={heading}>
+                    {recent.map(row)}
+                    {loaded && !recent.length && !pinned.length && (
+                      <li className="whitespace-nowrap px-2 text-[14px] text-muted">Jobs you add show up here.</li>
+                    )}
+                  </ul>
+                </section>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+        </div>
+        </div>
 
-      <div className="space-y-3">
-        <UsageMeter />
-        {/* The profile: a picture (or initial) and the name. Opens Account and Sign out, words only. */}
-        <Menu
-          portal
-          buttonClassName={`${ROW} ${ROW_IDLE} cursor-pointer overflow-hidden aria-expanded:bg-fg/[0.06] ${
-            path.startsWith("/account") ? "bg-fg/[0.05]" : ""
-          }`}
-          label={
-            <>
-              <Avatar name={account?.name ?? ""} url={account?.avatarUrl ?? null} />
-              <span className="min-w-0 flex-1 truncate text-left font-medium text-fg">{account?.name ?? "Account"}</span>
-            </>
-          }
-        >
-          <MenuItem onSelect={() => router.push("/account")}>Account</MenuItem>
-          <MenuItem onSelect={() => void signOut()}>Sign out</MenuItem>
-        </Menu>
-      </div>
-    </nav>
+        {/* The profile layer is opaque, so scrolled content never shows through it. The fade sits just above it, on the list. */}
+        <div className="sidebar-profile relative z-10 space-y-3">
+          {fadeBelow && <div aria-hidden className="sidebar-fade pointer-events-none absolute inset-x-0 bottom-full h-10" />}
+          <UsageMeter />
+          {/* The profile: a picture (or initial) and the name. Opens Account and Sign out, words only. */}
+          <Menu
+            portal
+            buttonClassName={`${ROW} ${ROW_IDLE} cursor-pointer overflow-hidden aria-expanded:bg-fg/[0.06] ${
+              path.startsWith("/account") ? "bg-fg/[0.05]" : ""
+            }`}
+            label={
+              <>
+                <Avatar name={account?.name ?? ""} url={account?.avatarUrl ?? null} />
+                <span className="min-w-0 flex-1 truncate text-left font-medium text-fg">{account?.name ?? "Account"}</span>
+              </>
+            }
+          >
+            <MenuItem onSelect={() => router.push("/account")}>Account</MenuItem>
+            <MenuItem onSelect={() => void signOut()}>Sign out</MenuItem>
+          </Menu>
+        </div>
+      </nav>
+    {/* The rail's drag handle (not in the peek): it straddles the rail's right edge, outside the nav's clip. */}
+    {!peek && <SidebarResizeHandle />}
+    </>
   );
 }
 

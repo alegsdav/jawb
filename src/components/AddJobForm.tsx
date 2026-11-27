@@ -2,39 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { pasteOnlySite } from "@/lib/jobsites";
-import { postApi } from "@/lib/api";
-import { findDuplicateJob } from "@/lib/status";
 import { useFocusTrap } from "@/lib/useFocusTrap";
-import type { Job } from "@/lib/types";
+import { addedOn, isLinkInput, type ExistingJob } from "@/lib/addJob";
+import { useAddJob } from "@/lib/useAddJob";
 import { PlusIcon } from "./icons";
 
-const URL_RE = /^https?:\/\/\S+$/i;
-
-/** A full http(s) address that the browser can parse (the server checks again). */
-function isHttpUrl(s: string): boolean {
-  if (!URL_RE.test(s)) return false;
-  try {
-    return /^https?:$/.test(new URL(s).protocol);
-  } catch {
-    return false;
-  }
-}
-
-/** An existing job, for the duplicate check. */
-export type ExistingJob = Pick<Job, "id" | "url" | "company" | "title" | "created_at">;
-
-type IntakeBody = { url?: string; text?: string };
-
-/** "Nov 13" for a timestamp, in the user's time zone ("" if it can't be read). */
-function addedOn(createdAt: string): string {
-  const d = new Date(createdAt);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
+export type { ExistingJob } from "@/lib/addJob";
 
 /**
- * "Add a job": one box for a link or a pasted description. For sites the server can't read
- * (LinkedIn, Handshake, Workday…) it switches to two fields: the link plus the pasted description.
+ * "Add a job": one box for a link or a pasted description. For sites the server can't read (LinkedIn, Handshake,
+ * Workday…) it switches to two fields: the link plus the pasted description. The flow itself is `useAddJob`, shared
+ * with the sidebar's Add job box.
  *
  * Adding a job that's already on the list (same link, or same company and title as the server reads
  * them) asks "You already added this job (added Nov 13). Open it instead?" with Open it / Add anyway.
@@ -42,17 +20,11 @@ function addedOn(createdAt: string): string {
  */
 export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[] }) {
   const router = useRouter();
-  const [mode, setMode] = useState<"one" | "paste">("one");
-  const [input, setInput] = useState("");
-  const [link, setLink] = useState("");
-  const [desc, setDesc] = useState("");
-  /** Why we're in paste mode. `failed` carries the message, shown once as the instruction. */
-  const [reason, setReason] = useState<{ site?: string; failed?: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const {
+    mode, input, setInput, link, setLink, desc, setDesc, reason, busy, error, setError, dup, setDup,
+    closedMsg, hint, isUrl, submit, send, reset, clear,
+  } = useAddJob({ existing });
   const [dragging, setDragging] = useState(false);
-  /** A job already on the list that matches what's being added. */
-  const [dup, setDup] = useState<{ id: string; created_at: string; body: IntakeBody; fromUrl: string | null } | null>(null);
 
   // The box grows with what's pasted, from one line up to its old fixed height (then it scrolls).
   const box = useRef<HTMLTextAreaElement>(null);
@@ -64,7 +36,6 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
   }, [input, mode]);
 
   // The "Oops" window for a closed posting (or a list of openings): nothing was added, and closing it clears the box.
-  const [closedMsg, setClosedMsg] = useState<string | null>(null);
   const closedOpen = closedMsg !== null;
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -74,16 +45,9 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
   useFocusTrap(panel, closedOpen);
 
   const closeOops = useCallback(() => {
-    setClosedMsg(null);
-    setMode("one");
-    setInput("");
-    setLink("");
-    setDesc("");
-    setReason(null);
-    setError("");
-    setDup(null);
+    clear();
     restoreFocus.current = true;
-  }, []);
+  }, [clear]);
 
   useEffect(() => {
     if (!closedOpen) {
@@ -100,83 +64,6 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [closedOpen, closeOops]);
-
-  function toPaste(url: string, why: NonNullable<typeof reason>) {
-    setError("");
-    setMode("paste");
-    setLink(url);
-    setDesc("");
-    setReason(why);
-  }
-
-  function reset() {
-    setMode("one");
-    setInput(link);
-    setLink("");
-    setDesc("");
-    setReason(null);
-    setError("");
-    setDup(null);
-  }
-
-  async function send(body: IntakeBody, fromUrl: string | null, force = false) {
-    setError("");
-    setDup(null);
-    if (!force && body.url) {
-      const same = findDuplicateJob(existing, { url: body.url });
-      if (same) return setDup({ id: same.id, created_at: same.created_at, body, fromUrl });
-    }
-    setBusy(true);
-    const r = await postApi<{ id: string }>("/api/intake", force ? { ...body, force: true } : body);
-    if (r.data?.id) {
-      router.push(`/jobs/${r.data.id}`);
-      return;
-    }
-    setBusy(false);
-    if (r.closed) {
-      // Closed, or a list of openings: nothing was saved. Said in the window, not the line under the button.
-      setClosedMsg(r.error ?? "This link doesn't lead to an open job posting.");
-      return;
-    }
-    if (r.duplicate) {
-      setDup({ ...r.duplicate, body, fromUrl });
-    } else if (r.pasteOnly) {
-      toPaste(fromUrl ?? link, { site: r.pasteOnly });
-    } else if (fromUrl && mode === "one") {
-      // Couldn't read the page: keep the link and ask for the text instead (the message says so once).
-      toPaste(fromUrl, { failed: r.error ?? "Couldn't read that page. Paste the job description and keep the link." });
-    } else {
-      setError(r.error ?? "Something went wrong.");
-    }
-  }
-
-  function submit() {
-    if (busy) return;
-    if (mode === "paste") {
-      const url = link.trim();
-      if (url && !isHttpUrl(url)) return setError("That doesn't look like a link. Paste the full address starting with https://");
-      if (!desc.trim()) return setError("Paste the job description first.");
-      return send({ ...(url ? { url } : {}), text: desc.trim() }, null);
-    }
-    const value = input.trim();
-    if (!value) return;
-    if (URL_RE.test(value)) {
-      const site = pasteOnlySite(value);
-      if (site) return toPaste(value, { site });
-      return send({ url: value }, value);
-    }
-    // One word with no spaces is never a description: a half-typed link ("http//x", "www.acme") or a stray
-    // word would otherwise create an "Untitled role" job and spend an analysis.
-    if (!/\s/.test(value)) {
-      const looksLikeLink = /^http/i.test(value) || value.startsWith("www.") || /[./]/.test(value);
-      return setError(
-        looksLikeLink
-          ? "That doesn't look like a link. Paste the full address starting with https://"
-          : "Paste a link to the posting or the full job description.",
-      );
-    }
-    return send({ text: value }, null);
-  }
 
   async function onDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -196,26 +83,10 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
     const dropped = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain")).trim();
     if (!dropped) return;
     if (mode === "paste") {
-      if (URL_RE.test(dropped)) setLink(dropped);
+      if (isLinkInput(dropped)) setLink(dropped);
       else setDesc(dropped);
     } else setInput(dropped);
   }
-
-  const isUrl = URL_RE.test(input.trim());
-  const site = isUrl ? pasteOnlySite(input.trim()) : null;
-  /** What "Add job" will do, under the button. */
-  const hint =
-    mode === "paste"
-      ? link.trim()
-        ? "Saves the description and keeps the link."
-        : ""
-      : !input.trim()
-        ? ""
-        : site
-          ? `${site} needs a login: paste the text next.`
-          : isUrl
-            ? "Reads the posting from the link."
-            : "Uses the pasted description.";
 
   return (
     <div

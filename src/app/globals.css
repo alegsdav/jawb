@@ -118,6 +118,16 @@ body {
 /* The peek's toggle sits at the panel's top edge: keep its focus ring inside the nav's clip. */
 .sidebar-peek :focus-visible { outline-offset: -2px; }
 
+/* The sidebar's own background: the rail is the window chrome, the peek is its dark glass (above). The profile layer
+   is painted in it so scrolled content never shows through, and the fade above the profile ends in it. */
+:root { --sidebar-bg: var(--chrome); }
+.sidebar-profile { background-color: var(--sidebar-bg); }
+.sidebar-fade { background-image: linear-gradient(to top, var(--sidebar-bg), transparent); }
+/* The sidebar's one scroll container: a thin scrollbar that shows only while the pointer is over the list. */
+.sidebar-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.sidebar-scroll:hover { scrollbar-color: rgb(127 127 127 / 0.45) transparent; }
+.sidebar-scroll:focus-visible { outline-offset: -2px; }
+
 @layer components {
   .card { @apply bg-surface border border-border rounded-2xl; }
   .input {

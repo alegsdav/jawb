@@ -164,14 +164,14 @@ export const withoutPin = (pins: string[], id: string): string[] => pins.filter(
 const newestCreated = (a: NavJob, b: NavJob) =>
   (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0) || a.id.localeCompare(b.id);
 
-/** The `n` most recently created jobs, newest first. */
-export const recentJobs = (jobs: NavJob[], n = 8): NavJob[] => [...jobs].sort(newestCreated).slice(0, n);
+/** Every job, newest created first. */
+export const recentJobs = (jobs: NavJob[]): NavJob[] => [...jobs].sort(newestCreated);
 
 /** Jobs whose title, company or location contain every word of the query (case-insensitive), newest created first. Pins are ignored. */
 export function searchJobs(jobs: NavJob[], query: string, n = 20): NavJob[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-  return recentJobs(jobs, jobs.length)
+  return recentJobs(jobs)
     .filter((j) => {
       const hay = `${j.title} ${j.company} ${j.location}`.toLowerCase();
       return words.every((w) => hay.includes(w));
@@ -180,12 +180,12 @@ export function searchJobs(jobs: NavJob[], query: string, n = 20): NavJob[] {
 }
 
 /**
- * The sidebar's two groups: the pinned jobs (newest pin first) and the recent jobs, which leave out
- * the pinned ones and are the `n` newest created. Pins that point at a job that is gone are skipped.
+ * The sidebar's two groups: the pinned jobs (newest pin first) and every other job, newest created first (the pinned
+ * ones are left out of that list). Pins that point at a job that is gone are skipped.
  */
-export function sidebarJobs(jobs: NavJob[], pins: string[], n = 8): { pinned: NavJob[]; recent: NavJob[] } {
+export function sidebarJobs(jobs: NavJob[], pins: string[]): { pinned: NavJob[]; recent: NavJob[] } {
   const byId = new Map(jobs.map((j) => [j.id, j]));
   const pinned = pins.map((id) => byId.get(id)).filter((j): j is NavJob => !!j);
   const pinnedIds = new Set(pinned.map((j) => j.id));
-  return { pinned, recent: recentJobs(jobs.filter((j) => !pinnedIds.has(j.id)), n) };
+  return { pinned, recent: recentJobs(jobs.filter((j) => !pinnedIds.has(j.id))) };
 }
