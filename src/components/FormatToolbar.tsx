@@ -66,7 +66,7 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
     <div role="toolbar" aria-label="Formatting" className="flex min-w-0 flex-nowrap items-center gap-1">
       <UndoRedo undo={commands.undo} redo={commands.redo} />
       <Sep />
-      <SelectChip label={font ?? ""} textClass="max-w-[9.5rem] min-w-[4.5rem] truncate">
+      <SelectChip label={font ?? ""} textClass={`max-w-[9.5rem] truncate ${font ? "" : "min-w-[4.5rem]"}`}>
         <select
           aria-label="Font"
           className={SELECT_CLASS}

@@ -5,7 +5,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createClient } from "@/lib/supabase/client";
 import { addedOn, type ExistingJob } from "@/lib/addJob";
 import { useAddJob } from "@/lib/useAddJob";
-import { ICON, ROW, ROW_IDLE } from "./Sidebar";
+import { ICON, ROW, ROW_IDLE } from "./sidebarRows";
 import { PlusIcon } from "./icons";
 
 /**
@@ -141,7 +141,7 @@ export function SidebarAddJob() {
                 // An empty box that loses focus closes (a paste step or a notice stays open).
                 if (!paste && !add.input.trim() && !add.busy && !add.dup) setOpen(false);
               }}
-              className="block max-h-44 w-full resize-none overflow-y-auto rounded-lg bg-fg/[0.04] px-2.5 py-2 text-[14px] leading-5 text-fg outline-none placeholder:text-muted focus:bg-fg/[0.06] disabled:opacity-60 motion-reduce:transition-none"
+              className="sidebar-add-box block max-h-44 w-full resize-none overflow-y-auto rounded-lg bg-fg/[0.04] px-2.5 py-2 text-[14px] leading-5 text-fg outline-none placeholder:text-muted focus:bg-fg/[0.06] disabled:opacity-60 motion-reduce:transition-none"
             />
 
             {dup ? (

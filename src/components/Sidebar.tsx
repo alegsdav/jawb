@@ -13,6 +13,7 @@ import {
   type NavJob, type NavRow, type Visits,
 } from "@/lib/jobNav";
 import { useSidebar } from "./sidebarState";
+import { ICON, JOB_ROW, ROW, ROW_ACTIVE, ROW_BASE, ROW_IDLE } from "./sidebarRows";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { useAccount } from "./account";
@@ -26,15 +27,6 @@ let uploadingLocalNav = false;
 
 const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.value, s.label])) as Record<JobStatus, string>;
 
-/** One row of the sidebar: 32px tall, 14px text, muted until it is the current page. */
-// leading-5, not leading-none: a 13px line box would cut off descenders (g, y, p) where a title truncates (overflow hidden).
-const ROW_BASE = "flex h-8 w-full items-center gap-2.5 rounded-lg text-[14px] leading-5 whitespace-nowrap";
-export const ROW = `${ROW_BASE} px-2`;
-/** A job row keeps room on the right for its ⋯ button, so long titles truncate before it. */
-const JOB_ROW = `${ROW_BASE} pl-2 pr-8`;
-export const ROW_IDLE = "text-muted hover:bg-fg/[0.04] hover:text-fg";
-const ROW_ACTIVE = "bg-fg/[0.05] font-medium text-fg";
-export const ICON = "h-[17px] w-[17px] shrink-0";
 /**
  * The row's ⋯ button (26px). Hidden until the row is hovered or focused, or its menu is open; always
  * shown on touch screens, which have no hover.
@@ -418,7 +410,7 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
 
   return (
     <>
-    <nav
+      <nav
         aria-label="Workspace"
         className={`relative flex flex-col gap-4 overflow-hidden px-3 pb-3 pt-[var(--bar-top)] text-[14px] ${peek ? "h-full w-full" : "h-dvh w-[var(--sidebar-w)]"}`}
       >
@@ -462,67 +454,67 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
           tabIndex={0}
           role="region"
           aria-label="Sidebar contents"
-          className="sidebar-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
-        >
-        <div ref={contentRef} className="flex flex-col gap-4">
-        <div className="space-y-px">
-          {link("/", "Dashboard", path === "/", <HomeIcon className={ICON} />)}
-          {link("/resume", "Master resume", path.startsWith("/resume"), <DocIcon className={ICON} />)}
-          <SidebarAddJob />
-        </div>
+          className={`sidebar-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden ${fadeBelow ? "sidebar-scroll-fade" : ""}`}
+      >
+          <div ref={contentRef} className="flex flex-col gap-4">
+            <div className="space-y-px">
+              {link("/", "Dashboard", path === "/", <HomeIcon className={ICON} />)}
+              {link("/resume", "Master resume", path.startsWith("/resume"), <DocIcon className={ICON} />)}
+              <SidebarAddJob />
+            </div>
 
-        <div className="flex flex-col gap-2">
-          <label htmlFor="job-search" className="sr-only">Search jobs</label>
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-            <input
-              id="job-search"
-              type="search"
-              placeholder="Search jobs"
-              className="h-8 w-full rounded-lg border border-transparent bg-fg/[0.06] pl-8 pr-2 text-[14px] outline-none placeholder:text-muted focus:border-fg/20"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="job-search" className="sr-only">Search jobs</label>
+              <div className="relative">
+                <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                <input
+                  id="job-search"
+                  type="search"
+                  placeholder="Search jobs"
+                  className="h-8 w-full rounded-lg border border-transparent bg-fg/[0.06] pl-8 pr-2 text-[14px] outline-none placeholder:text-muted focus:border-fg/20"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </div>
 
-          <div className="space-y-2">
-            {searching ? (
-              <section>
-                {sectionHeading(heading)}
-                <ul className="space-y-px" aria-label={heading}>
-                  {shown.map(row)}
-                  {!shown.length && <li className="px-2 text-[14px] text-muted">No jobs match.</li>}
-                </ul>
-              </section>
-            ) : (
-              <>
-                {pinned.length > 0 && (
+              <div className="space-y-2">
+                {searching ? (
                   <section>
-                    {sectionHeading("Pinned")}
-                    <ul className="space-y-px" aria-label="Pinned jobs">
-                      {pinned.map(row)}
+                    {sectionHeading(heading)}
+                    <ul className="space-y-px" aria-label={heading}>
+                      {shown.map(row)}
+                      {!shown.length && <li className="px-2 text-[14px] text-muted">No jobs match.</li>}
                     </ul>
                   </section>
-                )}
-                <section hidden={!loaded}>
-                  {sectionHeading(heading)}
-                  <ul className="space-y-px" aria-label={heading}>
-                    {recent.map(row)}
-                    {loaded && !recent.length && !pinned.length && (
-                      <li className="whitespace-nowrap px-2 text-[14px] text-muted">Jobs you add show up here.</li>
+                ) : (
+                  <>
+                    {pinned.length > 0 && (
+                      <section>
+                        {sectionHeading("Pinned")}
+                        <ul className="space-y-px" aria-label="Pinned jobs">
+                          {pinned.map(row)}
+                        </ul>
+                      </section>
                     )}
-                  </ul>
-                </section>
-              </>
-            )}
+                    <section hidden={!loaded}>
+                      {sectionHeading(heading)}
+                      <ul className="space-y-px" aria-label={heading}>
+                        {recent.map(row)}
+                        {loaded && !recent.length && !pinned.length && (
+                          <li className="whitespace-nowrap px-2 text-[14px] text-muted">Jobs you add show up here.</li>
+                        )}
+                      </ul>
+                    </section>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
-        </div>
-        </div>
 
-        {/* The profile layer is opaque, so scrolled content never shows through it. The fade sits just above it, on the list. */}
-        <div className="sidebar-profile relative z-10 space-y-3">
-          {fadeBelow && <div aria-hidden className="sidebar-fade pointer-events-none absolute inset-x-0 bottom-full h-10" />}
+        {/* The profile sits below the scrolling list (never under it) and is never faded: the list itself fades out
+            above it (a mask on the list, so it works on the rail's grey and the peek's glass alike). */}
+        <div className="relative space-y-3">
           <UsageMeter />
           {/* The profile: a picture (or initial) and the name. Opens Account and Sign out, words only. */}
           <Menu

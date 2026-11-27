@@ -179,7 +179,7 @@ export function AppShell({
             className={
               collapsed
                 ? "sidebar-peek hidden lg:fixed lg:bottom-0 lg:left-0 lg:top-0 lg:z-30 lg:block lg:w-[var(--sidebar-w)]"
-                : "hidden lg:block lg:shrink-0 lg:sticky lg:top-0 lg:h-dvh"
+                : "hidden lg:block lg:shrink-0 lg:sticky lg:top-0 lg:z-20 lg:h-dvh"
             }
           >
             <Sidebar peek={collapsed} onExpand={expandFromPeek} />
