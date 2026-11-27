@@ -21,8 +21,8 @@
   --border: #ededed;
   --fg: #171717;
   --muted: #737373;
-  --accent: #2f74b5;
-  --accent-soft: #e8f2fc;
+  --accent: #1e1e7a;
+  --accent-soft: #ececf6;
   --accent-fg: #ffffff;
   --primary-bg: #bcdcf6;
   --primary-bg-hover: #a9d0f2;
@@ -251,8 +251,6 @@ body {
 .doc-content a { color: #1155cc; text-decoration: underline; cursor: pointer; }
 .doc-placeholder { color: #b0b0aa; pointer-events: none; user-select: none; -webkit-user-select: none; }
 .doc-ph { background: #ffd84d; border-radius: 2px; box-shadow: 0 0 0 1px #d9a800; }
-/* The change bar sits in the page margin, beside the paragraph. */
-.doc-changed::before { content: ""; position: absolute; top: 2px; bottom: 2px; right: -16px; width: 3px; border-radius: 3px; background: #2f5bd3; }
 @media (max-width: 900px) {
   .doc-pagebreak { display: none; }
 }
@@ -261,7 +259,6 @@ body {
   .doc-canvas { padding: 0 0 24px; background: #fff; min-height: calc(100dvh - 12rem); }
   .doc-page { min-height: 0; padding: 20px 16px; font-size: 16px; box-shadow: none; }
   .doc-content ul, .doc-content ol { padding-left: 14pt; }
-  .doc-changed::before { right: -10px; }
 }
 /* Below xl the comment card floats over the bottom of the page (45dvh). Keep a focused or scrolled-to paragraph clear of it. */
 @media (max-width: 1279px) {
@@ -282,7 +279,6 @@ body {
   .doc-page { position: absolute; left: 0; top: 0; box-shadow: none !important; margin: 0 !important; }
   .zoom-frame { transform: none !important; }
   .doc-ui, .doc-pagebreak, .doc-placeholder { display: none !important; }
-  .doc-changed::before { display: none !important; }
   .doc-ph { background: transparent !important; box-shadow: none !important; }
   ::placeholder { color: transparent !important; }
 }
@@ -323,9 +319,9 @@ body {
   .doc-page-blank { min-height: 60vh; }
 }
 
-/* The coach's focus: a thin blue outline around the paragraph the coaching panel is on (ResumeDocument focusId).
-   An outline adds no layout, and it is never printed. */
-.doc-focus { outline: 1.5px solid #2f5bd3; outline-offset: 2px; border-radius: 3px; }
+/* The coach's focus: a navy outline around the paragraph the coaching panel is on (ResumeDocument focusId), with
+   square corners. An outline adds no layout, and it is never printed. */
+.doc-focus { outline: 3px solid #1e1e7a; outline-offset: 2px; border-radius: 0; }
 @media print {
   .doc-focus { outline: none !important; }
 }
@@ -352,4 +348,25 @@ body {
     color: var(--muted);
     animation: none;
   }
+}
+
+/* ---------- Revert to master arrow (ResumeDocument: the selected bullet that differs from the master) ----------
+   A round back-arrow button in the page's right margin, centred on the bullet's first line. ResumeDocument positions it
+   in the page's own coordinates (.doc-page is position: relative), so it moves with the page and never reflows the text.
+   It is document UI: never printed. The tip is the app's dark float (.float-dark), to the left of the button. */
+.doc-revert { position: absolute; z-index: 2; width: 26px; height: 26px; }
+.doc-revert-btn {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 9999px;
+  color: var(--muted); background: transparent; cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.doc-revert-btn:hover { background: rgb(23 23 23 / 0.06); color: var(--fg); }
+.doc-revert-btn svg { width: 14px; height: 14px; }
+.doc-revert-tip {
+  position: absolute; right: calc(100% + 6px); top: 50%; transform: translateY(-50%);
+  padding: 4px 8px; border-radius: 6px; font-size: 12px; line-height: 1.2; white-space: nowrap;
+  box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.3); pointer-events: none;
+}
+@media print {
+  .doc-revert, .doc-revert-tip { display: none !important; }
 }

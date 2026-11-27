@@ -142,37 +142,26 @@ describe("changed vs master", () => {
     ["b1", "old text"],
     ["b2", "Designed the notation"],
   ]);
-  const bars = (set: Decoration[]) =>
-    set.filter((x) => cls(x) === "doc-changed").map((x) => attrsOf(x)["data-change"]);
+  const changeDecos = (set: Decoration[]) => set.filter((x) => cls(x) === "doc-changed");
 
-  it("changed paragraphs get the change bar, unchanged ones do not", () => {
-    const set = decos(doc, { baseline, showChanges: true });
-    const changed = set.filter((x) => cls(x) === "doc-changed");
-    expect(changed.map((x) => [x.from, x.to])).toEqual([
-      [paraStart(doc, 1), paraStart(doc, 1) + doc.child(1).nodeSize],
-    ]);
+  it("no paragraph is drawn as changed: the change bar is gone, whatever showChanges is", () => {
+    expect(changeDecos(decos(doc, { baseline, showChanges: true }))).toEqual([]);
+    expect(changeDecos(decos(doc, { baseline: new Map(), showChanges: true }))).toEqual([]);
   });
 
-  it("nothing when showChanges is off", () => {
-    expect(bars(decos(doc, { baseline, showChanges: false }))).toEqual([]);
+  it("the change data is still there for the revert arrow (bulletInfo)", () => {
+    const changed = bulletInfo("b1", "new text", { baseline });
+    expect(changed).toMatchObject({ changed: true, isNew: false, original: "old text" });
+    const added = bulletInfo("b9", "fresh", { baseline });
+    expect(added).toMatchObject({ changed: false, isNew: true });
+    const same = bulletInfo("b2", "Designed the notation", { baseline });
+    expect(same).toMatchObject({ changed: false, isNew: false });
   });
 
-  it("a non-empty paragraph missing from the master is new; an empty one is not", () => {
-    const set = decos(doc, { baseline: new Map(), showChanges: true });
-    expect(bars(set)).toEqual(["new", "new", "new"]); // h1, b1, b2; the empty e1 has no bar
-  });
-
-  it("an empty paragraph with no master counterpart gets no bar", () => {
-    const d = docOf(para("e", ""));
-    expect(bars(decos(d, { baseline: new Map(), showChanges: true }))).toEqual([]);
-  });
-
-  it("a tab compares as \\t against the master text", () => {
-    const tabbed = docOf(
-      para("t", [{ type: "text", text: "Ada" }, { type: "tab" }, { type: "text", text: "London" }]),
-    );
-    expect(bars(decos(tabbed, { baseline: new Map([["t", "Ada\tLondon"]]), showChanges: true }))).toEqual([]);
-    expect(bars(decos(tabbed, { baseline: new Map([["t", "Ada London"]]), showChanges: true }))).toEqual(["changed"]);
+  it("a tab compares as \\t against the master text (bulletInfo)", () => {
+    const tabbed = "Ada\tLondon";
+    expect(bulletInfo("t", tabbed, { baseline: new Map([["t", "Ada\tLondon"]]) }).changed).toBe(false);
+    expect(bulletInfo("t", tabbed, { baseline: new Map([["t", "Ada London"]]) }).changed).toBe(true);
   });
 
   it("paragraphPlainText maps tabs and hard breaks like paragraphText", () => {

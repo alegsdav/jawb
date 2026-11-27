@@ -7,17 +7,19 @@ import { RATING, bulletInfo } from "./docDecorations";
 
 /**
  * The AI's highlights drawn over the resume document, as ProseMirror decorations (never document data):
- * the rating tint for each rated paragraph, the [placeholder] marks, the "changed vs master" bar and the
- * blue outline around the paragraph the coaching panel is on.
+ * the rating tint for each rated paragraph, the [placeholder] marks and the navy outline around the paragraph
+ * the coaching panel is on. (Bullets that differ from the master are not marked here: selecting one offers
+ * "Revert to master" in its card.)
  */
 
 export type HighlightOptions = {
   feedback?: Record<string, BulletFeedback>;   // keyed by paragraph id (= derived bullet id)
   showHighlights: boolean;
   baseline?: Map<string, string> | null;        // paragraph id → text in the master at copy time
+  /** Whether "Revert to master" is offered for bullets that differ from the master. Draws nothing itself. */
   showChanges: boolean;
   quiet: boolean;                               // after Applied: no placeholder tint
-  /** The paragraph the coaching panel is on: drawn with a thin blue outline (class doc-focus). Not document data. */
+  /** The paragraph the coaching panel is on: drawn with a navy outline (class doc-focus). Not document data. */
   focusId?: string | null;
 };
 
@@ -50,13 +52,6 @@ export function paragraphPlainText(node: PMNode): string {
   return node.textBetween(0, node.content.size, undefined, (leaf) => LEAF_TEXT[leaf.type.name] ?? "");
 }
 
-/** How a paragraph differs from the master copy: new (non-empty, not in the master) or changed. */
-function changeKind(id: string, text: string, baseline: Map<string, string>): "new" | "changed" | null {
-  const original = baseline.get(id);
-  if (original === undefined) return text ? "new" : null;
-  return original !== text ? "changed" : null;
-}
-
 /** The decorations for one paragraph; `pos` is its position in the document. */
 function paragraphDecorations(node: PMNode, pos: number, opts: HighlightOptions): Decoration[] {
   const out: Decoration[] = [];
@@ -81,11 +76,6 @@ function paragraphDecorations(node: PMNode, pos: number, opts: HighlightOptions)
     out.push(Decoration.inline(from, to, { class: RATING[info.fb.rating].tint }));
   }
 
-  const change = opts.showChanges && opts.baseline ? changeKind(id, text, opts.baseline) : null;
-  if (change) {
-    const title = change === "new" ? "Added in this tailored copy" : "Changed from master resume";
-    out.push(Decoration.node(pos, pos + node.nodeSize, { class: "doc-changed", title, "data-change": change }));
-  }
   return out;
 }
 

@@ -129,6 +129,13 @@ export const RefreshIcon = ({ className }: P) => (
   <svg {...base} className={className}><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></svg>
 );
 
+/** A filled curved back arrow (a rounded head pointing left, the tail sweeping down to the right): revert to the master's wording. */
+export const RevertIcon = ({ className }: P) => (
+  <svg width={14} height={14} viewBox="0 0 512 512" fill="currentColor" className={className} aria-hidden>
+    <path d="M248 48v82c152 10 252 130 252 330 0 15-15 18-22 6-38-106-118-176-230-176v82c0 13-13 20-23 13L12 220c-10-8-10-22 0-30L225 35c10-7 23 0 23 13z" />
+  </svg>
+);
+
 /** The app's wordmark: "Jawb" set in Young Serif (no glyph). `className` sets its size. */
 export function Wordmark({ className = "text-[24px]" }: { className?: string }) {
   return <span className={`font-brand leading-none tracking-[-0.01em] text-fg ${className}`}>Jawb</span>;

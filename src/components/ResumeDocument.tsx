@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Extension, type Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -16,6 +16,7 @@ import { resumeDoc, withDoc } from "@/lib/resume";
 import { bulletInfo } from "./docDecorations";
 import { AiHighlights, paragraphPlainText, sameOptions, type HighlightOptions } from "./aiHighlights";
 import { BulletCommentCard } from "./BulletCommentCard";
+import { RevertIcon } from "./icons";
 import { FormatToolbar } from "./FormatToolbar";
 import { selectionFor, formatAt, linkHref } from "./editorState";
 import { LinkPopover, type LinkAnchor } from "./LinkPopover";
@@ -34,7 +35,7 @@ type Props = {
   showHighlights?: boolean;
   /** Bullet texts the copy is compared against ("changed from master"): the copy's baseline or the master. */
   baseline?: Map<string, string> | null;
-  /** Draw the change bar next to bullets that differ from the baseline. Default true. */
+  /** Whether "Revert to master" is offered on a selected bullet that differs from the baseline. Draws nothing. Default true. */
   showChanges?: boolean;
   /** Reject a bullet's pending suggestion. */
   onReject?: (bulletId: string) => void;
@@ -54,7 +55,7 @@ type Props = {
   commandsRef?: React.RefObject<DocCommands | null>;
   /** Called when the caret's formatting state changes. */
   onFormatStateChange?: (s: FormatState) => void;
-  /** Paragraph id to outline in blue: the bullet (or entry's title line) the coaching panel is on. Editor only, never saved or printed. */
+  /** Paragraph id to outline in navy: the bullet (or entry's title line) the coaching panel is on. Editor only, never saved or printed. */
   focusId?: string | null;
 };
 
@@ -233,7 +234,7 @@ function applyExternalDoc(editor: Editor, doc: DocJSON) {
   editor.view.dispatch(closeHistory(editor.state.tr));
 }
 
-/** Replaces the caret paragraph's text as one undoable step (Accept suggestion, Revert to master). */
+/** Replaces the caret paragraph's text as one undoable step (Accept suggestion, the revert arrow). */
 function replaceCaretText(editor: Editor, text: string) {
   const { $from } = editor.state.selection;
   const from = $from.start();
@@ -244,6 +245,78 @@ function replaceCaretText(editor: Editor, text: string) {
   else tr.delete(from, to);
   tr.setSelection(TextSelection.create(tr.doc, from + text.length));
   editor.view.dispatch(tr);
+}
+
+/** The revert arrow's diameter, in px. */
+const REVERT_SIZE = 26;
+/** Where the revert arrow's top-left corner sits, in the page's own px (unscaled), inside the page (position: relative). */
+type RevertSpot = { top: number; left: number };
+
+/**
+ * Where the revert arrow goes: centred on the caret paragraph's first line, just right of the paragraph's right edge
+ * (in the page's right margin). The page's margin is narrower than the arrow on phones, and at the page's edge the
+ * arrow stops there, so it then covers the end of a full first line. Measured on the screen and divided by the zoom,
+ * so it does not depend on the zoom.
+ */
+function revertSpotAt(editor: Editor, pageEl: HTMLElement): RevertSpot | null {
+  const { $from } = editor.state.selection;
+  const para = editor.view.nodeDOM($from.before($from.depth));
+  if (!(para instanceof HTMLElement)) return null;
+  let line: { top: number; bottom: number };
+  try {
+    line = editor.view.coordsAtPos($from.start());
+  } catch {
+    return null;
+  }
+  const page = pageEl.getBoundingClientRect();
+  const scale = pageEl.offsetWidth > 0 ? page.width / pageEl.offsetWidth : 1;
+  const gap = window.matchMedia("(max-width: 639px)").matches ? 10 : 14;
+  const right = (para.getBoundingClientRect().right - page.left) / scale;
+  const mid = (line.top + line.bottom) / 2;
+  return {
+    top: (mid - page.top) / scale - REVERT_SIZE / 2,
+    left: Math.min(right + gap, pageEl.offsetWidth - REVERT_SIZE),
+  };
+}
+
+/**
+ * The revert arrow beside the selected bullet: a round button that puts the master's wording back. A tip reading
+ * "Revert to master" shows after a short hover or on keyboard focus. Pressing it does not take the focus from the editor.
+ */
+function RevertButton({ spot, onRevert }: { spot: RevertSpot; onRevert: () => void }) {
+  const [tip, setTip] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  const tipId = useId();
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return (
+    <div className="doc-ui doc-revert" style={{ top: spot.top, left: spot.left }}>
+      <button
+        type="button"
+        aria-label="Revert to master"
+        aria-describedby={tip ? tipId : undefined}
+        className="doc-revert-btn"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRevert}
+        onMouseEnter={() => {
+          window.clearTimeout(timer.current);
+          timer.current = window.setTimeout(() => setTip(true), 300);
+        }}
+        onMouseLeave={() => {
+          window.clearTimeout(timer.current);
+          setTip(false);
+        }}
+        onFocus={() => setTip(true)}
+        onBlur={() => setTip(false)}
+      >
+        <RevertIcon />
+      </button>
+      {tip && (
+        <span role="tooltip" id={tipId} className="doc-revert-tip float-dark">
+          Revert to master
+        </span>
+      )}
+    </div>
+  );
 }
 
 type CaretState = { id: string | null; text: string; sel: DocSelection | null };
@@ -514,6 +587,34 @@ export function ResumeDocument({
     return () => cancelAnimationFrame(frame);
   }, [cardId, editor]);
 
+  // The revert arrow: on the selected bullet only, and only when it differs from the master (never on the master page).
+  const revertInfo = cardId && showChanges && !quiet && baseline ? bulletInfo(cardId, caret.text, { baseline }) : null;
+  const revertTo = revertInfo?.changed ? revertInfo.original : undefined;
+  const revertOn = revertTo !== undefined && !!editor && !!commands;
+  const [revertSpot, setRevertSpot] = useState<RevertSpot | null>(null);
+  // Measured on every render (the caret, its text, the zoom and the page's size all reach here through one), and stored
+  // only when it moved, so it cannot loop. Before paint, so the arrow never shows in the wrong place. No dependency
+  // list on purpose: a zoom change moves the line without changing any value listed here.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const pageEl = pageRef.current;
+    const next = revertOn && editor && pageEl ? revertSpotAt(editor, pageEl) : null;
+    setRevertSpot((prev) => (prev?.top === next?.top && prev?.left === next?.left ? prev : next));
+  });
+  // A resize reflows the text and moves the first line: measure again. The page's own size changes with its reflow.
+  useEffect(() => {
+    if (!revertOn) return;
+    const bump = () => setViewTick((t) => t + 1);
+    const pageEl = pageRef.current;
+    const ro = pageEl ? new ResizeObserver(bump) : null;
+    if (pageEl) ro?.observe(pageEl);
+    window.addEventListener("resize", bump);
+    return () => {
+      window.removeEventListener("resize", bump);
+      ro?.disconnect();
+    };
+  }, [revertOn]);
+
   const editAnchor = editing ? anchorAt(editing.pos) : null;
   const bubbleAnchor = bubble && selActive && !editing ? anchorAt(bubble.pos) : null;
 
@@ -531,7 +632,6 @@ export function ResumeDocument({
             showChanges={showChanges}
             quiet={quiet}
             onAccept={(text) => editor && replaceCaretText(editor, text)}
-            onRevert={(text) => editor && replaceCaretText(editor, text)}
             onReject={onReject}
             onClose={() => setSelActive(false)}
             onSelectPlaceholder={(start, length) => selectInCaret(start, length)}
@@ -575,6 +675,17 @@ export function ResumeDocument({
           <div ref={contentRef} className="doc-content">
             <EditorContent editor={editor} />
           </div>
+          {revertOn && revertSpot && (
+            <RevertButton
+              spot={revertSpot}
+              onRevert={() => {
+                if (!editor || revertTo === undefined) return;
+                replaceCaretText(editor, revertTo);
+                // The button is about to go: the editor keeps the keyboard, and the caret stays where it was.
+                editor.commands.focus();
+              }}
+            />
+          )}
         </div>
       </div>
       {card}
