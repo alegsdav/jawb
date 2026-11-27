@@ -3,6 +3,7 @@
 import type { Job } from "@/lib/types";
 import { countPlaceholders, plural } from "@/lib/facts";
 import { PlaceholderTextarea } from "../PlaceholderTextarea";
+import { LoadingState } from "@/components/ui/loading-state";
 import { PostingView } from "./PostingView";
 
 /** The Posting tab: the posting as a readable document, editable in place (see PostingView). */
@@ -33,7 +34,7 @@ export function CoverLetterTab({
         {quiet && <p className="text-[13px] text-muted">The letter as you last saved it here.</p>}
         {!quiet && (
           <button type="button" className={`${textButton} font-medium text-fg`} onClick={onWrite} disabled={writing || !canWrite}>
-            {writing ? "Writing…" : job.cover_letter ? "Regenerate" : "Draft cover letter"}
+            {writing ? <LoadingState label="Writing" /> : job.cover_letter ? "Regenerate" : "Draft cover letter"}
           </button>
         )}
         {job.cover_letter && (

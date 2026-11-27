@@ -5,6 +5,7 @@ import type { Fact } from "@/lib/types";
 import { FACT_SOURCE_LABEL } from "@/lib/facts";
 import { FACTS_MIGRATION_HINT } from "@/lib/factStore";
 import type { FactsStatus } from "@/lib/useFacts";
+import { LoadingState } from "@/components/ui/loading-state";
 
 /**
  * The student's facts: true things the AI uses so it doesn't ask again (numbers, tools, side projects,
@@ -63,7 +64,7 @@ export function FactsPanel({
             placeholder={"e.g. Automated a weekly Excel report with Python, saving ~4 hrs/week\nOne fact per line"}
           />
           <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" onClick={() => void add()} disabled={!draft.trim() || busy}>
-            {busy ? "Adding…" : `Add fact${draft.trim().includes("\n") ? "s" : ""}`}
+            {busy ? <LoadingState label="Adding" /> : `Add fact${draft.trim().includes("\n") ? "s" : ""}`}
           </button>
         </div>
       )}

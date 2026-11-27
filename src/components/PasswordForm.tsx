@@ -2,6 +2,7 @@
 
 import { useActionState, useId, useState } from "react";
 import { updatePassword } from "@/app/login/actions";
+import { LoadingState } from "@/components/ui/loading-state";
 
 /** Set or change the sign-in password (the `updatePassword` server action). Behind a disclosure button. */
 export function PasswordForm() {
@@ -54,7 +55,7 @@ export function PasswordForm() {
             className="input w-full"
           />
           <button disabled={pending} className="btn btn-primary w-full py-2.5">
-            {pending ? "Saving…" : "Save password"}
+            {pending ? <LoadingState label="Saving" className="loading-on-fill" /> : "Save password"}
           </button>
           {state.message && <p className={`text-sm ${state.ok ? "text-good" : "text-bad"}`}>{state.message}</p>}
         </form>

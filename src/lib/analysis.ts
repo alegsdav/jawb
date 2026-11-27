@@ -1,4 +1,4 @@
-import type { Analysis, Fit, Resume } from "./types";
+import type { Analysis, Fit, MasterAnalysis, ReviewCore, Resume } from "./types";
 import { fitFromScore } from "./fit";
 import { bulletTextMap } from "./resume";
 import { addFacts, hasPlaceholder, PLACEHOLDER_RE } from "./facts";
@@ -37,59 +37,114 @@ export function stripBulletIds(text: string): string {
   return ledWithId && tidy ? tidy[0].toUpperCase() + tidy.slice(1) : tidy;
 }
 
-/** Coerce whatever the model (or an old stored row) returned into a complete Analysis so the UI never crashes on a missing field. */
-export function normalizeAnalysis(raw: unknown): Analysis {
-  const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
-  const kw = (r.keywords && typeof r.keywords === "object" ? r.keywords : {}) as Record<string, unknown>;
-  const rating = (v: unknown): "strong" | "ok" | "weak" => (v === "strong" || v === "weak" ? v : "ok");
-  const bulletId = (v: unknown) => str(v).trim().replace(/^\[?b:/, "").replace(/\]$/, "");
-  const sev = (v: unknown): "high" | "medium" | "low" => (v === "high" || v === "low" ? v : "medium");
-  const clean = (v: unknown) => stripBulletIds(str(v));
-  const out: Analysis = {
-    fit: fitOfRaw(r),
-    verdict: clean(r.verdict),
-    keywords: { matched: arr<unknown>(kw.matched).map(str).filter(Boolean), missing: arr<unknown>(kw.missing).map(str).filter(Boolean) },
-    strengths: arr<unknown>(r.strengths).map(clean).filter(Boolean),
-    gaps: arr<Record<string, unknown>>(r.gaps).map((g) => ({ issue: clean(g?.issue), severity: sev(g?.severity), fix: clean(g?.fix) })),
-    bullets: arr<Record<string, unknown>>(r.bullets)
-      .map((b) => ({
-        bullet_id: bulletId(b?.bullet_id),
-        rating: rating(b?.rating),
-        note: clean(b?.note),
-        rewrite: str(b?.rewrite),
-        why: clean(b?.why),
-        ...(typeof b?.original === "string" ? { original: b.original } : {}),
-      }))
-      .filter((b) => b.bullet_id),
-    questions: arr<Record<string, unknown>>(r.questions)
-      .map((q, i) => {
-        const bid = bulletId(q?.bullet_id);
-        const ph = str(q?.placeholder).trim();
-        return {
-          id: str(q?.id) || `q${i}`,
-          question: clean(q?.question),
-          why: clean(q?.why),
-          // Only meaningful together: "fill this placeholder in this bullet".
-          ...(bid && ph ? { bullet_id: bid, placeholder: ph.startsWith("[") ? ph : `[${ph}]` } : {}),
-        };
-      })
-      .filter((q) => q.question),
-  };
-  // Stored analyses carry user state; keep it when re-normalizing a saved row.
+const rating = (v: unknown): "strong" | "ok" | "weak" => (v === "strong" || v === "weak" ? v : "ok");
+const bulletId = (v: unknown) => str(v).trim().replace(/^\[?b:/, "").replace(/\]$/, "");
+const sev = (v: unknown): "high" | "medium" | "low" => (v === "high" || v === "low" ? v : "medium");
+const clean = (v: unknown) => stripBulletIds(str(v));
+
+const normGaps = (r: Record<string, unknown>): Analysis["gaps"] =>
+  arr<Record<string, unknown>>(r.gaps).map((g) => ({ issue: clean(g?.issue), severity: sev(g?.severity), fix: clean(g?.fix) }));
+
+const normStrengths = (r: Record<string, unknown>): string[] => arr<unknown>(r.strengths).map(clean).filter(Boolean);
+
+const normBullets = (r: Record<string, unknown>): Analysis["bullets"] =>
+  arr<Record<string, unknown>>(r.bullets)
+    .map((b) => ({
+      bullet_id: bulletId(b?.bullet_id),
+      rating: rating(b?.rating),
+      note: clean(b?.note),
+      rewrite: str(b?.rewrite),
+      why: clean(b?.why),
+      ...(typeof b?.original === "string" ? { original: b.original } : {}),
+    }))
+    .filter((b) => b.bullet_id);
+
+const normQuestions = (r: Record<string, unknown>): Analysis["questions"] =>
+  arr<Record<string, unknown>>(r.questions)
+    .map((q, i) => {
+      const bid = bulletId(q?.bullet_id);
+      const ph = str(q?.placeholder).trim();
+      return {
+        id: str(q?.id) || `q${i}`,
+        question: clean(q?.question),
+        why: clean(q?.why),
+        // Only meaningful together: "fill this placeholder in this bullet".
+        ...(bid && ph ? { bullet_id: bid, placeholder: ph.startsWith("[") ? ph : `[${ph}]` } : {}),
+      };
+    })
+    .filter((q) => q.question);
+
+/** Stored analyses carry user state; keep it when re-normalizing a saved row. */
+function keepUserState(r: Record<string, unknown>, out: ReviewCore & { analyzed_at?: string }): void {
   if (r.answers && typeof r.answers === "object" && !Array.isArray(r.answers)) {
     out.answers = Object.fromEntries(Object.entries(r.answers as Record<string, unknown>).map(([k, v]) => [k, str(v)]));
   }
   if (Array.isArray(r.dismissed)) out.dismissed = r.dismissed.map(str).filter(Boolean);
   if (typeof r.analyzed_at === "string") out.analyzed_at = r.analyzed_at;
+}
+
+const asRecord = (raw: unknown): Record<string, unknown> =>
+  (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+
+/** Coerce whatever the model (or an old stored row) returned into a complete Analysis so the UI never crashes on a missing field. */
+export function normalizeAnalysis(raw: unknown): Analysis {
+  const r = asRecord(raw);
+  const kw = (r.keywords && typeof r.keywords === "object" ? r.keywords : {}) as Record<string, unknown>;
+  const out: Analysis = {
+    fit: fitOfRaw(r),
+    verdict: clean(r.verdict),
+    keywords: { matched: arr<unknown>(kw.matched).map(str).filter(Boolean), missing: arr<unknown>(kw.missing).map(str).filter(Boolean) },
+    strengths: normStrengths(r),
+    gaps: normGaps(r),
+    bullets: normBullets(r),
+    questions: normQuestions(r),
+  };
+  keepUserState(r, out);
   return out;
 }
 
 /**
- * Combine a fresh model result with the job's previous analysis: questions the user already answered
+ * The master review's `weakest`: ids of bullets that exist in `bullets` and are rated weak or ok, in the
+ * given order, no repeats, at most 5. When that leaves none, derived from the ratings: weak bullets first,
+ * then ok ones, each in the order of `bullets`.
+ */
+function weakestIds(raw: unknown, bullets: Analysis["bullets"]): string[] {
+  const ok = new Map(bullets.filter((b) => b.rating !== "strong").map((b) => [b.bullet_id, true]));
+  const given = [...new Set(arr<unknown>(raw).map(bulletId).filter((id) => ok.has(id)))].slice(0, 5);
+  if (given.length) return given;
+  const weak = bullets.filter((b) => b.rating === "weak").map((b) => b.bullet_id);
+  const mid = bullets.filter((b) => b.rating === "ok").map((b) => b.bullet_id);
+  return [...new Set([...weak, ...mid])].slice(0, 5);
+}
+
+/**
+ * Coerce a master review (model output or a stored row) into a complete MasterAnalysis, defensively like
+ * normalizeAnalysis. `weakest` keeps only bullets in this result that are rated weak or ok, in the given
+ * order, at most 5; when the model gave none, it is derived from the ratings (weak, then ok, in the
+ * order the bullets come in, which follows the resume).
+ */
+export function normalizeMasterAnalysis(raw: unknown): MasterAnalysis {
+  const r = asRecord(raw);
+  const bullets = normBullets(r);
+  const out: MasterAnalysis = {
+    verdict: clean(r.verdict),
+    weakest: weakestIds(r.weakest, bullets),
+    strengths: normStrengths(r),
+    gaps: normGaps(r),
+    bullets,
+    questions: normQuestions(r),
+  };
+  keepUserState(r, out);
+  return out;
+}
+
+/**
+ * Combine a fresh model result with the previous analysis: questions the user already answered
  * (and their answers) carry over so they keep informing future runs, new questions get unique ids,
  * rejected rewrites are forgotten (the bullets were re-rated), and the run is timestamped.
+ * Works for a job analysis and a master review alike.
  */
-export function mergeAnalysis(prev: Analysis | null, fresh: Analysis, now: Date): Analysis {
+export function mergeAnalysis<T extends ReviewCore & { analyzed_at?: string }>(prev: T | null, fresh: T, now: Date): T {
   const answers = Object.fromEntries(Object.entries(prev?.answers ?? {}).filter(([, v]) => v?.trim()));
   const oldAnswered = (prev?.questions ?? []).filter((q) => answers[q.id]);
   const asked = new Set(oldAnswered.map((q) => q.question.trim().toLowerCase()));
@@ -109,7 +164,7 @@ export function mergeAnalysis(prev: Analysis | null, fresh: Analysis, now: Date)
 }
 
 /** Record the text each bullet had when it was rated, so the UI can tell when feedback no longer applies. */
-export function attachOriginals(a: Analysis, resume: Resume): Analysis {
+export function attachOriginals<T extends ReviewCore>(a: T, resume: Resume): T {
   const texts = bulletTextMap(resume);
   return {
     ...a,
@@ -155,7 +210,7 @@ export function matchesRewrite(text: string, rewrite: string): boolean {
  * counted for "Accept all") while the bullet still reads like the text it was written for.
  */
 export function bulletFeedback(
-  analysis: Analysis | null | undefined,
+  analysis: ReviewCore | null | undefined,
   resume: Resume | null | undefined,
   loaded?: Map<string, string> | null,
 ): Record<string, BulletFeedback> {
@@ -399,13 +454,13 @@ type MasterWrite = (mutate: (m: Resume) => Resume) => Promise<{ ok: true; conten
  * `writeMaster`, i.e. updateMaster), and only once that worked, the answers on the job (`persist`).
  * If the master write fails nothing is persisted, so the answers stay "unsaved" and a retry redoes it.
  */
-export async function saveAnswersInOrder(opts: {
-  analysis: Analysis;
+export async function saveAnswersInOrder<T extends ReviewCore>(opts: {
+  analysis: T;
   answers: Record<string, string>;
   writeMaster: MasterWrite;
-  persist: (next: Analysis) => Promise<void> | void;
+  persist: (next: T) => Promise<void> | void;
 }): Promise<
-  { ok: true; master: Resume; added: number; analysis: Analysis } | { ok: false; stage: "master" | "answers"; error: string }
+  { ok: true; master: Resume; added: number; analysis: T } | { ok: false; stage: "master" | "answers"; error: string }
 > {
   const { analysis } = opts;
   const clean = Object.fromEntries(Object.entries(opts.answers).filter(([, v]) => v.trim()));
@@ -420,7 +475,7 @@ export async function saveAnswersInOrder(opts: {
     res = { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!res.ok) return { ok: false, stage: "master", error: res.error };
-  const next: Analysis = { ...analysis, answers: clean };
+  const next: T = { ...analysis, answers: clean };
   try {
     await opts.persist(next);
   } catch (e) {
@@ -436,11 +491,11 @@ export async function saveAnswersInOrder(opts: {
  * keeps its old question, so nothing typed disappears. `changed` means the result differs from
  * `fresh`, so the page must save it itself.
  */
-export function carryClientState(
-  prev: Analysis | null,
-  fresh: Analysis,
+export function carryClientState<T extends ReviewCore>(
+  prev: T | null,
+  fresh: T,
   drafts: Record<string, string>,
-): { analysis: Analysis; drafts: Record<string, string>; changed: boolean } {
+): { analysis: T; drafts: Record<string, string>; changed: boolean } {
   const questions = [...fresh.questions];
   const answers: Record<string, string> = { ...(fresh.answers ?? {}) };
   const byText = new Map(questions.map((q) => [normText(q.question), q.id]));
@@ -832,7 +887,7 @@ export function guardNumbers(text: string, sources: string[] | KnownNumbers): { 
  * (`shared`); numbers from other bullets don't count. Anything else becomes a [placeholder], with a
  * question (`bullet_id` + `placeholder`) asking for the real value.
  */
-export function guardAnalysisNumbers(a: Analysis, shared: string[], bulletTexts?: Map<string, string>): Analysis {
+export function guardAnalysisNumbers<T extends ReviewCore>(a: T, shared: string[], bulletTexts?: Map<string, string>): T {
   const sharedKnown = knownNumbers(shared);
   const questions = [...a.questions];
   const bullets = a.bullets.map((b) => {
@@ -852,7 +907,7 @@ export function guardAnalysisNumbers(a: Analysis, shared: string[], bulletTexts?
     });
     return { ...b, rewrite: g.text };
   });
-  return { ...a, bullets, questions };
+  return { ...a, bullets, questions } as T;
 }
 
 /** A sentence with one of these is a claim about the candidate. */

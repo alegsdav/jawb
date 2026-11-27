@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { hasPullChanges, type PullAddition, type PullPlan, type PullRemoval } from "@/lib/tailor";
 import type { MergeConflict } from "@/lib/master";
 import type { MasterRemoval, SaveAsMasterPlan } from "@/lib/jobSync";
+import { LoadingState } from "@/components/ui/loading-state";
 
 
 function additionText(a: PullAddition) {
@@ -298,7 +299,7 @@ export function SaveAsMasterDialog({
             onClick={() => onConfirm(remove)}
             disabled={busy || nothing}
           >
-            {busy ? "Saving…" : remove.size ? `Save and remove ${remove.size}` : "Save to master resume"}
+            {busy ? <LoadingState label="Saving" className="loading-on-fill" /> : remove.size ? `Save and remove ${remove.size}` : "Save to master resume"}
           </button>
         </div>
       </div>

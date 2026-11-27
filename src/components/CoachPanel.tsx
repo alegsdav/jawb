@@ -10,6 +10,7 @@ import {
   type CoachQuestion, type CoachTarget,
 } from "@/lib/coaching";
 import type { FactsApi } from "@/lib/useFacts";
+import { LoadingState } from "@/components/ui/loading-state";
 import { markPlaceholders } from "./PlaceholderTextarea";
 import { UndoToast } from "./UndoToast";
 import { CHOICES, choiceClass, choiceOfStage, rowGapClass, type ChoiceMode } from "@/lib/coachChoice";
@@ -314,7 +315,7 @@ export function CoachPanel({
             ))}
           </div>
 
-          {zoom && busy && busyText && <p className="ai-shimmer text-[14px]">{busyText}</p>}
+          {zoom && busy && busyText && <LoadingState label={busyText} className="text-[14px]" />}
 
           {done && (
             <p role="status" className="text-[13px] text-good">
@@ -353,7 +354,7 @@ export function CoachPanel({
                 ))}
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(round + 1, false)}>
-                    {busy === "examples" ? "Writing…" : "More examples"}
+                    {busy === "examples" ? <LoadingState label="Writing" /> : "More examples"}
                   </button>
                   <button type="button" className="rounded-md px-2 py-1 text-[13px] text-muted underline underline-offset-2 hover:text-fg disabled:opacity-50" disabled={!!busy} onClick={loadQuestions}>
                     Question me instead
@@ -392,13 +393,13 @@ export function CoachPanel({
                 ))}
                 {!answered ? (
                   <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" disabled={busy === "saving"} onClick={saveAnswers}>
-                    {busy === "saving" ? "Saving…" : Object.values(answers).some((a) => a.trim()) ? "Save answers" : "Skip"}
+                    {busy === "saving" ? <LoadingState label="Saving" /> : Object.values(answers).some((a) => a.trim()) ? "Save answers" : "Skip"}
                   </button>
                 ) : (
                   <div className="space-y-2">
                     <p className="text-[13px]">Saved to your facts. Now write the bullet with your real numbers.</p>
                     <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-[13px] font-medium text-fg hover:bg-surface-2 disabled:opacity-50" disabled={!!busy} onClick={() => loadExamples(1, true)}>
-                      {busy === "examples" ? "Writing…" : "Write my bullet"}
+                      {busy === "examples" ? <LoadingState label="Writing" /> : "Write my bullet"}
                     </button>
                   </div>
                 )}

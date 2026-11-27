@@ -6,8 +6,8 @@
 export type ChoiceMode = "examples" | "questions";
 
 export const CHOICES: { mode: ChoiceMode; label: string; busyText: string }[] = [
-  { mode: "examples", label: "Examples", busyText: "Finding examples for this bullet…" },
-  { mode: "questions", label: "Question me", busyText: "Writing questions about this bullet…" },
+  { mode: "examples", label: "Examples", busyText: "Finding examples for this bullet" },
+  { mode: "questions", label: "Question me", busyText: "Writing questions about this bullet" },
 ];
 
 /** The choice a stage belongs to (null while the two are side by side). */

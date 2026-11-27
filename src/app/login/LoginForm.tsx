@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { sendMagicLink, signInWithPassword } from "./actions";
 import { Wordmark } from "@/components/icons";
+import { LoadingState } from "@/components/ui/loading-state";
 
 /** Password sign-in with a magic-link fallback. `notice` explains why the user landed here (from `?error=`). */
 export function LoginForm({ notice }: { notice?: string }) {
@@ -42,7 +43,7 @@ export function LoginForm({ notice }: { notice?: string }) {
               className="input w-full"
             />
             <button disabled={pwPending} className="btn btn-primary w-full py-2.5">
-              {pwPending ? "Signing in…" : "Sign in"}
+              {pwPending ? <LoadingState label="Signing in" className="loading-on-fill" /> : "Sign in"}
             </button>
             {pwState.message && <p className="text-sm text-bad">{pwState.message}</p>}
           </form>
@@ -50,7 +51,7 @@ export function LoginForm({ notice }: { notice?: string }) {
           <form action={linkAction} className="space-y-3">
             <input name="email" type="email" autoComplete="email" required placeholder="Email" className="input w-full" />
             <button disabled={linkPending} className="btn btn-primary w-full py-2.5">
-              {linkPending ? "Sending…" : "Email me a sign-in link"}
+              {linkPending ? <LoadingState label="Sending" className="loading-on-fill" /> : "Email me a sign-in link"}
             </button>
             {linkState.message && (
               <p className={`text-sm ${linkState.ok ? "text-muted" : "text-bad"}`}>{linkState.message}</p>

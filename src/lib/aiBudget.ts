@@ -21,6 +21,7 @@ export type AiWeight = "heavy" | "light";
 export const AI_WEIGHTS = {
   analyze: "heavy", // first analysis of a job
   reanalyze: "heavy", // any later analysis of the same job
+  master_review: "heavy", // the one-time review of the master resume (no job); re-running it costs the same
   parse_resume: "heavy", // resume import (PDF or pasted text)
   builder_draft: "heavy", // "Build my resume" in the guided builder
   intake_meta: "light", // company/title/location from a pasted posting

@@ -1,16 +1,17 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { Analysis } from "@/lib/types";
+import type { Analysis, ReviewCore } from "@/lib/types";
 import { suggestFill } from "@/lib/analysis";
+import { LoadingState } from "@/components/ui/loading-state";
 
 type Question = Analysis["questions"][number];
 
 type Props = {
   /** Unanswered questions about the selected bullet. */
   questions: Question[];
-  /** The job's analysis: its stored answers decide what's unsaved. */
-  analysis: Analysis;
+  /** The job's analysis (or the master review): its stored answers decide what's unsaved. */
+  analysis: ReviewCore;
   /** What's typed in each answer box, by question id (kept by the page). */
   drafts: Record<string, string>;
   onDraftsChange: (drafts: Record<string, string>) => void;
@@ -118,7 +119,7 @@ export function BulletQuestions({ questions, analysis, drafts, onDraftsChange, o
           {dirty && <span className="text-xs text-muted">Unsaved answers</span>}
         </div>
       )}
-      {saving && <p className="text-xs text-muted">Saving…</p>}
+      {saving && <LoadingState label="Saving" />}
       {saveError && !saving && (
         <div role="alert" className="space-y-2 text-[13px]">
           <p className="text-bad">

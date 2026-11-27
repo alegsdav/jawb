@@ -107,6 +107,81 @@ ${args.answers || "(none)"}
 """`;
 }
 
+/**
+ * The master-resume rubric: substance for any recruiter, no job. Same ideas as REVIEW_RUBRIC, without the job match.
+ * The number-honesty rules above it still win any conflict.
+ */
+const MASTER_RUBRIC = `
+Master resume review rubric (judge SUBSTANCE for any recruiter, not a match to one job; the number-honesty rules above win any conflict with it):
+1. Section order sends signals (student resumes):
+- Education goes at the top: recruiters look for the graduation date and current-student status first.
+- Technical Skills goes near the bottom: it mainly helps ATS keyword matching and doesn't prove depth.
+- Leadership and extracurriculars matter: they show soft skills and teamwork.
+- If the order is off, add a gap (severity "medium", or "low" if only minor).
+- If there is no leadership or activities section, add a "low" gap phrased as "if you have any…". This is the ONE exception
+  to the "never suggest adding content or sections" rule above. It never invents content.
+2. Less experience, more impact. A resume is a sales document, not a timeline.
+- Prefer fewer roles with strong, specific bullets.
+- If an entry is weak, a gap's fix may say to cut or condense it so stronger entries get the space.
+3. Outcomes, not responsibilities.
+- Rate a bullet "weak" when it describes duties or teamwork without a result ("Collaborated with engineers, designers, and PMs").
+- Rewrites use Google's XYZ formula: "Accomplished X as measured by Y, by doing Z". Result first, then the measure, then how.
+4. Specific, not fluffy.
+- Vague metrics ("improved productivity by 20%") rate "ok" at best.
+- The note says what is unclear: what was measured, how, and what changed.
+- The question asks for the concrete definition.
+5. A bullet is strong when a recruiter reading it cold learns what the student did, what changed because of it, and at what scale.
+6. Questions surface what a recruiter would want to know: how success was measured, what changed because of the student's work,
+   and scale (users, revenue, time saved). They are still subject to the never-invent rules.`;
+
+/**
+ * One review of the whole master resume, for no particular job. The fixed instructions come first, with no
+ * interpolation, so the model can cache them across calls (see analyzePrompt).
+ */
+export function masterReviewPrompt(args: {
+  /** resumeToPromptText(master): bullets tagged [b:ID]. */
+  resume: string;
+  /** Output of formatFacts(...) for the master's active facts. */
+  facts: string;
+  /** The student's earlier answers as "Q: … / A: …" blocks (formatted by the route). */
+  answers: string;
+}) {
+  return `You are a blunt, expert tech recruiter and resume coach reviewing a college student's MASTER resume: the full resume they keep, not a tailored copy for any one job. Judge it for a recruiter in general.
+${RULES}
+${MASTER_RUBRIC}
+
+Return ONLY JSON with exactly this shape:
+{
+  "verdict": "2-3 sentences: the resume's overall substance, and the single most important improvement to make",
+  "weakest": ["up to 5 bullet IDs from [b:ID], weakest first, judged on substance; only bullets rated weak or ok"],
+  "strengths": ["specific strengths, citing resume content"],
+  "gaps": [{ "issue": "structural issue (section order, missing leadership, etc.)", "severity": "high|medium|low", "fix": "concrete action" }],
+  "bullets": [{ "bullet_id": "ID from [b:ID]", "rating": "strong|ok|weak", "note": "why, judged on substance for any recruiter", "rewrite": "improved bullet, or empty string if already strong", "why": "one sentence, at most 25 words, to the student: what the rewrite changes and why a recruiter will care, or empty string when rewrite is empty" }],
+  "questions": [{ "id": "q1", "question": "a question whose answer would strengthen the resume (missing metrics, scale, results, tools)", "why": "what it would improve", "bullet_id": "ID from [b:ID] when the question asks for the real value of a [placeholder] in that bullet's rewrite, else empty string", "placeholder": "that exact [placeholder] text, brackets included, copied from the rewrite, else empty string" }]
+}
+When a rewrite contains a [placeholder], ask one question per placeholder and set its bullet_id and placeholder so the answer can be filled in.
+Rate EVERY resume bullet. "weakest": up to 5 bullet ids, weakest first, judged on substance. Ask 2-6 questions. Never ask anything the CANDIDATE FACTS or the candidate's answers below already cover; use that information in the rewrites instead. Order gaps by severity.
+Never mention bullet ids ([b:…] or b:…) in any text field; refer to a bullet by its words instead. The note, why and rewrite speak about impact for recruiters in general, not about a specific job.
+
+The candidate's resume, their facts and their answers follow. Review them as shown.
+
+CANDIDATE RESUME (bullets are tagged [b:ID]):
+"""
+${args.resume}
+"""
+
+CANDIDATE FACTS (true, from their master resume; may be empty). Real details that didn't fit on the page;
+use them in rewrites (numbers, tools, scope) only where they belong to that bullet's experience:
+"""
+${args.facts || "(none)"}
+"""
+
+CANDIDATE'S ANSWERS TO YOUR EARLIER QUESTIONS (true; may be empty):
+"""
+${args.answers || "(none)"}
+"""`;
+}
+
 export function coverLetterPrompt(args: { resume: string; job: string; facts: string; answers: string }) {
   return `Write a concise cover letter (under 250 words, 3 short paragraphs) for this candidate and job.
 Sound like a sharp, genuine college student, not a template: no "I am writing to express my interest", no clichés.

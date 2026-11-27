@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Resume } from "@/lib/types";
 import { postApi } from "@/lib/api";
+import { LoadingState } from "@/components/ui/loading-state";
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024; // read in the browser
 const MAX_DOCX_BYTES = 20 * 1024 * 1024; // read in the browser
@@ -151,9 +152,11 @@ export function ResumeImport({
         } ${busy ? "pointer-events-none opacity-60" : ""}`}
       >
         <span className="text-sm font-medium">
-          {busy
-            ? busyKind === "docx" ? "Opening your document…" : busyKind === "pdf" ? "Opening your PDF…" : "Laying out your resume…"
-            : "Drop your resume here or tap to choose"}
+          {busy ? (
+            <LoadingState label={busyKind === "docx" ? "Opening your document" : busyKind === "pdf" ? "Opening your PDF" : "Laying out your resume"} />
+          ) : (
+            "Drop your resume here or tap to choose"
+          )}
         </span>
         <span className="text-xs text-muted">PDF or .docx, up to 20 MB</span>
         <input
@@ -188,7 +191,7 @@ export function ResumeImport({
       <div className="flex flex-wrap items-center gap-2">
         {mode !== "file" && (
           <button className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => run()}>
-            {busy ? "Laying out…" : "Lay out with AI (Harvard template)"}
+            {busy ? <LoadingState label="Laying out" className="loading-on-fill" /> : "Lay out with AI (Harvard template)"}
           </button>
         )}
         {onCancel && <button className="btn btn-sm" onClick={onCancel}>Cancel</button>}

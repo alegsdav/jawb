@@ -19,6 +19,7 @@ import { deadlineUrgency, isClosingSoon } from "@/components/DeadlineField";
 import { InProgress } from "@/components/dashboard/InProgress";
 import { NeedsAttention } from "@/components/dashboard/NeedsAttention";
 import { Greeting, StatStrip } from "@/components/dashboard/Overview";
+import { LoadingState } from "@/components/ui/loading-state";
 
 const BASE_COLS = "id, company, title, location, url, status, date_applied, follow_up_date, analysis, created_at, updated_at";
 /** Added by migration 0002. */
@@ -423,7 +424,7 @@ export default function TrackerPage() {
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                         <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
-                        {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
+                        {busyId === j.id && <LoadingState label="Saving a copy" />}
                         {!needsMigration && j.deadline && (
                           <span className={`text-xs ${urgency === "overdue" ? "text-bad font-medium" : urgency === "soon" ? "text-ok font-medium" : "text-muted"}`}>
                             Deadline {shortDate(j.deadline)}
@@ -481,7 +482,7 @@ export default function TrackerPage() {
                           <td className="py-2.5 pr-4">
                             <div className="flex flex-col items-start gap-1">
                               <StatusSelect value={j.status} onChange={(status) => setStatus(j, status)} />
-                              {busyId === j.id && <span className="text-xs text-muted">Saving a copy…</span>}
+                              {busyId === j.id && <LoadingState label="Saving a copy" />}
                               {/* In the status column so it shows at every width (the follow-up column hides below md). */}
                               {isDue && <FollowedUpButton onClick={() => followedUp(j)} />}
                               <RowSaveNote state={writes.states.get(j.id)} onDiscard={() => writes.discard(j.id)} />

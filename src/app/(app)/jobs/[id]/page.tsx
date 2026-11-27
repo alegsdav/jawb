@@ -1,6 +1,7 @@
 "use client";
 
 import { DownloadIcon } from "@/components/icons";
+import { LoadingState } from "@/components/ui/loading-state";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1116,7 +1117,7 @@ export default function JobPage() {
           <MenuBar>
             <MenuBarMenu label="File">
               <MenuItem onSelect={downloadPdf} disabled={pdfBusy}>
-                {pdfBusy ? "Building PDF…" : "Download PDF"}
+                {pdfBusy ? <LoadingState label="Building PDF" /> : "Download PDF"}
               </MenuItem>
               <MenuItem onSelect={copyText}>Copy as text</MenuItem>
               <MenuItem onSelect={() => window.print()} shortcut="Ctrl+P">Print…</MenuItem>
@@ -1174,9 +1175,7 @@ export default function JobPage() {
                     {docBar && (
                       <>
                         {quiet ? null : analyzing ? (
-                          <span className="px-1 text-xs whitespace-nowrap text-muted">
-                            Analyzing<span className="hidden sm:inline"> against the job</span>…
-                          </span>
+                          <LoadingState label="Analyzing" className="px-1" />
                         ) : analyzeError ? (
                           <button type="button" className={`${quietText} text-bad lg:hidden`} onClick={() => selectTab("overview")}>
                             Analysis failed
@@ -1262,7 +1261,8 @@ export default function JobPage() {
                   analysis={analysis}
                   analyzing={analyzing}
                   analyzeError={analyzeError}
-                  disabledReason={needsMaster ? "Import your resume first, then the analysis runs automatically." : !resume ? "Loading your resume…" : undefined}
+                  disabledReason={needsMaster ? "Import your resume first, then the analysis runs automatically." : undefined}
+                  loadingResume={!needsMaster && !resume}
                   notices={notices}
                   statusControl={statusQuiet}
                   onPatch={patch}

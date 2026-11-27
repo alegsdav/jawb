@@ -5,8 +5,8 @@ describe("coach choices", () => {
   it("are Examples and Question me, in that order", () => {
     expect(CHOICES.map((c) => c.label)).toEqual(["Examples", "Question me"]);
     expect(CHOICES.map((c) => c.busyText)).toEqual([
-      "Finding examples for this bullet…",
-      "Writing questions about this bullet…",
+      "Finding examples for this bullet",
+      "Writing questions about this bullet",
     ]);
   });
 
