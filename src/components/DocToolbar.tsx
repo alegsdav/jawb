@@ -237,7 +237,9 @@ export function useZoom(key: string): [number, (z: number) => void] {
 }
 
 /**
- * Slim top bar for editor pages: h-9 (36px), hairline bottom border, children laid out left to right.
+ * Slim top bar for editor pages: `.app-bar` (36px, globals.css), hairline bottom border, children laid out left to
+ * right. With the sidebar collapsed (lg and up) it grows up to the window's top, padded so its contents and divider
+ * stay where they are when the sidebar is open. The review panel's tab row uses the same class.
  * Use `<div className="ml-auto flex items-center gap-1">` for the right-hand group.
  */
 export function DocToolbar({
@@ -247,12 +249,12 @@ export function DocToolbar({
   /** Kept for compatibility. Selection actions now float inside the document, so nothing renders here. */
   onSlot?: (el: HTMLDivElement | null) => void;
 }) {
-  // Collapsed, the sidebar's expand button sits in this bar's left end (6px in, 32px wide, centred on the bar; see
-  // .expand-btn in globals.css): the bar starts clear of it, on lg and up only.
+  // Collapsed, the sidebar's expand button sits in this bar's left end (6px in, 32px wide, centred on the bar's row;
+  // see .expand-btn in globals.css): the bar starts clear of it, on lg and up only.
   const { collapsed } = useSidebar();
   return (
     <div
-      className={`doc-toolbar sticky top-0 z-10 flex h-9 shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-2 ${
+      className={`app-bar doc-toolbar sticky top-0 z-10 flex shrink-0 flex-nowrap items-center gap-1 whitespace-nowrap border-b border-border bg-surface px-2 ${
         collapsed ? "lg:pl-11" : ""
       }`}
     >

@@ -1,6 +1,14 @@
 @import "tailwindcss";
 
 :root {
+  /* Window chrome geometry (rem, so it scales). --chrome-gap is the grey gap around the white canvas. --bar-top is
+     where the canvas's inside starts (the gap plus its 1px border). --toggle-top centres a sidebar toggle on the
+     editor bar's row. Used by AppShell, Sidebar, .app-bar and .expand-btn. */
+  --chrome-gap: 0.5rem;
+  --bar-h: 2.25rem;
+  --toggle: 2rem;
+  --bar-top: calc(var(--chrome-gap) + 1px);
+  --toggle-top: calc(var(--bar-top) + (var(--bar-h) - var(--toggle)) / 2);
   /* After the Logip reference: white canvas, black and grey type, hairlines, one pale blue. */
   --bg: #ffffff;
   --surface: #ffffff;
@@ -65,9 +73,21 @@ body {
 .app-main { --page-x: 2.5rem; --page-top: 2.5rem; }
 .app-main[data-collapsed] { --page-x: 29px; --page-top: 76px; }
 
-/* The collapsed sidebar's expand button sits in the same window spot on every page: 6px in, 2px down, which is the
-   editor toolbar's row (36px) too. The rail's and the peek's toggle sit at this same spot (Sidebar's header row). */
-.expand-btn { left: 6px; top: 2px; }
+/* The collapsed sidebar's expand button sits in the same window spot on every page: 6px in, and centred on the editor
+   bar's row (--toggle-top, 11px down). The rail's and the peek's toggle sit at this same spot (Sidebar's header row). */
+.expand-btn { left: 6px; top: var(--toggle-top); }
+
+/* The editor's top bar (DocToolbar) and the review panel's tab row: one 36px row. Collapsed (lg and up) the page fills
+   the window, so the bar grows upward to the canvas's inside edge (--bar-top): its padding keeps the contents on the
+   same y, and its bottom border stays on the same line as when the sidebar is open. */
+.app-bar { height: var(--bar-h); }
+@media (min-width: 1024px) {
+  .app-main[data-collapsed] .app-bar {
+    height: calc(var(--bar-top) + var(--bar-h));
+    padding-top: var(--bar-top);
+    box-sizing: border-box;
+  }
+}
 
 /* The peek (AppShell): a full-height panel flush to the window's left edge, square, on the dark glass of the menus
    (float-dark's colours and blur), with a 1px right edge and a soft shadow. Its colour tokens flip, so the sidebar's

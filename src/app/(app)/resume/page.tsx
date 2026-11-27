@@ -36,7 +36,7 @@ import { Onboarding } from "@/components/Onboarding";
 import { UndoToast } from "@/components/UndoToast";
 import { useFacts } from "@/lib/useFacts";
 import { importedBulletFacts, plural } from "@/lib/facts";
-import { SaveErrorToast, SaveStatus, useAutosaveWithRetry } from "@/lib/useAutosave";
+import { SaveErrorToast, useAutosaveWithRetry } from "@/lib/useAutosave";
 
 const REBUILD_CONFIRM =
   "Rebuild your resume in the app's clean template? Your text is kept; the layout and fonts change. Uses 1 AI analysis.";
@@ -471,13 +471,6 @@ export default function MasterResumePage() {
     </div>
   );
 
-  /** Fixed width: "Saved" / "Saving…" / "Unsaved changes" never resize the bar beside it. */
-  const saveBox = (
-    <div className="ml-auto flex w-[112px] shrink-0 items-center justify-end pl-2">
-      <SaveStatus status={conflict ? "error" : status} />
-    </div>
-  );
-
   const topBar = (
     <DocToolbar>
       {/* Phones: the menus wrap onto a second line and get smaller padding, so each popup stays on screen. */}
@@ -501,7 +494,7 @@ export default function MasterResumePage() {
           <FormatMenu commandsRef={commandsRef} fmt={formatState} />
         </MenuBar>
       </div>
-      {saveBox}
+      <ReviewPanelToggle placement="editor" />
     </DocToolbar>
   );
 
@@ -544,7 +537,6 @@ export default function MasterResumePage() {
                     <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>
                       <DownloadIcon />
                     </IconButton>
-                    <ReviewPanelToggle placement="editor" />
                   </div>
                 </EditorToolbar>
               </div>
@@ -577,7 +569,7 @@ export default function MasterResumePage() {
               tab === "resume" ? "max-lg:invisible max-lg:h-0 max-lg:overflow-hidden" : "max-lg:flex-1"
             }`}
           >
-            <div className="hidden h-9 shrink-0 items-stretch border-b border-border px-6 lg:flex">
+            <div className="hidden app-bar shrink-0 items-stretch border-b border-border pl-6 pr-1.5 lg:flex">
               {tabList(MASTER_PANEL_TABS, tab === "resume" ? "overview" : tab, "flex h-full min-w-0 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
               <ReviewPanelToggle placement="panel" />
             </div>

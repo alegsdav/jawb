@@ -57,7 +57,7 @@ import { SubmittedView } from "@/components/SubmittedView";
 import { PullBanner, SaveAsMasterDialog, TailoredConflictBanner } from "@/components/PullBanner";
 import { FlashToast } from "@/components/FlashToast";
 import { confirmPlaceholders, downloadResumePdf, resumeTexts } from "@/components/pdfDownload";
-import { SaveErrorToast, SaveStatus, useAutosaveWithRetry, worstStatus } from "@/lib/useAutosave";
+import { SaveErrorToast, useAutosaveWithRetry, worstStatus } from "@/lib/useAutosave";
 
 /** The phone row (Resume first) and the panel tabs; on desktop "resume" shows as Overview in the panel. */
 type Tab = "resume" | "overview" | "job" | "cover" | "facts";
@@ -1108,13 +1108,6 @@ export default function JobPage() {
     </div>
   );
 
-  /** Fixed width: "Saved" / "Saving…" / "Unsaved changes" never resize the bar beside it. */
-  const saveBox = (
-    <div className="ml-auto flex w-[112px] shrink-0 items-center justify-end pl-2">
-      <SaveStatus status={saveState} />
-    </div>
-  );
-
   const topBar = (
     <DocToolbar>
       {/* Wrapping at phone width keeps each popup about 224px wide, inside the screen. */}
@@ -1147,7 +1140,7 @@ export default function JobPage() {
           </MenuBar>
         </div>
       )}
-      {saveBox}
+      <ReviewPanelToggle placement="editor" />
     </DocToolbar>
   );
 
@@ -1196,7 +1189,6 @@ export default function JobPage() {
                     <IconButton label={pdfBusy ? "Building PDF…" : "Download PDF"} onClick={downloadPdf} disabled={pdfBusy || !resume}>
                       <DownloadIcon />
                     </IconButton>
-                    <ReviewPanelToggle placement="editor" />
                   </div>
                 </EditorToolbar>
               </div>
@@ -1256,7 +1248,7 @@ export default function JobPage() {
             tab === "resume" ? "max-lg:invisible max-lg:h-0 max-lg:overflow-hidden" : "max-lg:flex-1"
           }`}
         >
-          <div className="hidden h-9 shrink-0 items-stretch border-b border-border px-6 lg:flex">
+          <div className="hidden app-bar shrink-0 items-stretch border-b border-border pl-6 pr-1.5 lg:flex">
             {tabList(PANEL_TABS, panelTab, "flex h-full min-w-0 items-stretch gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden")}
             <ReviewPanelToggle placement="panel" />
           </div>

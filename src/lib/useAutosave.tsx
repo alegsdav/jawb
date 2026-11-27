@@ -91,15 +91,6 @@ export function worstStatus(...all: SaveState[]): SaveState {
   return "saved";
 }
 
-export function SaveStatus({ status }: { status: string }) {
-  const text = { saved: "Saved", saving: "Saving…", unsaved: "Unsaved changes", error: "Not saved" }[status];
-  return (
-    <span role="status" className={`text-xs whitespace-nowrap ${status === "error" ? "text-bad font-medium" : "text-muted"}`}>
-      {text}
-    </span>
-  );
-}
-
 /**
  * Hard-to-miss notice while a save is failing: fixed at the bottom of the screen (above the phone tab
  * bar), with a "Retry now" button. Renders nothing unless `status` is "error". Without `onRetry` it

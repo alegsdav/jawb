@@ -182,7 +182,7 @@ export function AppShell({
                 className={`app-main min-w-0 flex-1 bg-surface lg:overflow-y-auto lg:flex-none ${
                   collapsed
                     ? "lg:h-dvh"
-                    : "lg:my-2 lg:mr-2 lg:h-[calc(100dvh-1rem)] lg:rounded-xl lg:border lg:border-border lg:shadow-[0_1px_3px_rgb(0_0_0/0.04)]"
+                    : "lg:my-[var(--chrome-gap)] lg:mr-[var(--chrome-gap)] lg:h-[calc(100dvh-2*var(--chrome-gap))] lg:rounded-xl lg:border lg:border-border lg:shadow-[0_1px_3px_rgb(0_0_0/0.04)]"
                 }`}
               >
                 {children}
