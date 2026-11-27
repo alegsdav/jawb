@@ -124,6 +124,11 @@ export const PanelRightIcon = ({ className }: P) => (
   <svg {...base} className={className}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M14.5 4.5v15" /></svg>
 );
 
+/** A circular arrow: re-run something (the master resume's Re-analyze). */
+export const RefreshIcon = ({ className }: P) => (
+  <svg {...base} className={className}><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></svg>
+);
+
 /** The app's wordmark: "Jawb" set in Young Serif (no glyph). `className` sets its size. */
 export function Wordmark({ className = "text-[24px]" }: { className?: string }) {
   return <span className={`font-brand leading-none tracking-[-0.01em] text-fg ${className}`}>Jawb</span>;
