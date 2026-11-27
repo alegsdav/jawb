@@ -84,7 +84,7 @@ export function EditorCanvas({
   return (
     // On lg+ the grey starts 4px in from the canvas's left edge: the same white as the divider's sides, so the menu and
     // the canvas read as apart. The border isn't in clientWidth, so the Fit zoom still measures the grey's width.
-    <div ref={ref} className={`overflow-x-auto ${plain ? "" : "bg-[#f1f3f4] lg:border-l-4 lg:border-white"} ${className}`}>
+    <div ref={ref} className={`overflow-x-auto ${plain ? "" : "bg-[#f1f3f4] lg:border-l-4 lg:border-surface"} ${className}`}>
       {/* Until the canvas is measured (the server's HTML, before hydration) the page would draw at 100% and then
           jump to its fitted size, or from the desktop page to the phone reflow; keep it invisible for that frame. */}
       <div style={viewport ? undefined : { visibility: "hidden" }}>

@@ -187,8 +187,9 @@ export function ReviewPanelToggle({ placement }: { placement: "panel" | "editor"
   const hide = placement === "panel";
   const label = hide ? "Hide review panel" : "Show review panel";
   return (
-    // The button is centred on the bar; the editor's copy has a -2px margin, as its bar has 8px padding (6px net).
-    <span className={`ml-auto hidden shrink-0 items-center lg:flex ${hide ? "pl-2" : "-mr-0.5"}`}>
+    // Centred on the whole 36px row, line included (pt-px: the row's 1px bottom border would otherwise lift it half a
+    // pixel above the sidebar's toggle). The editor's copy has a -2px margin, as its bar has 8px padding (6px net).
+    <span className={`ml-auto hidden shrink-0 items-center pt-px lg:flex ${hide ? "pl-2" : "-mr-0.5"}`}>
       <button
         type="button"
         className={PANEL_TOGGLE}
