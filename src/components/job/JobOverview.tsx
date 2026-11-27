@@ -34,31 +34,57 @@ function FitInput({ value, placeholder, onChange }: { value: string; placeholder
 const TITLE_TEXT = "text-[28px] font-semibold leading-tight tracking-tight";
 
 /**
- * The job's name, in the Overview's h1: "Company – Role". The company is static text; the role is the editable part.
- * A long role wraps onto as many lines as it needs: a hidden copy sets the size and the textarea fills the same
- * grid cell over it. Enter doesn't add a line. With no company, only the role shows.
+ * One editable part of the heading (the company or the role). It sizes to its text: a hidden copy in the same grid
+ * cell sets the width and height, with the same font, padding and line height as the textarea over it, so the text
+ * sits on the heading's baseline and wraps at the same line height. Enter doesn't add a line.
+ * `hideWhenEmpty` (the company): with no text the field is collapsed to nothing. Hovering or focusing the heading
+ * opens it with its muted "Company" placeholder, so it is offered without clutter at rest.
  */
-function TitleField({ company, value, onChange }: { company: string; value: string; onChange: (v: string) => void }) {
-  const co = company.trim();
+function HeadingField({
+  value, placeholder, ariaLabel, onChange, hideWhenEmpty = false,
+}: { value: string; placeholder: string; ariaLabel: string; onChange: (v: string) => void; hideWhenEmpty?: boolean }) {
+  const collapsed = hideWhenEmpty && !value.trim();
   return (
-    <h1 className={`min-w-0 break-words ${TITLE_TEXT}`}>
-      {co && `${co} – `}
-      <span className="relative -mx-[5px] inline-grid max-w-full align-top">
-        <span aria-hidden className={`invisible col-start-1 row-start-1 block whitespace-pre-wrap break-words rounded-lg border border-transparent px-1 py-0.5 ${TITLE_TEXT}`}>
-          {value || "Job title"}{" "}
-        </span>
-        <textarea
-          rows={1}
-          className={`ghost-input col-start-1 row-start-1 h-full w-full min-w-0 resize-none overflow-hidden ${TITLE_TEXT}`}
-          value={value}
-          placeholder="Job title"
-          aria-label="Job title"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.preventDefault();
-          }}
-          onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
-        />
+    <span
+      className={
+        collapsed
+          ? "inline-grid max-w-0 overflow-hidden group-hover/heading:-mx-[5px] group-hover/heading:max-w-full focus-within:-mx-[5px] focus-within:max-w-full"
+          : "-mx-[5px] inline-grid max-w-full"
+      }
+    >
+      <span aria-hidden className={`invisible col-start-1 row-start-1 block whitespace-pre-wrap break-words rounded-lg border border-transparent px-1 py-0.5 ${TITLE_TEXT}`}>
+        {value || placeholder}
       </span>
+      {/* cols={1} + w-full: a textarea's default width (20 columns) would otherwise size the grid; the hidden copy
+          above is what sets the field's width, so it hugs its text. */}
+      <textarea
+        rows={1}
+        cols={1}
+        className={`ghost-input col-start-1 row-start-1 w-full min-w-0 self-stretch resize-none overflow-hidden ${TITLE_TEXT}`}
+        value={value}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.preventDefault();
+        }}
+        onChange={(e) => onChange(e.target.value.replace(/\n/g, " "))}
+      />
+    </span>
+  );
+}
+
+/**
+ * The job's name, in the Overview's h1: "Company – Role", both parts editable. The separator is static text, and it
+ * shows only while there is a company. A long name wraps onto as many lines as it needs.
+ */
+function JobHeading({
+  company, title, onCompany, onTitle,
+}: { company: string; title: string; onCompany: (v: string) => void; onTitle: (v: string) => void }) {
+  return (
+    <h1 className={`group/heading min-w-0 break-words ${TITLE_TEXT}`}>
+      <HeadingField value={company} placeholder="Company" ariaLabel="Company" onChange={onCompany} hideWhenEmpty />
+      {company.trim() ? " – " : null}
+      <HeadingField value={title} placeholder="Job title" ariaLabel="Job title" onChange={onTitle} />
     </h1>
   );
 }
@@ -193,7 +219,12 @@ export function JobOverview(p: OverviewProps) {
       {p.notices && <div className="space-y-3 empty:hidden pb-8">{p.notices}</div>}
 
       <div className={fadeClass(play)} style={fadeStyle(play, 0)}>
-        <TitleField company={job.company} value={job.title} onChange={(v) => p.onPatch({ title: v })} />
+        <JobHeading
+          company={job.company}
+          title={job.title}
+          onCompany={(v) => p.onPatch({ company: v })}
+          onTitle={(v) => p.onPatch({ title: v })}
+        />
       </div>
 
       <div className={`mt-2 flex min-w-0 flex-wrap items-center gap-x-1 text-[15px] text-muted ${fadeClass(play)}`} style={fadeStyle(play, 60)}>

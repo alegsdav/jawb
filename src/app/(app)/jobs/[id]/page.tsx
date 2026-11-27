@@ -549,11 +549,11 @@ export default function JobPage() {
     return () => window.removeEventListener("jawb:job-renamed", onRenamed);
   }, [serial, supabase, id, applyServerJob]);
 
-  // Browser tab title: the job's name once it has loaded (the layout's "Jawb" until then).
+  // Browser tab title: the server sets it on load (jobs/[id]/layout.tsx); this keeps it current when the name changes here.
+  const tabTitle = job ? `${jobLabel(job)} · Jawb` : null;
   useEffect(() => {
-    if (!job) return;
-    document.title = `${jobLabel(job)} · Jawb`;
-  }, [job]);
+    if (tabTitle) document.title = tabTitle;
+  }, [tabTitle]);
 
   // ---------- derived ----------
 
