@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzePrompt, builderDraftPrompt, coachExamplesPrompt, coachQuestionsPrompt, coverLetterPrompt, extractFactsPrompt } from "@/lib/prompts";
+import { analyzePrompt, builderDraftPrompt, coachExamplesPrompt, coachQuestionsPrompt, coverLetterPrompt, extractFactsPrompt, masterReviewPrompt } from "@/lib/prompts";
 
 const TRANSITION = "The job posting, the candidate's resume, their facts and their answers follow.";
 
@@ -249,5 +249,59 @@ describe("coaching, facts and builder prompts: caching-friendly layout", () => {
     expect(a.data).toContain("MAJOR: Economics");
     expect(a.data.indexOf("MAJOR:")).toBeLessThan(a.data.indexOf("EXPERIENCES (JSON):"));
     expect(a.fixed).toContain('Return ONLY JSON: { "bullets"');
+  });
+});
+
+describe("masterReviewPrompt: one review of the master resume, no job", () => {
+  const MASTER_TRANSITION = "The candidate's resume, their facts and their answers follow. Review them as shown.";
+  const masterPrefix = (p: string) => {
+    const at = p.indexOf(MASTER_TRANSITION);
+    expect(at).toBeGreaterThan(-1);
+    return p.slice(0, at);
+  };
+  const a = masterReviewPrompt({ resume: "[b:b1] Built a sales dashboard in Excel", facts: "- Saved $1,200", answers: "Q: How many?\nA: 300" });
+  const b = masterReviewPrompt({ resume: "[b:z9] Tutored calculus", facts: "", answers: "" });
+
+  it("keeps every fixed instruction before the candidate's data, identical across inputs (for caching)", () => {
+    expect(masterPrefix(a)).toBe(masterPrefix(b));
+    expect(masterPrefix(a)).not.toContain("Built a sales dashboard");
+    expect(masterPrefix(a)).not.toContain("Saved $1,200");
+    expect(masterPrefix(a)).not.toContain("Tutored calculus");
+  });
+
+  it("puts the variable sections in order: resume, then facts, then answers", () => {
+    const resume = a.indexOf("CANDIDATE RESUME (bullets are tagged [b:ID]):");
+    const facts = a.indexOf("CANDIDATE FACTS (true, from their master resume");
+    const answers = a.indexOf("CANDIDATE'S ANSWERS TO YOUR EARLIER QUESTIONS");
+    expect(resume).toBeGreaterThan(masterPrefix(a).length);
+    expect(facts).toBeGreaterThan(resume);
+    expect(answers).toBeGreaterThan(facts);
+    expect(a).toContain("[b:b1] Built a sales dashboard in Excel");
+    expect(a).toContain("Q: How many?\nA: 300");
+  });
+
+  it("uses the shared number-honesty rules and the master rubric, with no job posting requirement", () => {
+    const fixed = masterPrefix(a);
+    expect(fixed).toContain("Hard rules:");
+    expect(fixed).toContain("Master resume review rubric");
+    expect(fixed).toContain("XYZ");
+    expect(fixed).not.toContain("Resume review rubric (apply it on top of the job match");
+    expect(fixed).not.toMatch(/JOB POSTING/);
+    expect(a).not.toMatch(/JOB POSTING/);
+    expect(fixed).toContain("not a match to one job");
+  });
+
+  it("asks for the MasterAnalysis shape: verdict, weakest, strengths, gaps, bullets, questions", () => {
+    for (const key of ['"verdict"', '"weakest"', '"strengths"', '"gaps"', '"bullets"', '"questions"', '"bullet_id"', '"placeholder"']) {
+      expect(a).toContain(key);
+    }
+    expect(a).toContain("Rate EVERY resume bullet");
+    expect(a).toContain("up to 5 bullet ids, weakest first, judged on substance");
+    expect(a).toContain("Ask 2-6 questions");
+    expect(a).toContain("Never mention bullet ids");
+  });
+
+  it("keeps the 'if you have any' leadership gap as the one exception", () => {
+    expect(masterPrefix(a)).toContain('"if you have any…"');
   });
 });

@@ -37,6 +37,7 @@ import { UndoToast } from "@/components/UndoToast";
 import { useFacts } from "@/lib/useFacts";
 import { importedBulletFacts, plural } from "@/lib/facts";
 import { SaveErrorToast, useAutosaveWithRetry } from "@/lib/useAutosave";
+import { LoadingState } from "@/components/ui/loading-state";
 
 const REBUILD_CONFIRM =
   "Rebuild your resume in the app's clean template? Your text is kept; the layout and fonts change. Uses 1 AI analysis.";
@@ -488,7 +489,7 @@ export default function MasterResumePage() {
             <MenuSeparator />
             <MenuItem onSelect={() => setImportOpen(true)}>Re-import resume</MenuItem>
             <MenuItem onSelect={() => void rebuildInTemplate()} disabled={empty || rebuilding}>
-              {rebuilding ? "Rebuilding…" : "Rebuild in a clean template…"}
+              {rebuilding ? <LoadingState label="Rebuilding" /> : "Rebuild in a clean template…"}
             </MenuItem>
           </MenuBarMenu>
           <FormatMenu commandsRef={commandsRef} fmt={formatState} />

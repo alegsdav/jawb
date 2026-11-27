@@ -10,6 +10,7 @@ import { liveKeywords, meaningMatches } from "@/lib/keywords";
 import { DeadlineField } from "../DeadlineField";
 import { Menu, MenuItem } from "../Menu";
 import { FlowText, flowEndMs } from "../FlowText";
+import { LoadingState } from "@/components/ui/loading-state";
 
 /** Borderless input exactly as wide as its text: a hidden copy sets the width, the input sits over it. */
 function FitInput({ value, placeholder, onChange }: { value: string; placeholder: string; onChange: (v: string) => void }) {
@@ -110,6 +111,8 @@ export type OverviewProps = {
   analyzeError: string;
   /** Why analysis can't run yet (no resume loaded, or an empty master). */
   disabledReason?: string;
+  /** The resume is still loading: the page shows a loader in place of the reason, and analysis waits for it. */
+  loadingResume?: boolean;
   /** Notices (migration hint, errors, applied state, pull-from-master plan), shown above the title. */
   notices: ReactNode;
   /** The quiet status control, shown while the job isn't applied. */
@@ -226,8 +229,8 @@ export function JobOverview(p: OverviewProps) {
           title="More actions"
           buttonClassName="-my-1 rounded-md px-1.5 text-[15px] leading-none text-muted hover:bg-surface-2 hover:text-fg"
         >
-          <MenuItem onSelect={p.onAnalyze} disabled={p.analyzing || p.quiet || !!p.disabledReason}>
-            {p.analyzing ? "Analyzing…" : a ? "Re-analyze" : "Analyze fit"}
+          <MenuItem onSelect={p.onAnalyze} disabled={p.analyzing || p.quiet || !!p.disabledReason || !!p.loadingResume}>
+            {p.analyzing ? <LoadingState label="Analyzing" /> : a ? "Re-analyze" : "Analyze fit"}
           </MenuItem>
           <MenuItem onSelect={p.onDelete} danger>
             Delete job
@@ -242,7 +245,7 @@ export function JobOverview(p: OverviewProps) {
             {a ? "From before you applied. " : "No analysis was run before you applied. "}Turn on &ldquo;Keep editing&rdquo; to tailor this copy again.
           </p>
         )}
-        {p.analyzing && <p className="ai-shimmer text-[13px]">Reading the posting against your resume…</p>}
+        {p.analyzing && <LoadingState label="Reading the posting against your resume" />}
         {p.analyzeError && !p.analyzing && !p.quiet && (
           <p role="alert" className="text-[13px]">
             <span className="text-bad">{p.analyzeError}</span>
@@ -267,10 +270,11 @@ export function JobOverview(p: OverviewProps) {
             Analyzed {timeAgo(a.analyzed_at)}
           </p>
         )}
+        {!a && !p.analyzing && !p.analyzeError && !p.quiet && p.loadingResume && <LoadingState label="Loading your resume" />}
         {!a && !p.analyzing && !p.analyzeError && !p.quiet && p.disabledReason && (
           <p className="text-[15px] text-muted">{p.disabledReason}</p>
         )}
-        {!a && !p.analyzing && !p.analyzeError && !p.quiet && !p.disabledReason && !job.description.trim() && (
+        {!a && !p.analyzing && !p.analyzeError && !p.quiet && !p.disabledReason && !p.loadingResume && !job.description.trim() && (
           <p className="text-[15px] text-muted">
             Paste the job description in the{" "}
             <button type="button" className="text-fg underline underline-offset-2" onClick={p.onOpenPosting}>

@@ -6,6 +6,7 @@ import { useFocusTrap } from "@/lib/useFocusTrap";
 import { addedOn, isLinkInput, type ExistingJob } from "@/lib/addJob";
 import { useAddJob } from "@/lib/useAddJob";
 import { PlusIcon } from "./icons";
+import { LoadingState } from "@/components/ui/loading-state";
 
 export type { ExistingJob } from "@/lib/addJob";
 
@@ -190,7 +191,11 @@ export function AddJobForm({ existing = [] }: { existing?: readonly ExistingJob[
             onClick={submit}
           >
             {!busy && <PlusIcon className="h-4 w-4" />}
-            {busy ? (isUrl && mode === "one" ? "Reading job…" : "Adding…") : "Add job"}
+            {busy ? (
+              <LoadingState label={isUrl && mode === "one" ? "Reading job" : "Adding"} className="loading-on-fill" />
+            ) : (
+              "Add job"
+            )}
           </button>
           {mode === "paste" && (
             <button type="button" className="h-8 w-full cursor-pointer rounded-lg text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50" onClick={reset} disabled={busy}>

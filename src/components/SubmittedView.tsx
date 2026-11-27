@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Resume } from "@/lib/types";
 import { ResumeView } from "./ResumeView";
 import { downloadResumePdf } from "./pdfDownload";
+import { LoadingState } from "@/components/ui/loading-state";
 
 export const formatSubmitted = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -66,7 +67,7 @@ export function SubmittedView({
           <div className="flex flex-wrap items-center gap-1.5">
             <button type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={onReplace}>Replace with current tailored copy…</button>
             <button type="button" className="btn btn-sm btn-primary min-h-10 sm:min-h-0" onClick={download} disabled={busy}>
-              {busy ? "Building…" : "Download this PDF"}
+              {busy ? <LoadingState label="Building" className="loading-on-fill" /> : "Download this PDF"}
             </button>
             <button ref={closeBtn} type="button" className="btn btn-sm min-h-10 sm:min-h-0" onClick={onClose} aria-label="Close">Close</button>
           </div>

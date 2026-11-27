@@ -162,6 +162,32 @@ export type Analysis = {
   analyzed_at?: string;
 };
 
+/**
+ * What a job analysis and a master review share: the per-bullet feedback, the questions and the user's
+ * answers and dismissals. The helpers that only need these accept this type, so both kinds of review use them.
+ */
+export type ReviewCore = Pick<Analysis, "bullets" | "questions" | "answers" | "dismissed">;
+
+/**
+ * The one-time AI review of the master resume (no job posting), stored on the master row's `analysis`
+ * column (migration 0011). Judges bullets on substance for any recruiter.
+ */
+export type MasterAnalysis = {
+  /** 2-3 sentences: overall substance + the single most important improvement. */
+  verdict: string;
+  /** Bullet ids, weakest first, at most 5 (only bullets rated weak or ok). */
+  weakest: string[];
+  strengths: string[];
+  /** Structural issues (section order, missing leadership "if you have any…", etc.). */
+  gaps: Analysis["gaps"];
+  /** Same shape as a job analysis's bullets: rating, note, rewrite, why, original. */
+  bullets: Analysis["bullets"];
+  questions: Analysis["questions"];
+  answers?: Record<string, string>;
+  dismissed?: string[];
+  analyzed_at?: string;
+};
+
 export type Job = {
   id: string;
   company: string;

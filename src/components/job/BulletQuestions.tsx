@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { Analysis } from "@/lib/types";
 import { suggestFill } from "@/lib/analysis";
+import { LoadingState } from "@/components/ui/loading-state";
 
 type Question = Analysis["questions"][number];
 
@@ -118,7 +119,7 @@ export function BulletQuestions({ questions, analysis, drafts, onDraftsChange, o
           {dirty && <span className="text-xs text-muted">Unsaved answers</span>}
         </div>
       )}
-      {saving && <p className="text-xs text-muted">Saving…</p>}
+      {saving && <LoadingState label="Saving" />}
       {saveError && !saving && (
         <div role="alert" className="space-y-2 text-[13px]">
           <p className="text-bad">

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Fact, Resume } from "@/lib/types";
 import { postApi } from "@/lib/api";
+import { LoadingState } from "@/components/ui/loading-state";
 import {
   BUILDER_KEY, builderStepErrors, emptyBuilder, EXPERIENCE_TYPES, MIN_WHAT, newExperience, readBuilder, type BuilderState,
   type Experience, type StepErrors,
@@ -267,7 +268,7 @@ export function Builder({
           </button>
         ) : (
           <button type="button" className="btn btn-primary min-h-10 ml-auto" disabled={busy} onClick={build}>
-            {busy ? "Building your resume…" : "Build my resume"}
+            {busy ? <LoadingState label="Building your resume" className="loading-on-fill" /> : "Build my resume"}
           </button>
         )}
       </div>

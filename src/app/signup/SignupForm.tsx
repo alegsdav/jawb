@@ -4,6 +4,7 @@ import { Wordmark } from "@/components/icons";
 import Link from "next/link";
 import { useActionState } from "react";
 import { signUp, type SignupState } from "./actions";
+import { LoadingState } from "@/components/ui/loading-state";
 
 /** Email, password and invite code. Errors are announced and point at the field they're about. */
 export function SignupForm({ initialCode = "" }: { initialCode?: string }) {
@@ -65,7 +66,7 @@ export function SignupForm({ initialCode = "" }: { initialCode?: string }) {
             />
           </div>
           <button disabled={pending} className="btn btn-primary w-full py-2.5">
-            {pending ? "Creating your account…" : "Create account"}
+            {pending ? <LoadingState label="Creating your account" className="loading-on-fill" /> : "Create account"}
           </button>
           {state.message && (
             <p id="signup-error" role="alert" className="text-sm text-bad">

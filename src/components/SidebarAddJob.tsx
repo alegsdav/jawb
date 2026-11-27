@@ -5,6 +5,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createClient } from "@/lib/supabase/client";
 import { addedOn, type ExistingJob } from "@/lib/addJob";
 import { useAddJob } from "@/lib/useAddJob";
+import { LoadingState } from "@/components/ui/loading-state";
 import { ICON, ROW, ROW_IDLE } from "./sidebarRows";
 import { PlusIcon } from "./icons";
 
@@ -184,12 +185,10 @@ export function SidebarAddJob() {
                 </div>
               </div>
             ) : add.busy ? (
-              <p className="px-2 text-[12px] leading-4 text-muted">Adding…</p>
+              <LoadingState label="Adding" className="px-2" />
             ) : notice ? (
               <p role="alert" className="px-2 text-[12px] leading-4 text-bad">{notice}</p>
-            ) : (
-              add.hint && <p className="px-2 text-[12px] leading-4 text-muted">{add.hint}</p>
-            )}
+            ) : null}
 
             {paste && (
               <button

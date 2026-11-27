@@ -102,7 +102,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("weights and limits", () => {
   it("keeps every action's weight in one table, with the documented defaults", () => {
     expect(AI_WEIGHTS).toMatchObject({
-      analyze: "heavy", reanalyze: "heavy", parse_resume: "heavy", builder_draft: "heavy",
+      analyze: "heavy", reanalyze: "heavy", master_review: "heavy", parse_resume: "heavy", builder_draft: "heavy",
       intake_meta: "light", cover_letter: "light", coach_examples: "light", coach_questions: "light", extract_facts: "light",
     });
     expect(aiLimits({})).toEqual({
