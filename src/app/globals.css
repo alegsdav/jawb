@@ -187,9 +187,12 @@ li[data-job-id]:is(:hover, :focus-within, :has([aria-expanded="true"])) .row-fad
   .icon-chip { @apply inline-grid h-11 w-11 shrink-0 place-items-center rounded-full bg-surface-2 text-fg; }
 }
 
-/* The sign-in page's fields (src/app/login/LoginForm.tsx): a navy 3px ring with a 2px gap on any focus, mouse or
+/* The auth pages' fields (src/components/AuthShell.tsx): a navy 3px ring with a 2px gap on any focus, mouse or
    keyboard. It is a plain :focus rule, not a utility, because the global :focus-visible outline would win over one. */
 .login-field:focus { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* An invalid field (aria-invalid="true", set by the sign-up form) gets a red ring instead, focused or not. */
+.login-field[aria-invalid="true"],
+.login-field[aria-invalid="true"]:focus { outline: 3px solid var(--bad); outline-offset: 2px; }
 
 /* iOS zooms into any field under 16px on focus; keep fields at 16px on phones. */
 @media (max-width: 639px) {
