@@ -161,19 +161,54 @@ async function countedSince(supabase: SupabaseClient, since: Date, weight?: AiWe
 export type Meter = { add: (u: TokenUsage) => void; readonly usage: Required<TokenUsage> };
 
 const newMeter = (): Meter => {
-  const usage: Required<TokenUsage> = { promptTokens: 0, outputTokens: 0, totalTokens: 0, model: "" };
+  const usage: Required<TokenUsage> = { promptTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, model: "" };
   return {
     usage,
     add: (u) => {
       usage.promptTokens += u.promptTokens;
       usage.outputTokens += u.outputTokens;
       usage.totalTokens += u.totalTokens;
+      usage.cachedTokens += u.cachedTokens;
       if (u.model) usage.model = u.model;
     },
   };
 };
 
 let warnedMissing = false;
+let warnedNoCached = false;
+
+type FinishArgs = {
+  p_id: string;
+  p_status: "ok" | "failed";
+  p_prompt: number;
+  p_output: number;
+  p_total: number;
+  p_model: string;
+};
+
+/**
+ * Record how a call ended, with its cached prompt tokens (p_cached, migration 0010). Until 0010 is run the
+ * database still has the 0008 signature, which PostgREST reports as a missing function; then retry once
+ * without p_cached so the usage (and the quota refund on failure) is still recorded, and say once that
+ * cached tokens aren't stored. Never throws: a failed record is only logged.
+ */
+async function recordFinish(supabase: SupabaseClient, args: FinishArgs, cached: number): Promise<void> {
+  const missingFunction = (e: { code?: string; message?: string } | null | undefined) =>
+    !!e && (e.code === "PGRST202" || e.code === "42883" || /could not find the function|function .* does not exist/i.test(e.message ?? ""));
+  try {
+    let { error } = await supabase.rpc("finish_ai_call", { ...args, p_cached: cached });
+    if (error && missingFunction(error)) {
+      if (!warnedNoCached) {
+        console.info("Cached Gemini tokens aren't stored until supabase/migrations/0010_cached_tokens.sql is run.");
+      }
+      warnedNoCached = true;
+      ({ error } = await supabase.rpc("finish_ai_call", args));
+    }
+    if (error) console.warn("finish_ai_call failed:", error.message);
+  } catch (e) {
+    console.warn("finish_ai_call failed:", e);
+  }
+}
 
 /**
  * Run one metered AI call. `fn` gets a Meter: pass `meter.add` as geminiJSON/geminiText's `onUsage`.
@@ -222,19 +257,11 @@ export async function withAiBudget<T>(
     ok = true;
     return out;
   } finally {
-    const { promptTokens, outputTokens, totalTokens, model } = meter.usage;
-    await Promise.resolve(
-      supabase.rpc("finish_ai_call", {
-        p_id: id,
-        p_status: ok ? "ok" : "failed",
-        p_prompt: promptTokens,
-        p_output: outputTokens,
-        p_total: totalTokens,
-        p_model: model,
-      }),
-    ).then(
-      (r) => r?.error && console.warn("finish_ai_call failed:", r.error.message),
-      (e) => console.warn("finish_ai_call failed:", e),
+    const { promptTokens, outputTokens, totalTokens, cachedTokens, model } = meter.usage;
+    await recordFinish(
+      supabase,
+      { p_id: id, p_status: ok ? "ok" : "failed", p_prompt: promptTokens, p_output: outputTokens, p_total: totalTokens, p_model: model },
+      cachedTokens,
     );
   }
 }

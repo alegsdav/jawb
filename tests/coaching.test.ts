@@ -291,7 +291,7 @@ describe("example text never reaches storage or prompts", () => {
     const base = { entry: "Learning Center", bullets: [], bullet: "", facts: "" };
     expect(coachExamplesPrompt({ ...base, job: "Data Analyst Intern at Acme", round: 1 })).toMatch(/use the posting's language and priorities[\s\S]*JOB POSTING:[\s\S]*Data Analyst Intern at Acme/);
     expect(coachExamplesPrompt({ ...base, job: "", round: 1 })).toMatch(/master resume \(no specific job\)/);
-    expect(coachExamplesPrompt({ ...base, job: "", round: 1 })).not.toMatch(/JOB POSTING/);
+    expect(coachExamplesPrompt({ ...base, job: "", round: 1 })).toMatch(/JOB POSTING:\n"""\n\(none: this is the master resume\)/);
   });
 });
 
