@@ -303,6 +303,10 @@ body {
 @keyframes shimmer-text { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 /* Inside a filled button the loader takes the button's text colour, not the page's (the grid would vanish into the fill). */
 .loading-state.loading-on-fill { --fg: var(--surface); --muted: color-mix(in srgb, var(--surface) 60%, transparent); }
+/* A button that is busy (its loader shows) is not "unavailable": keep it at full strength so the loader reads, and
+   keep the button's own line height so it doesn't shrink while it works. */
+.btn:disabled:has(.loading-state) { opacity: 1; cursor: progress; }
+.btn .loading-state { min-height: 1lh; }
 .btn-primary .loading-state.loading-on-fill { --fg: var(--primary-fg); --muted: color-mix(in srgb, var(--primary-fg) 60%, transparent); }
 @media (prefers-reduced-motion: reduce) {
   .loading-state .loading-cell { animation: none !important; }

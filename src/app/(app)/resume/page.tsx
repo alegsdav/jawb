@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { emptyResume, isEmptyResume, normalizeResume, reconcileIds, uid } from "@/lib/resume";
-import { dbErrorMessage, isUniqueViolation } from "@/lib/db";
+import { bulletTextMap, emptyResume, isEmptyResume, normalizeResume, reconcileIds, uid } from "@/lib/resume";
+import { dbErrorMessage, isMissingColumn, isUniqueViolation } from "@/lib/db";
 import { keepMineVersion, mergeResumes, sameJson, saveMasterDocument, type MergeConflict } from "@/lib/master";
 import { PAGE_DEFAULTS } from "@/lib/doc/types";
-import type { Fact, Resume } from "@/lib/types";
+import type { Fact, MasterAnalysis, Resume } from "@/lib/types";
 import { ResumeDocument } from "@/components/ResumeDocument";
 import { EditorSkeleton, MASTER_PANEL_TABS, MASTER_TABS } from "@/components/EditorSkeleton";
 import { REVIEW_SPLIT_KEY, ReviewPanelToggle, SplitPane } from "@/components/SplitPane";
@@ -18,7 +18,7 @@ import { CoachPanel } from "@/components/CoachPanel";
 import { insertCoachedBullet, type CoachTarget } from "@/lib/coaching";
 import { useResumeActions } from "@/components/ResumeActions";
 import {
-  countWords, DocToolbar, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, ToolbarSep, useEditorShortcuts, useZoom,
+  countWords, DocToolbar, EditorToolbar, IconButton, MenuBar, MenuBarMenu, StatusBar, Toggle, ToolbarSep, useEditorShortcuts, useZoom,
 } from "@/components/DocToolbar";
 import { MenuItem, MenuSeparator } from "@/components/Menu";
 import { PageSetupDialog } from "@/components/PageSetupDialog";
@@ -28,7 +28,17 @@ import { ReimportDialog } from "@/components/ReimportDialog";
 import { type ImportSource } from "@/components/ResumeImport";
 import { FlashToast } from "@/components/FlashToast";
 import { resumePlainText } from "@/lib/importReview";
-import { postApi } from "@/lib/api";
+import { friendlyError, patchApi, postApi } from "@/lib/api";
+import {
+  bulletFeedback, carryClientState, findPlaceholder, missingAnswerFacts, normalizeMasterAnalysis, planFill, saveAnswersInOrder,
+} from "@/lib/analysis";
+import { factListWriter } from "@/lib/factStore";
+import { replaceBullet } from "@/lib/tailor";
+import { BulletQuestions } from "@/components/job/BulletQuestions";
+import {
+  answerChanges, clearLocalReview, markReviewRunning, readLocalReview, REVIEW_RUNNING_MAX_MS, reviewRunningSince, type ReviewPatch,
+  weakestBullets, writeLocalReview,
+} from "@/lib/masterReview";
 import { FactsPanel } from "@/components/FactsPanel";
 import { MasterOverview } from "@/components/MasterOverview";
 import { Builder } from "@/components/Builder";
@@ -45,25 +55,30 @@ const REBUILD_CONFIRM =
 /** Re-import keeps bullet ids stable (so jobs' "changes vs master" and linked facts stay right). */
 const mergeImport = (prev: Resume, imported: Resume): Resume => reconcileIds(prev, normalizeResume(imported));
 
-type MasterRow = { id: string; content: unknown; updated_at: string };
+/** `analysis` is the master's review (migration 0011): absent from the row when that column doesn't exist yet. */
+type MasterRow = { id: string; content: unknown; updated_at: string; analysis?: unknown };
 const MASTER_COLS = "id, content, updated_at";
+const MASTER_REVIEW_COLS = "id, content, updated_at, analysis";
+/** How often a page waiting for another page's review looks for its result. */
+const REVIEW_POLL_MS = 4000;
+type Question = MasterAnalysis["questions"][number];
 
 /** Load the master row, creating an empty one on the first visit. Safe when two tabs do this at once. */
-async function loadOrCreateMaster(supabase: SupabaseClient): Promise<MasterRow> {
-  const { data, error } = await supabase.from("resumes").select(MASTER_COLS).eq("is_master", true).maybeSingle();
+async function loadOrCreateMaster(supabase: SupabaseClient, cols: string): Promise<MasterRow> {
+  const { data, error } = await supabase.from("resumes").select(cols).eq("is_master", true).maybeSingle();
   if (error) throw error;
-  if (data) return data as MasterRow;
+  if (data) return data as unknown as MasterRow;
   const { data: created, error: e2 } = await supabase
     .from("resumes")
     .insert({ is_master: true, name: "Master resume", content: emptyResume() })
-    .select(MASTER_COLS)
+    .select(cols)
     .single();
-  if (!e2) return created as MasterRow;
+  if (!e2) return created as unknown as MasterRow;
   if (!isUniqueViolation(e2)) throw e2;
   // Another tab (or a double mount) created it first: use that one.
-  const again = await supabase.from("resumes").select(MASTER_COLS).eq("is_master", true).single();
+  const again = await supabase.from("resumes").select(cols).eq("is_master", true).single();
   if (again.error) throw again.error;
-  return again.data as MasterRow;
+  return again.data as unknown as MasterRow;
 }
 
 /** `replaced`: the server holds a different resume, so `conflicts` is empty and the banner offers whole versions. */
@@ -187,6 +202,27 @@ export default function MasterResumePage() {
   /** The entry or bullet the coaching panel is about (follows the selection; "Back" clears it). */
   const [coachTarget, setCoachTarget] = useState<CoachTarget | null>(null);
   const [coachStart, setCoachStart] = useState<"questions" | undefined>(undefined);
+  /** The master's review (its highlights, questions, weakest bullets). Null until one exists (on the account or this device). */
+  const [analysis, setAnalysisState] = useState<MasterAnalysis | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  /** What's typed in each answer box, by question id (kept when the review runs again). */
+  const [drafts, setDraftsState] = useState<Record<string, string>>({});
+  /** Bullet texts when the page loaded: stand-in for `original` on reviews saved before it existed. */
+  const [loadedTexts, setLoadedTexts] = useState<Map<string, string> | null>(null);
+  const [showHighlights, setShowHighlights] = useState(true);
+  /** Puts the caret on a bullet and shows its card (see the editor's reveal). */
+  const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
+  /** The review as the latest value, for async work that finishes later (a run takes a while). */
+  const analysisRef = useRef<MasterAnalysis | null>(null);
+  const draftsRef = useRef<Record<string, string>>({});
+  /** A review is running on this page (no second one starts meanwhile). */
+  const reviewRunning = useRef(false);
+  /** The account has the review column (migration 0011); without it the review is kept on this device only. */
+  const reviewColumn = useRef(true);
+  /** The automatic review was decided for this page view (it never runs again here; Re-analyze does). */
+  const autoRan = useRef(false);
+  const mounted = useRef(true);
   /**
    * The right panel's tab, and on phones and tablets (below lg) which half is shown: "resume" is the document,
    * the others are the panel's tabs. Both halves stay mounted; the hidden one is only hidden with CSS.
@@ -213,21 +249,215 @@ export default function MasterResumePage() {
     setTab((cur) => (cur === "resume" ? cur : "overview"));
   }, []);
 
+  // ----- the review. Kept on the account (migration 0011); this device keeps its copy when the column is missing
+  // or a save there failed. A saved review on the account wins over this device's copy. -----
+
+  const setReviewNow = useCallback((next: MasterAnalysis | null) => {
+    analysisRef.current = next;
+    setAnalysisState(next);
+  }, []);
+  const setDrafts = useCallback((d: Record<string, string>) => {
+    draftsRef.current = d;
+    setDraftsState(d);
+  }, []);
+
+  /**
+   * Saves answers or dismissals: on the account when this page can (the route says `saved: false` when the review
+   * isn't stored there, and then this device keeps it). Throws when the account write fails.
+   */
+  const persistReview = useCallback(async (next: MasterAnalysis, patch: ReviewPatch) => {
+    if (!reviewColumn.current) {
+      writeLocalReview(next);
+      return;
+    }
+    const { data, error: err } = await patchApi<{ analysis: MasterAnalysis | null; saved: boolean }>("/api/analyze-master", patch);
+    if (err) throw new Error(err);
+    if (data?.saved) clearLocalReview();
+    else writeLocalReview(next);
+  }, []);
+
+  /** One review of the master (POST). Only one runs at a time on this page; its result replaces the review here. */
+  const runReview = useCallback(async () => {
+    if (reviewRunning.current) return;
+    reviewRunning.current = true;
+    setReviewing(true);
+    setReviewError("");
+    markReviewRunning(true);
+    const { data, error: err } = await postApi<{ analysis: MasterAnalysis; saved: boolean }>("/api/analyze-master", undefined);
+    markReviewRunning(false);
+    reviewRunning.current = false;
+    setReviewing(false);
+    if (err || !data?.analysis) {
+      setReviewError(err ?? "The review didn't come back. Try again.");
+      return;
+    }
+    // Keep the answers and drafts typed on this page; they're matched to the new questions by text.
+    const carried = carryClientState(analysisRef.current, normalizeMasterAnalysis(data.analysis), draftsRef.current);
+    setDrafts(carried.drafts);
+    setReviewNow(carried.analysis);
+    if (data.saved) clearLocalReview();
+    else writeLocalReview(carried.analysis);
+  }, [setDrafts, setReviewNow]);
+
+  /**
+   * Another page of this device is running the review: show "Reviewing" until its result shows up (on the account,
+   * or in this device's copy). If that run ends without one, this page runs it.
+   */
+  const waitForReview = useCallback(
+    async (since: number) => {
+      setReviewing(true);
+      while (Date.now() - since < REVIEW_RUNNING_MAX_MS) {
+        await new Promise((r) => setTimeout(r, REVIEW_POLL_MS));
+        if (!mounted.current) return;
+        const { data, error: err } = await supabase.from("resumes").select("analysis").eq("is_master", true).maybeSingle();
+        const stored = !err && data ? (data as { analysis?: unknown }).analysis : null;
+        const found = stored && typeof stored === "object" ? normalizeMasterAnalysis(stored) : readLocalReview();
+        if (found) {
+          setDrafts(found.answers ?? {});
+          setReviewNow(found);
+          setReviewing(false);
+          return;
+        }
+        if (reviewRunningSince() === null) break;
+      }
+      if (!mounted.current) return;
+      markReviewRunning(false);
+      setReviewing(false);
+      void runReview();
+    },
+    [supabase, setDrafts, setReviewNow, runReview],
+  );
+
+  /** A suggestion the user rejected: its highlight and rewrite go away, and stay away (the review keeps the list). */
+  function rejectSuggestion(bulletId: string) {
+    const cur = analysisRef.current;
+    if (!cur) return;
+    const dismissed = [...new Set([...(cur.dismissed ?? []), bulletId])];
+    setReviewNow({ ...cur, dismissed });
+    setError("");
+    persistReview({ ...cur, dismissed }, { dismissed }).catch((e) => setError(friendlyError(e, "Couldn't save that change. Try again.")));
+  }
+
+  /** The answers, then their facts on the master (facts first, as on a job page); the review keeps the answers. */
+  async function saveAnswers(answers: Record<string, string>): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+    const current = analysisRef.current;
+    if (!current) return { ok: false, error: "Run the review first." };
+    const res = await saveAnswersInOrder({
+      analysis: current,
+      answers,
+      writeMaster: factListWriter(supabase, "answer", facts.replace),
+      persist: async (next) => {
+        const cur = analysisRef.current ?? next;
+        const applied: MasterAnalysis = { ...cur, answers: next.answers };
+        setReviewNow(applied);
+        try {
+          await persistReview(applied, { answers: answerChanges(cur.answers, next.answers) });
+        } catch (e) {
+          setReviewNow(cur);
+          throw e;
+        }
+      },
+    });
+    if (!res.ok) {
+      console.warn("Saving answers failed at", res.stage, res.error);
+      return { ok: false, error: friendlyError(res.error, "Couldn't save them to your facts. Check your connection, then tap Retry.") };
+    }
+    setError("");
+    return { ok: true, added: res.added };
+  }
+
+  /**
+   * A bullet picked from the Overview's weakest list: the same as clicking it in the document. Its card and coach
+   * follow it, the caret goes to it, and on phones the document shows (as the job page does).
+   */
+  function selectBullet(bulletId: string) {
+    if (!resume) return;
+    for (const sec of resume.sections) {
+      for (const it of sec.items) {
+        if (!it.bullets.some((b) => b.id === bulletId)) continue;
+        setCoachTarget({ sectionId: sec.id, entryId: it.id, bulletId });
+        setCoachStart(undefined);
+        setReveal({ id: bulletId, n: Date.now() });
+        if (!window.matchMedia("(min-width: 1024px)").matches) setTab("resume");
+        return;
+      }
+    }
+  }
+
+  /** The bullet a question's placeholder is in, when the placeholder can be filled there now (null otherwise). */
+  function fillTarget(q: Question): string | null {
+    if (!resume || !q.bullet_id || !q.placeholder) return null;
+    const text = bulletTextMap(resume).get(q.bullet_id);
+    if (text === undefined) return null;
+    const suggestion = feedback[q.bullet_id]?.suggestion ?? "";
+    return findPlaceholder(text, q.placeholder) || (suggestion && findPlaceholder(suggestion, q.placeholder)) ? text : null;
+  }
+
+  /** Puts an answer in place of its placeholder in the bullet, and shows the bullet. */
+  function fillAnswer(q: Question, value: string) {
+    const text = fillTarget(q);
+    if (!resume || text === null || !q.bullet_id || !q.placeholder) return;
+    const next = planFill(text, feedback[q.bullet_id]?.suggestion ?? "", q.placeholder, value);
+    if (next === null) return;
+    const bid = q.bullet_id;
+    setResume(replaceBullet(resume, bid, next));
+    setReveal({ id: bid, n: Date.now() });
+    setNotice(`Filled ${q.placeholder} in the bullet. Edit the bullet if it reads oddly.`);
+  }
+
+  const feedback = useMemo(() => bulletFeedback(analysis, resume, loadedTexts), [analysis, resume, loadedTexts]);
+  const weakest = useMemo(() => weakestBullets(analysis, resume, feedback), [analysis, resume, feedback]);
+  const factTexts = useMemo(() => facts.facts.map((f) => f.text), [facts.facts]);
+  const missingFacts = useMemo(
+    () => (analysis && facts.status === "ready" ? missingAnswerFacts(analysis.questions, analysis.answers, factTexts, analysis.bullets) : []),
+    [analysis, factTexts, facts.status],
+  );
+
   useEffect(() => {
-    loadOrCreateMaster(supabase).then(
-      (row) => {
-        const content = normalizeResume(row.content);
-        base.current = { content, updatedAt: row.updated_at };
-        setId(row.id);
-        setResume(content);
-      },
-      (e: { code?: string; message?: string }) => {
-        console.error("Loading the master resume failed:", e);
-        setError(dbErrorMessage(e, "load"));
-      },
-    );
+    loadOrCreateMaster(supabase, MASTER_REVIEW_COLS)
+      .catch((e) => (isMissingColumn(e) ? loadOrCreateMaster(supabase, MASTER_COLS) : Promise.reject(e)))
+      .then(
+        (row) => {
+          const content = normalizeResume(row.content);
+          base.current = { content, updatedAt: row.updated_at };
+          setId(row.id);
+          setResume(content);
+          setLoadedTexts(bulletTextMap(content));
+          reviewColumn.current = "analysis" in row;
+          const stored = row.analysis && typeof row.analysis === "object" && !Array.isArray(row.analysis)
+            ? normalizeMasterAnalysis(row.analysis)
+            : null;
+          if (stored) clearLocalReview();
+          const found = stored ?? readLocalReview();
+          setReviewNow(found);
+          setDrafts(found?.answers ?? {});
+        },
+        (e: { code?: string; message?: string }) => {
+          console.error("Loading the master resume failed:", e);
+          setError(dbErrorMessage(e, "load"));
+        },
+      );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // The review runs once by itself: when the master is loaded and not empty and no review exists yet (on the account
+  // or this device). An empty master shows the onboarding instead of the editor, so the first non-empty one comes from
+  // an import or the builder. Never again on this page view; "Re-analyze" in the Overview runs it on demand.
+  useEffect(() => {
+    if (autoRan.current || !resume || isEmptyResume(resume)) return;
+    autoRan.current = true;
+    if (analysisRef.current) return;
+    const since = reviewRunningSince();
+    if (since === null) void runReview();
+    else void waitForReview(since);
+  }, [resume, runReview, waitForReview]);
 
   // The account email prefills the builder's contact details.
   useEffect(() => {
@@ -499,6 +729,22 @@ export default function MasterResumePage() {
     </DocToolbar>
   );
 
+  /** The selected bullet's open questions (unanswered, about that bullet), with the job page's answer boxes. */
+  const selectedBullet = coachTarget?.bulletId ?? null;
+  const questions = analysis ? (
+    <BulletQuestions
+      questions={selectedBullet ? analysis.questions.filter((q) => q.bullet_id === selectedBullet && !analysis.answers?.[q.id]?.trim()) : []}
+      analysis={analysis}
+      drafts={drafts}
+      onDraftsChange={setDrafts}
+      onSaveAnswers={saveAnswers}
+      missingFacts={missingFacts}
+      canFill={(q) => fillTarget(q) !== null}
+      onFill={fillAnswer}
+    />
+  ) : null;
+  const canReview = !empty && !reviewing;
+
   // Onboarding (an empty master isn't a document yet) takes the whole canvas. Otherwise the page is the job page's
   // split: the document on the left, the panel on the right; phones show one of them at a time.
   return (
@@ -534,7 +780,9 @@ export default function MasterResumePage() {
                   {/* The formatting controls portal in here. */}
                   <div ref={setSlot} className="flex shrink-0 items-center" />
                   <ToolbarSep />
+                  <Toggle on={showHighlights} onChange={setShowHighlights} label="Highlights" />
                   <div className="ml-auto flex shrink-0 items-center gap-1">
+                    {reviewing && <LoadingState label="Reviewing" className="px-1" />}
                     <IconButton label={actions.busy ? "Building PDF…" : "Download PDF"} onClick={() => void actions.download()} disabled={actions.busy}>
                       <DownloadIcon />
                     </IconButton>
@@ -545,6 +793,10 @@ export default function MasterResumePage() {
                 <ResumeDocument
                   value={resume}
                   onChange={setResume}
+                  feedback={feedback}
+                  showHighlights={showHighlights}
+                  onReject={rejectSuggestion}
+                  reveal={reveal}
                   onMeasure={setMeasure}
                   actionsSlot={slot}
                   commentSlot={commentEl}
@@ -581,6 +833,14 @@ export default function MasterResumePage() {
                     notices={notices}
                     commentSheet={tab === "resume"}
                     onCommentSlot={setCommentEl}
+                    review={analysis}
+                    reviewing={reviewing}
+                    reviewError={reviewError}
+                    canReview={canReview}
+                    onReview={() => void runReview()}
+                    weakest={weakest}
+                    onSelectBullet={selectBullet}
+                    questions={questions}
                     coach={
                       coachTarget && (
                         <CoachPanel

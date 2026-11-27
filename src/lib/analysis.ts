@@ -454,13 +454,13 @@ type MasterWrite = (mutate: (m: Resume) => Resume) => Promise<{ ok: true; conten
  * `writeMaster`, i.e. updateMaster), and only once that worked, the answers on the job (`persist`).
  * If the master write fails nothing is persisted, so the answers stay "unsaved" and a retry redoes it.
  */
-export async function saveAnswersInOrder(opts: {
-  analysis: Analysis;
+export async function saveAnswersInOrder<T extends ReviewCore>(opts: {
+  analysis: T;
   answers: Record<string, string>;
   writeMaster: MasterWrite;
-  persist: (next: Analysis) => Promise<void> | void;
+  persist: (next: T) => Promise<void> | void;
 }): Promise<
-  { ok: true; master: Resume; added: number; analysis: Analysis } | { ok: false; stage: "master" | "answers"; error: string }
+  { ok: true; master: Resume; added: number; analysis: T } | { ok: false; stage: "master" | "answers"; error: string }
 > {
   const { analysis } = opts;
   const clean = Object.fromEntries(Object.entries(opts.answers).filter(([, v]) => v.trim()));
@@ -475,7 +475,7 @@ export async function saveAnswersInOrder(opts: {
     res = { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
   if (!res.ok) return { ok: false, stage: "master", error: res.error };
-  const next: Analysis = { ...analysis, answers: clean };
+  const next: T = { ...analysis, answers: clean };
   try {
     await opts.persist(next);
   } catch (e) {
@@ -491,11 +491,11 @@ export async function saveAnswersInOrder(opts: {
  * keeps its old question, so nothing typed disappears. `changed` means the result differs from
  * `fresh`, so the page must save it itself.
  */
-export function carryClientState(
-  prev: Analysis | null,
-  fresh: Analysis,
+export function carryClientState<T extends ReviewCore>(
+  prev: T | null,
+  fresh: T,
   drafts: Record<string, string>,
-): { analysis: Analysis; drafts: Record<string, string>; changed: boolean } {
+): { analysis: T; drafts: Record<string, string>; changed: boolean } {
   const questions = [...fresh.questions];
   const answers: Record<string, string> = { ...(fresh.answers ?? {}) };
   const byText = new Map(questions.map((q) => [normText(q.question), q.id]));

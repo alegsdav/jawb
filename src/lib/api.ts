@@ -33,6 +33,17 @@ export async function postApi<T>(path: string, body: unknown): Promise<ApiResult
   }
 }
 
+/** PATCH JSON to one of our API routes. Never throws (same error handling as postApi; no AI-usage event: nothing is analysed). */
+export async function patchApi<T>(path: string, body: unknown): Promise<ApiResult<T>> {
+  try {
+    return await readApi<T>(
+      await fetch(path, { method: "PATCH", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
+    );
+  } catch {
+    return { error: NETWORK_MESSAGE };
+  }
+}
+
 /** GET one of our API routes. Never throws (same error handling as postApi). */
 export async function getApi<T>(path: string): Promise<ApiResult<T>> {
   try {

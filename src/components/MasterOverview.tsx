@@ -161,11 +161,11 @@ export function MasterOverview({
 
       {review && !reviewing && (
         <section className={`mt-7 ${fadeClass(reviewPlay)}`} style={fadeStyle(reviewPlay, weakMs)} aria-labelledby="weakest-heading">
-          <h2 id="weakest-heading" className="mb-1 px-3 text-[13px] font-medium text-muted">
+          <h2 id="weakest-heading" className="mb-1 text-[13px] font-medium text-muted">
             Weakest bullets
           </h2>
           {weakest.length > 0 ? (
-            <ol role="list" className="list-none space-y-0.5">
+            <ol role="list" className="-mx-3 list-none space-y-0.5">
               {weakest.map((item, i) => (
                 <li key={item.id} className={fadeClass(reviewPlay)} style={fadeStyle(reviewPlay, weakMs + i * 60)}>
                   <WeakBullet item={item} onSelect={() => onSelectBullet(item.id)} />
@@ -173,7 +173,7 @@ export function MasterOverview({
               ))}
             </ol>
           ) : (
-            <p className="px-3 text-[15px] text-muted">No weak bullets. Nice work.</p>
+            <p className="text-[15px] text-muted">No weak bullets. Nice work.</p>
           )}
         </section>
       )}
