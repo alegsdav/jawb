@@ -2,10 +2,16 @@ import "server-only";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
-/** Token counts from a response's `usageMetadata` (0 when the API leaves a field out), and the model that answered. */
-export type TokenUsage = { promptTokens: number; outputTokens: number; totalTokens: number; model?: string };
+/**
+ * Token counts from a response's `usageMetadata` (0 when the API leaves a field out), and the model that answered.
+ * `cachedTokens` is how many of `promptTokens` Gemini served from its context cache (cachedContentTokenCount).
+ */
+export type TokenUsage = { promptTokens: number; outputTokens: number; totalTokens: number; cachedTokens: number; model?: string };
 
-/** Read `usageMetadata` (promptTokenCount, candidatesTokenCount, totalTokenCount) from a Gemini response body. */
+/**
+ * Read `usageMetadata` (promptTokenCount, candidatesTokenCount, totalTokenCount, cachedContentTokenCount)
+ * from a Gemini response body.
+ */
 export function readUsage(data: unknown, model = MODEL): TokenUsage {
   const d = (data ?? {}) as { usageMetadata?: Record<string, unknown>; modelVersion?: unknown };
   const u = d.usageMetadata ?? {};
@@ -16,6 +22,7 @@ export function readUsage(data: unknown, model = MODEL): TokenUsage {
     promptTokens,
     outputTokens,
     totalTokens: n(u.totalTokenCount) || promptTokens + outputTokens,
+    cachedTokens: n(u.cachedContentTokenCount),
     model: typeof d.modelVersion === "string" && d.modelVersion ? d.modelVersion : model,
   };
 }

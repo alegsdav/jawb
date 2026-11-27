@@ -238,7 +238,7 @@ describe("facts from the facts table", () => {
     ];
     h.gemini.json = { fit: "possible", verdict: "", bullets: [], questions: [] };
     await analyze(req({ jobId: "j1" }));
-    const factsBlock = h.gemini.prompt.split("CANDIDATE FACTS")[1].split("CANDIDATE'S ANSWERS")[0];
+    const factsBlock = h.gemini.prompt.split("\nCANDIDATE FACTS (true")[1].split("CANDIDATE'S ANSWERS")[0];
     expect(factsBlock).toContain("- Saved $1,200 a month");
     expect(factsBlock).toContain("- Fluent in Spanish");
     expect(factsBlock).not.toContain("Grew sign-ups");

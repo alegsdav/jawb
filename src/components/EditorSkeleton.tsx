@@ -106,7 +106,6 @@ function SkeletonFrame({ tabs, panelTabs, active }: {
                   <MenuLabel>Format</MenuLabel>
                 </MenuBar>
               </div>
-              <div className="ml-auto w-[112px] shrink-0 items-center justify-end flex" />
             </DocToolbar>
             <div className="flex h-9 items-center border-b border-border bg-surface px-3 lg:hidden">
               <SkeletonTabs
@@ -138,7 +137,7 @@ function SkeletonFrame({ tabs, panelTabs, active }: {
 
         {/* The panel's frame: its tab row (desktop only; phones have the row above) and an empty column. */}
         <section className="hidden min-w-0 flex-col lg:flex lg:min-h-0">
-          <div className="flex h-9 shrink-0 items-stretch border-b border-border px-6">
+          <div className="app-bar flex shrink-0 items-stretch border-b border-border pl-6 pr-1.5">
             <SkeletonTabs tabList={panelTabs} active="overview" className="flex h-full min-w-0 items-stretch gap-4 overflow-hidden" />
           </div>
         </section>

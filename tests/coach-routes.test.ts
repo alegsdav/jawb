@@ -94,7 +94,7 @@ describe("POST /api/coach/examples", () => {
     h.reply = { examples: [{ text: "Tutored {{b1}} students", blanks: [{ key: "b1", label: "students" }] }] };
     await examples(req(body({ jobId: null })));
     expect(h.prompt).toMatch(/master resume \(no specific job\)/);
-    expect(h.prompt).not.toMatch(/JOB POSTING/);
+    expect(h.prompt).toMatch(/JOB POSTING:\n"""\n\(none: this is the master resume\)/);
   });
 
   it("422 with a plain message when every example fails the honesty check; 404 for a deleted job; 400 without an entry", async () => {

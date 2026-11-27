@@ -4,7 +4,6 @@ import {
   Children, createContext, useCallback, useContext, useLayoutEffect, useRef, useState,
   type KeyboardEvent, type PointerEvent, type ReactNode,
 } from "react";
-import { IconButton } from "./DocToolbar";
 import { PanelRightIcon } from "./icons";
 import {
   DIVIDER_PX, SPLIT_DEFAULT, SPLIT_STEP, clampSplit, parseSplit, splitColumns, splitLimits,
@@ -173,24 +172,35 @@ export function SplitPane({ storageKey, children }: { storageKey: string; childr
   );
 }
 
+/** The sidebar toggle's look and size (see TOGGLE in Sidebar.tsx): a 32×32 box, muted until hovered. */
+const PANEL_TOGGLE =
+  "flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted hover:bg-fg/[0.06] hover:text-fg";
+
 /**
- * The review panel's show/hide button. `panel` sits at the top right of the panel's tab row and hides the panel;
- * `editor` sits at the top right of the editor's toolbar and shows it again once it is collapsed. Desktop only.
+ * The review panel's show/hide button. `panel` sits at the right end of the panel's tab row and hides the panel;
+ * `editor` sits at the right end of the editor's top bar and shows it again once it is collapsed. Both sit 6px in from
+ * the canvas's right edge and are centred on the 36px bar, so they share one spot. Desktop only.
  */
 export function ReviewPanelToggle({ placement }: { placement: "panel" | "editor" }) {
   const { collapsed, toggle } = useContext(SplitContext);
   if (placement === "panel" ? collapsed : !collapsed) return null;
-  return placement === "panel" ? (
-    <span className="ml-auto hidden shrink-0 items-center pl-2 lg:flex">
-      <IconButton label="Hide review panel" onClick={toggle}>
-        <PanelRightIcon />
-      </IconButton>
-    </span>
-  ) : (
-    <span className="hidden shrink-0 items-center lg:flex">
-      <IconButton label="Show review panel" onClick={toggle}>
-        <PanelRightIcon />
-      </IconButton>
+  const hide = placement === "panel";
+  const label = hide ? "Hide review panel" : "Show review panel";
+  return (
+    // Centred on the whole 36px row, line included (pt-px: the row's 1px bottom border would otherwise lift it half a
+    // pixel above the sidebar's toggle). The editor's copy has a -2px margin, as its bar has 8px padding (6px net).
+    <span className={`ml-auto hidden shrink-0 items-center pt-px lg:flex ${hide ? "pl-2" : "-mr-0.5"}`}>
+      <button
+        type="button"
+        className={PANEL_TOGGLE}
+        aria-label={label}
+        title={label}
+        onClick={toggle}
+        // Pressing the button doesn't take focus from the document (as IconButton does).
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        <PanelRightIcon className="h-[18px] w-[18px] shrink-0" />
+      </button>
     </span>
   );
 }

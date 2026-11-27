@@ -397,25 +397,27 @@ export function Sidebar({ peek = false, onExpand }: { peek?: boolean; onExpand?:
   return (
     <nav
       aria-label="Workspace"
-      className={`relative flex flex-col gap-4 overflow-hidden px-3 pb-3 pt-3 text-[14px] ${peek ? "h-full w-full" : "h-dvh w-[248px]"}`}
+      className={`relative flex flex-col gap-4 overflow-hidden px-3 pb-3 pt-[var(--bar-top)] text-[14px] ${peek ? "h-full w-full" : "h-dvh w-[248px]"}`}
     >
       {peek ? (
         <>
-          {/* The peek's toggle sits exactly over the collapsed expand button (window 6px, 2px), which the pointer is on. */}
+          {/* The peek's toggle sits exactly over the collapsed expand button (window 6px, --toggle-top), which the pointer is on. */}
           <button
             type="button"
             onClick={onExpand}
             aria-label="Expand sidebar"
             aria-expanded={false}
-            className={`absolute left-[6px] top-[2px] ${TOGGLE}`}
+            className={`absolute left-[6px] top-[var(--toggle-top)] ${TOGGLE}`}
           >
             <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
           </button>
-          {/* Keeps the rail's header height, so the menu sits at the same spot as in the rail. No Wordmark here. */}
-          <div aria-hidden className="h-8 shrink-0" />
+          {/* Keeps the rail's header row (one 36px bar row, see the rail below), so the menu sits at the same spot as in the rail. No Wordmark here. */}
+          <div aria-hidden className="-mb-px h-[var(--bar-h)] shrink-0" />
         </>
       ) : (
-        <div className="flex h-8 items-center">
+        // The header row is the editor bar's row (9..45 in window y): the toggle is centred on it, at --toggle-top.
+        // -mb-px: the row's last pixel is the bar's divider, so the nav's gap below ends where it did before (Dashboard at 60).
+        <div className="-mb-px flex h-[var(--bar-h)] items-center">
           <Link href="/" className="flex h-8 min-w-0 items-center px-2">
             <Wordmark />
           </Link>

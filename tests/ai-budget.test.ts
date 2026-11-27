@@ -8,7 +8,9 @@ import { readUsage } from "@/lib/gemini";
 import { friendlyError } from "@/lib/api";
 import { AI_LIMIT_MESSAGE } from "@/lib/gemini";
 
-type Row = { id: string; weight: string; action: string; status: string; created_at: string; total_tokens: number; model: string };
+type Row = {
+  id: string; weight: string; action: string; status: string; created_at: string; total_tokens: number; cached_tokens: number; model: string;
+};
 
 const intervalMs = (i: string) => {
   const [n, unit] = i.split(" ");
@@ -20,8 +22,10 @@ const intervalMs = (i: string) => {
  * insert happen under a per-weight lock (the advisory lock), with an await in between that would let
  * parallel requests overshoot without it.
  */
-function fakeDb(clock: { now: number }, opts: { missing?: boolean; lock?: boolean } = {}) {
+function fakeDb(clock: { now: number }, opts: { missing?: boolean; lock?: boolean; oldFinish?: boolean } = {}) {
   const rows: Row[] = [];
+  /** Every finish_ai_call argument list, in order (for the p_cached checks). */
+  const finishCalls: Record<string, unknown>[] = [];
   const locks: Record<string, Promise<unknown>> = {};
   let n = 0;
   const reserve = async (a: Record<string, unknown>) => {
@@ -32,7 +36,10 @@ function fakeDb(clock: { now: number }, opts: { missing?: boolean; lock?: boolea
     await new Promise((r) => setTimeout(r, 1)); // between the count and the insert
     if (used >= Number(a.p_limit)) return { data: null, error: null };
     const id = `r${++n}`;
-    rows.push({ id, weight: String(a.p_weight), action: String(a.p_action), status: "pending", created_at: new Date(clock.now).toISOString(), total_tokens: 0, model: "" });
+    rows.push({
+      id, weight: String(a.p_weight), action: String(a.p_action), status: "pending", created_at: new Date(clock.now).toISOString(),
+      total_tokens: 0, cached_tokens: 0, model: "",
+    });
     return { data: id, error: null };
   };
   const client = {
@@ -47,12 +54,22 @@ function fakeDb(clock: { now: number }, opts: { missing?: boolean; lock?: boolea
         return run;
       }
       if (name === "finish_ai_call") {
+        finishCalls.push(a);
+        // Before migration 0010 the function has no p_cached argument, so PostgREST can't find that signature.
+        if (opts.oldFinish && "p_cached" in a) {
+          return Promise.resolve({ data: null, error: { code: "PGRST202", message: "Could not find the function public.finish_ai_call in the schema cache" } });
+        }
         const r = rows.find((x) => x.id === a.p_id && x.status === "pending");
-        if (r) Object.assign(r, { status: a.p_status === "ok" ? "ok" : "failed", total_tokens: a.p_total, model: a.p_model });
+        if (r) {
+          Object.assign(r, {
+            status: a.p_status === "ok" ? "ok" : "failed", total_tokens: a.p_total, model: a.p_model, cached_tokens: Number(a.p_cached ?? 0),
+          });
+        }
         return Promise.resolve({ data: null, error: null });
       }
       throw new Error(`unexpected rpc ${name}`);
     },
+    finishCalls,
     from() {
       const f: { statuses?: string[]; since?: string; weight?: string } = {};
       const q = {
@@ -159,11 +176,43 @@ describe("withAiBudget", () => {
   it("records token counts and the model from the meter", async () => {
     const db = fakeDb({ now: T0 });
     await withAiBudget(asClient(db), { action: "coach_examples", env }, async (meter) => {
-      meter.add({ promptTokens: 100, outputTokens: 20, totalTokens: 120, model: "gemini-x" });
-      meter.add({ promptTokens: 5, outputTokens: 5, totalTokens: 10 });
+      meter.add({ promptTokens: 100, outputTokens: 20, totalTokens: 120, cachedTokens: 0, model: "gemini-x" });
+      meter.add({ promptTokens: 5, outputTokens: 5, totalTokens: 10, cachedTokens: 0 });
       return null;
     });
     expect(db.rows[0]).toMatchObject({ weight: "light", action: "coach_examples", status: "ok", total_tokens: 130, model: "gemini-x" });
+  });
+
+  it("sums cached prompt tokens across the calls inside one budgeted call", async () => {
+    const db = fakeDb({ now: T0 });
+    await withAiBudget(asClient(db), { action: "analyze", env }, async (meter) => {
+      meter.add({ promptTokens: 1000, outputTokens: 10, totalTokens: 1010, cachedTokens: 800 });
+      meter.add({ promptTokens: 500, outputTokens: 10, totalTokens: 510, cachedTokens: 0 });
+      meter.add({ promptTokens: 900, outputTokens: 10, totalTokens: 910, cachedTokens: 600 });
+      return null;
+    });
+    expect(db.rows[0]).toMatchObject({ status: "ok", total_tokens: 2430, cached_tokens: 1400 });
+    expect(db.finishCalls[0]).toMatchObject({ p_cached: 1400 });
+  });
+
+  it("if the database predates migration 0010, retries finish_ai_call without p_cached and still records the call", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const db = fakeDb({ now: T0 }, { oldFinish: true });
+    await withAiBudget(asClient(db), { action: "analyze", env }, async (meter) => {
+      meter.add({ promptTokens: 40, outputTokens: 4, totalTokens: 44, cachedTokens: 30 });
+      return "ok";
+    });
+    await withAiBudget(asClient(db), { action: "analyze", env }, async (meter) => {
+      meter.add({ promptTokens: 8, outputTokens: 2, totalTokens: 10, cachedTokens: 0 });
+      return "ok";
+    });
+    // Each call: one attempt with p_cached (refused), then one retry without it.
+    expect(db.finishCalls.map((a) => "p_cached" in a)).toEqual([true, false, true, false]);
+    expect(db.rows.map((r) => [r.status, r.total_tokens, r.cached_tokens])).toEqual([["ok", 44, 0], ["ok", 10, 0]]);
+    // The missing-migration note is logged once, not per call, and is not a warning.
+    expect(info.mock.calls.filter((c) => /0010_cached_tokens\.sql/.test(String(c[0]))).length).toBeLessThanOrEqual(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("heavy and light have separate caps and windows (24 hours vs 60 minutes)", async () => {
@@ -232,10 +281,18 @@ describe("helpers", () => {
 
   it("readUsage maps Gemini's usageMetadata", () => {
     expect(readUsage({ usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 3, totalTokenCount: 20 }, modelVersion: "m-1" })).toEqual({
-      promptTokens: 12, outputTokens: 3, totalTokens: 20, model: "m-1",
+      promptTokens: 12, outputTokens: 3, totalTokens: 20, cachedTokens: 0, model: "m-1",
     });
-    expect(readUsage({}, "fallback")).toEqual({ promptTokens: 0, outputTokens: 0, totalTokens: 0, model: "fallback" });
+    expect(readUsage({}, "fallback")).toEqual({ promptTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0, model: "fallback" });
     expect(readUsage({ usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 6 } }).totalTokens).toBe(10);
+  });
+
+  it("readUsage reads cachedContentTokenCount (0 when absent or not a number)", () => {
+    expect(
+      readUsage({ usageMetadata: { promptTokenCount: 900, candidatesTokenCount: 5, totalTokenCount: 905, cachedContentTokenCount: 700 } }).cachedTokens,
+    ).toBe(700);
+    expect(readUsage({ usageMetadata: { promptTokenCount: 9, cachedContentTokenCount: "x" } }).cachedTokens).toBe(0);
+    expect(readUsage({ usageMetadata: { promptTokenCount: 9 } }).cachedTokens).toBe(0);
   });
 });
 
@@ -248,7 +305,7 @@ describe("geminiText reports usage without changing what it returns", () => {
         new Response(
           JSON.stringify({
             candidates: [{ content: { parts: [{ text: '{"a":1}' }] } }],
-            usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 2, totalTokenCount: 9 },
+            usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 2, totalTokenCount: 9, cachedContentTokenCount: 4 },
           }),
         ),
       ),
@@ -257,7 +314,7 @@ describe("geminiText reports usage without changing what it returns", () => {
     const seen: unknown[] = [];
     await expect(geminiJSON("p", { onUsage: (u) => seen.push(u) })).resolves.toEqual({ a: 1 });
     await expect(geminiJSON("p")).resolves.toEqual({ a: 1 }); // old call shape still works
-    expect(seen).toEqual([expect.objectContaining({ promptTokens: 7, outputTokens: 2, totalTokens: 9 })]);
+    expect(seen).toEqual([expect.objectContaining({ promptTokens: 7, outputTokens: 2, totalTokens: 9, cachedTokens: 4 })]);
     vi.unstubAllGlobals();
   });
 });

@@ -62,6 +62,28 @@ export function analyzePrompt(args: {
   answers: string;
 }) {
   return `You are a blunt, expert tech recruiter and resume coach helping a college student tailor their resume to one job or internship.
+${RULES}
+${REVIEW_RUBRIC}
+
+Return ONLY JSON with exactly this shape:
+{
+  "fit": "strong|possible|stretch",
+  "verdict": "2-3 sentences: overall fit, and the single most important change to make",
+  "keywords": { "matched": [important skills/terms from the posting the resume shows], "missing": [important posting terms absent from the resume] },
+  "strengths": ["specific strengths for THIS job, citing resume content"],
+  "gaps": [{ "issue": "what's missing or weak vs the posting", "severity": "high|medium|low", "fix": "concrete action" }],
+  "bullets": [{ "bullet_id": "ID from [b:ID]", "rating": "strong|ok|weak", "note": "why, relative to this job", "rewrite": "improved bullet tailored to this job, or empty string if already strong", "why": "one sentence, at most 25 words, to the student: what the rewrite changes and why a recruiter for THIS job will care, or empty string when rewrite is empty" }],
+  "questions": [{ "id": "q1", "question": "a question whose answer would strengthen the resume for this job (missing metrics, unlisted relevant experience, tools)", "why": "what it would improve", "bullet_id": "ID from [b:ID] when the question asks for the real value of a [placeholder] in that bullet's rewrite, else empty string", "placeholder": "that exact [placeholder] text, brackets included, copied from the rewrite, else empty string" }]
+}
+When a rewrite contains a [placeholder], ask one question per placeholder and set its bullet_id and placeholder so the answer can be filled in.
+Fit (judge the candidate as shown by the resume plus the facts and answers below):
+- "strong": meets the core requirements; a recruiter would likely move them forward.
+- "possible": meets some core requirements, with gaps a tailored resume could reasonably cover.
+- "stretch": missing several core requirements (level, degree, key skills); apply only if very interested.
+Rate EVERY resume bullet. Ask 2-6 questions. Never ask anything the CANDIDATE FACTS or the candidate's answers below already cover; use that information in the rewrites instead. Order gaps by severity.
+Never mention bullet ids ([b:…] or b:…) in any text field; refer to a bullet by its words instead.
+
+The job posting, the candidate's resume, their facts and their answers follow. Apply everything above to them.
 
 JOB POSTING:
 """
@@ -82,27 +104,7 @@ ${args.facts || "(none)"}
 CANDIDATE'S ANSWERS TO YOUR EARLIER QUESTIONS (true; may be empty):
 """
 ${args.answers || "(none)"}
-"""
-${RULES}
-${REVIEW_RUBRIC}
-
-Return ONLY JSON with exactly this shape:
-{
-  "fit": "strong|possible|stretch",
-  "verdict": "2-3 sentences: overall fit, and the single most important change to make",
-  "keywords": { "matched": [important skills/terms from the posting the resume shows], "missing": [important posting terms absent from the resume] },
-  "strengths": ["specific strengths for THIS job, citing resume content"],
-  "gaps": [{ "issue": "what's missing or weak vs the posting", "severity": "high|medium|low", "fix": "concrete action" }],
-  "bullets": [{ "bullet_id": "ID from [b:ID]", "rating": "strong|ok|weak", "note": "why, relative to this job", "rewrite": "improved bullet tailored to this job, or empty string if already strong", "why": "one sentence, at most 25 words, to the student: what the rewrite changes and why a recruiter for THIS job will care, or empty string when rewrite is empty" }],
-  "questions": [{ "id": "q1", "question": "a question whose answer would strengthen the resume for this job (missing metrics, unlisted relevant experience, tools)", "why": "what it would improve", "bullet_id": "ID from [b:ID] when the question asks for the real value of a [placeholder] in that bullet's rewrite, else empty string", "placeholder": "that exact [placeholder] text, brackets included, copied from the rewrite, else empty string" }]
-}
-When a rewrite contains a [placeholder], ask one question per placeholder and set its bullet_id and placeholder so the answer can be filled in.
-Fit (judge the candidate as shown by the resume plus the facts and answers above):
-- "strong": meets the core requirements; a recruiter would likely move them forward.
-- "possible": meets some core requirements, with gaps a tailored resume could reasonably cover.
-- "stretch": missing several core requirements (level, degree, key skills); apply only if very interested.
-Rate EVERY resume bullet. Ask 2-6 questions. Never ask anything the CANDIDATE FACTS or earlier answers already cover; use that information in the rewrites instead. Order gaps by severity.
-Never mention bullet ids ([b:…] or b:…) in any text field; refer to a bullet by its words instead.`;
+"""`;
 }
 
 export function coverLetterPrompt(args: { resume: string; job: string; facts: string; answers: string }) {
@@ -113,6 +115,8 @@ Paragraph 2: 2 most relevant accomplishments from the resume (or the true facts 
 Paragraph 3: short close.
 ${RULES}
 Use [placeholders] for anything you'd have to invent (e.g. hiring manager name). Return plain text only, starting with "Dear".
+
+The job posting, the candidate's resume, their facts and their answers follow. Write the letter from them.
 
 JOB:
 """
@@ -154,6 +158,8 @@ title and the location, from the posting only. Use "" for anything not stated.
 
 Return ONLY JSON: {"status": "open" | "closed" | "not_a_posting", "company": "", "title": "", "location": ""}
 
+The page details follow.
+
 PAGE TITLE: ${pageTitle.slice(0, 200) || "(none)"}
 PAGE TEXT:
 """
@@ -164,6 +170,8 @@ ${pageText.slice(0, 6000)}
 export function extractJobMetaPrompt(text: string) {
   return `From this job posting, extract the company name, job title and location.
 Return ONLY JSON: {"company": "", "title": "", "location": ""}. Use "" for anything not stated.
+
+The posting follows.
 
 """
 ${text.slice(0, 6000)}
@@ -176,22 +184,8 @@ ${text.slice(0, 6000)}
  */
 export function extractFactsPrompt(args: { answer: string; question: string; context: string }) {
   return `A college student answered a question about their own experience. Turn their answer into short, atomic facts
-that can be reused on a resume later.
-
-QUESTION THEY WERE ASKED (for context only; it is NOT a source of facts):
-"""
-${args.question.slice(0, 600) || "(none)"}
-"""
-
-THE RESUME LINE OR ENTRY IT'S ABOUT (for context only; it is NOT a source of facts):
-"""
-${args.context.slice(0, 1500) || "(none)"}
-"""
-
-THE STUDENT'S ANSWER (the ONLY source of facts):
-"""
-${args.answer.slice(0, 4000)}
-"""
+that can be reused on a resume later. Three labelled sections follow the rules: the resume line the answer is about,
+the question they were asked, and their answer. Only the answer is a source of facts; the other two are context.
 
 Rules:
 - Restate ONLY what the student literally wrote in their answer. Never add, infer, round, combine or improve anything.
@@ -203,7 +197,24 @@ Rules:
 - Skip anything vague, joking, or not about the student (e.g. "not sure", "n/a"). Zero facts is a fine answer.
 - At most 6 facts.
 
-Return ONLY JSON: {"facts": ["...", "..."]}`;
+Return ONLY JSON: {"facts": ["...", "..."]}
+
+The student's details follow.
+
+THE RESUME LINE OR ENTRY IT'S ABOUT (for context only; it is NOT a source of facts):
+"""
+${args.context.slice(0, 1500) || "(none)"}
+"""
+
+QUESTION THEY WERE ASKED (for context only; it is NOT a source of facts):
+"""
+${args.question.slice(0, 600) || "(none)"}
+"""
+
+THE STUDENT'S ANSWER (the ONLY source of facts):
+"""
+${args.answer.slice(0, 4000)}
+"""`;
 }
 
 /** What the coaching prompts know about the entry being coached (the student's own resume text). */
@@ -220,12 +231,24 @@ export type CoachContext = {
   job: string;
 };
 
-function coachHeader(c: CoachContext, task: string) {
-  const target = c.job
-    ? `They are tailoring it to the job posting below: use the posting's language and priorities (what this employer will look for).`
-    : `This is their master resume (no specific job): aim for what makes a bullet strong to any recruiter for this kind of role.`;
+/** Fixed coaching instructions: the role, the rules every coaching prompt shares, then the task's own rules. */
+function coachInstructions(task: string, taskRules: string) {
   return `You are a warm, honest resume coach for college students who don't yet know what recruiters value. ${task}
-${target}
+Check the JOB POSTING section below. If it holds a posting, they are tailoring this entry to that job: use the posting's language and priorities (what this employer will look for). If it says (none), this is their master resume (no specific job): aim for what makes a bullet strong to any recruiter for this kind of role.
+
+${RULES}
+- Never fabricate employers, tools, technologies, titles or results the student did not state in the entry or facts.
+- In coaching, a metric you don't know is a blank token like {{b1}} (described in the rules below), not a [placeholder].
+
+${taskRules}`;
+}
+
+/** The variable coaching data, most stable first: the job posting, the entry, its facts, then the selected bullet. */
+function coachData(c: CoachContext) {
+  return `JOB POSTING:
+"""
+${c.job ? c.job.slice(0, 8000) : "(none: this is the master resume)"}
+"""
 
 RESUME ENTRY:
 """
@@ -233,14 +256,15 @@ ${c.entry || "(untitled entry)"}
 ${c.bullets.map((b) => `- ${b}`).join("\n") || "(no bullets yet)"}
 """
 
-${c.bullet ? `SELECTED BULLET:\n"""\n${c.bullet}\n"""\n` : ""}
 STUDENT'S FACTS (true, things they told us; may be empty):
 """
 ${c.facts || "(none)"}
 """
-${c.job ? `\nJOB POSTING:\n"""\n${c.job.slice(0, 8000)}\n"""\n` : ""}${RULES}
-- Never fabricate employers, tools, technologies, titles or results the student did not state in the entry or facts.
-- In coaching, a metric you don't know is a blank token like {{b1}} (described below), not a [placeholder].`;
+
+SELECTED BULLET (when it says (none), the whole entry is the subject):
+"""
+${c.bullet || "(none)"}
+"""`;
 }
 
 /**
@@ -248,9 +272,7 @@ ${c.job ? `\nJOB POSTING:\n"""\n${c.job.slice(0, 8000)}\n"""\n` : ""}${RULES}
  * angles; earlier examples are never sent back (they're ephemeral and must not reach any prompt).
  */
 export function coachExamplesPrompt(c: CoachContext & { round: number }) {
-  return `${coachHeader(c, `Show the student up to 3 example bullets for ${c.bullet ? "the selected bullet" : "this entry"}, so they can see what a strong version looks like.`)}
-
-${BULLET_CRAFT}
+  return `${coachInstructions("Show the student up to 3 example bullets for the SELECTED BULLET below (or for the whole entry when it says (none)), so they can see what a strong version looks like.", `${BULLET_CRAFT}
 
 How to write the examples:
 - Build each example only from what the entry, the selected bullet and the facts say the student did. Same employer,
@@ -267,23 +289,32 @@ How to write the examples:
   for a student, phrased as a hint, e.g. "Most student tutors see somewhere between a handful and a few dozen a week"),
   "example_value" (an illustrative value with its unit, e.g. "15"), and "question" (plain language: how to find the real
   number, with an estimation tip, e.g. "Count a typical week and multiply by the weeks in the semester").
-${c.round > 1 ? `- This is set #${c.round}: take different angles than the most obvious ones (for example lead with the outcome, the process, collaboration, or who benefited), with different verbs.\n` : ""}
+- If the ROUND line below is more than 1, this is a "More examples" set: take different angles than the most obvious ones (for example lead with the outcome, the process, collaboration, or who benefited), with different verbs.
+
 Return ONLY JSON:
 { "examples": [ { "text": "Led {{b1}} weekly calculus review sessions...", "why": "", "anatomy": [{ "part": "verb", "span": "Led" }],
-  "blanks": [{ "key": "b1", "label": "", "hint": "", "example_value": "", "question": "", "from_fact": "", "fact_value": "" }] } ] }`;
+  "blanks": [{ "key": "b1", "label": "", "hint": "", "example_value": "", "question": "", "from_fact": "", "fact_value": "" }] } ] }`)}
+
+The student's details follow.
+
+${coachData(c)}
+
+ROUND: ${c.round}`;
 }
 
 /** 3 to 5 questions that help the student find the real details and numbers for an entry. */
 export function coachQuestionsPrompt(c: CoachContext) {
-  return `${coachHeader(c, `Ask the student 3 to 5 short questions that would let them write a strong bullet for ${c.bullet ? "the selected bullet" : "this entry"}: real numbers, scope, tools, and results they may not realize count.`)}
-
-- Ask about what they actually did; never assume results.
+  return `${coachInstructions("Ask the student 3 to 5 short questions that would let them write a strong bullet for the SELECTED BULLET below (or for the whole entry when it says (none)): real numbers, scope, tools, and results they may not realize count.", `- Ask about what they actually did; never assume results.
 - Don't ask anything the STUDENT'S FACTS already answer.
 - Each question must be answerable in rough form ("about 20", "maybe 3 hours a week") or skipped.
 - "why": one line on why it matters to a recruiter. "tip": how to estimate if they don't know exactly
   (e.g. "Think of a typical week and multiply").
 
-Return ONLY JSON: { "questions": [ { "question": "", "why": "", "tip": "" } ] }`;
+Return ONLY JSON: { "questions": [ { "question": "", "why": "", "tip": "" } ] }`)}
+
+The student's details follow.
+
+${coachData(c)}`;
 }
 
 /**
@@ -291,7 +322,7 @@ Return ONLY JSON: { "questions": [ { "question": "", "why": "", "tip": "" } ] }`
  * skills) from the student's answers; the model only writes bullets, keyed by experience id.
  */
 export function builderDraftPrompt(experiences: { id: string; type: string; org: string; role: string; what: string }[], major: string) {
-  return `A college student${major ? ` studying ${major}` : ""} is writing their first resume. For each experience below, write 2 to 4
+  return `A college student is writing their first resume. The MAJOR line below gives their major, or says (not given). For each experience in the EXPERIENCES section below, write 2 to 4
 Harvard-style resume bullets from what they wrote.
 ${RULES}
 - Use ONLY what the student wrote for THAT experience: never add tools, people, employers, numbers or results they didn't
@@ -302,10 +333,14 @@ ${RULES}
 
 ${BULLET_CRAFT}
 
-EXPERIENCES (JSON):
-${JSON.stringify(experiences.map((x) => ({ id: x.id, type: x.type, organization: x.org, role: x.role, what_they_did: x.what })), null, 1).slice(0, 14000)}
+Return ONLY JSON: { "bullets": { "<experience id>": ["...", "..."] } }
 
-Return ONLY JSON: { "bullets": { "<experience id>": ["...", "..."] } }`;
+The student's details follow.
+
+MAJOR: ${major || "(not given)"}
+
+EXPERIENCES (JSON):
+${JSON.stringify(experiences.map((x) => ({ id: x.id, type: x.type, organization: x.org, role: x.role, what_they_did: x.what })), null, 1).slice(0, 14000)}`;
 }
 
 /**
@@ -341,6 +376,8 @@ Rules:
   brackets such as "LinkedIn (https://www.linkedin.com/in/x)". Never drop, shorten or reword a link.
 - Keep [placeholders] exactly as written, brackets included.
 - Use "" for anything not stated. Return ONLY the JSON.
+
+The resume text follows.
 
 RESUME TEXT:
 """
