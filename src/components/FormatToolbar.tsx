@@ -1,7 +1,8 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { FONT_CHOICES } from "@/lib/doc/fonts";
-import { UndoRedo } from "./DocToolbar";
+import { ToolbarSep, UndoRedo } from "./DocToolbar";
 import { LinkIcon, ListIcon, NumberedListIcon } from "./icons";
 import { FONT_SIZES, type DocCommands, type FormatState, type MarkName } from "./editorTypes";
 
@@ -12,6 +13,28 @@ const MARKS: { name: MarkName; title: string; glyph: string; glyphClass: string 
 ];
 
 const Sep = () => <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />;
+
+/**
+ * The native select is transparent and covers the chip, so clicks, keyboard use and its dropdown still belong to the
+ * select. The visible text and a small chevron come from the chip itself, which sizes to its content, so the arrow sits
+ * right after the value instead of at the far edge of a box.
+ */
+const SELECT_CLASS =
+  "absolute inset-0 h-full w-full min-w-0 cursor-pointer appearance-none bg-surface text-sm text-fg opacity-0 outline-none";
+
+function SelectChip({ label, textClass, children }: { label: string; textClass?: string; children: ReactNode }) {
+  return (
+    <div className="relative inline-flex h-8 max-w-full shrink-0 items-center rounded-md hover:bg-surface-2 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-fg/40">
+      <span aria-hidden className="pointer-events-none flex min-w-0 items-center gap-1 pl-2 pr-1.5 text-sm text-fg">
+        <span className={textClass}>{label}</span>
+        <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 4.5 6 7.5 9 4.5" />
+        </svg>
+      </span>
+      {children}
+    </div>
+  );
+}
 
 /**
  * A toolbar button. Never disabled: it keeps the editor's focus on press, so its command applies to the editor's
@@ -43,28 +66,33 @@ export function FormatToolbar({ fmt, commands }: { fmt: FormatState; commands: D
     <div role="toolbar" aria-label="Formatting" className="flex min-w-0 flex-nowrap items-center gap-1">
       <UndoRedo undo={commands.undo} redo={commands.redo} />
       <Sep />
-      <select
-        aria-label="Font"
-        className="h-8 w-32 max-w-full shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
-        value={font ?? ""}
-        onChange={(e) => commands.setFontFamily(e.target.value)}
-      >
-        {font === null && <option value="" disabled />}
-        {families.map((f) => (
-          <option key={f} value={f}>{f}</option>
-        ))}
-      </select>
-      <select
-        aria-label="Font size"
-        className="h-8 w-[4.5rem] shrink-0 rounded-md border border-border bg-surface px-2 text-sm text-fg"
-        value={size === null ? "" : String(size)}
-        onChange={(e) => commands.setSize(Number(e.target.value))}
-      >
-        {size === null && <option value="" disabled />}
-        {sizes.map((pt) => (
-          <option key={pt} value={String(pt)}>{pt}</option>
-        ))}
-      </select>
+      <SelectChip label={font ?? ""} textClass={`max-w-[9.5rem] truncate ${font ? "" : "min-w-[4.5rem]"}`}>
+        <select
+          aria-label="Font"
+          className={SELECT_CLASS}
+          value={font ?? ""}
+          onChange={(e) => commands.setFontFamily(e.target.value)}
+        >
+          {font === null && <option value="" disabled />}
+          {families.map((f) => (
+            <option key={f} value={f}>{f}</option>
+          ))}
+        </select>
+      </SelectChip>
+      <ToolbarSep />
+      <SelectChip label={size === null ? "" : String(size)} textClass="min-w-[1.25rem]">
+        <select
+          aria-label="Font size"
+          className={SELECT_CLASS}
+          value={size === null ? "" : String(size)}
+          onChange={(e) => commands.setSize(Number(e.target.value))}
+        >
+          {size === null && <option value="" disabled />}
+          {sizes.map((pt) => (
+            <option key={pt} value={String(pt)}>{pt}</option>
+          ))}
+        </select>
+      </SelectChip>
       <Sep />
       {MARKS.map((b) => (
         <button

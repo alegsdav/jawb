@@ -9,6 +9,11 @@
   --toggle: 2rem;
   --bar-top: calc(var(--chrome-gap) + 1px);
   --toggle-top: calc(var(--bar-top) + (var(--bar-h) - var(--toggle)) / 2);
+  /* The sidebar's icon column: the nav's side padding (px-3) plus a row's (px-2). The 32px toggle's 18px glyph is
+     centred in it, so the toggle's left edge sits 7px further out: --toggle-left puts the glyph on the icons' column. */
+  --rail-pad: 0.75rem;
+  --row-pad: 0.5rem;
+  --toggle-left: calc(var(--rail-pad) + var(--row-pad) - (var(--toggle) - 18px) / 2);
   /* After the Logip reference: white canvas, black and grey type, hairlines, one pale blue. */
   --bg: #ffffff;
   --surface: #ffffff;
@@ -67,27 +72,25 @@ body {
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Page gutters (lg and up), for pages that line up with the shell: 40px inside the canvas beside the sidebar; with
-   the sidebar collapsed, the page fills the window and lines up with the expand button's glyph (button at 20px,
-   glyph 7px in, its outline 2px more), and starts below the button. */
+/* Page gutters (lg and up), for pages that line up with the shell: 40px inside the canvas beside the sidebar. With the
+   sidebar collapsed, the canvas reaches the window's left edge (keeping its margin), and the page lines up with the
+   sidebar icons' column (window x 20px, the same column as the expand button's glyph), starting at window y 76px. The
+   canvas's inside starts at --bar-top (9px), so the offsets are measured from there. */
 .app-main { --page-x: 2.5rem; --page-top: 2.5rem; }
-.app-main[data-collapsed] { --page-x: 29px; --page-top: 76px; }
-
-/* The collapsed sidebar's expand button sits in the same window spot on every page: 6px in, and centred on the editor
-   bar's row (--toggle-top, 11px down). The rail's and the peek's toggle sit at this same spot (Sidebar's header row). */
-.expand-btn { left: 6px; top: var(--toggle-top); }
-
-/* The editor's top bar (DocToolbar) and the review panel's tab row: one 36px row. Collapsed (lg and up) the page fills
-   the window, so the bar grows upward to the canvas's inside edge (--bar-top): its padding keeps the contents on the
-   same y, and its bottom border stays on the same line as when the sidebar is open. */
-.app-bar { height: var(--bar-h); }
-@media (min-width: 1024px) {
-  .app-main[data-collapsed] .app-bar {
-    height: calc(var(--bar-top) + var(--bar-h));
-    padding-top: var(--bar-top);
-    box-sizing: border-box;
-  }
+.app-main[data-collapsed] {
+  --page-x: calc(var(--rail-pad) + var(--row-pad) - var(--bar-top));
+  --page-top: calc(76px - var(--bar-top));
 }
+
+/* The collapsed sidebar's expand button sits in the same window spot on every page: on the sidebar icons' column
+   (--toggle-left, window x 13px: its glyph at 20px) and centred on the editor bar's row (--toggle-top, 11px down). It is
+   positioned in .app-canvas, which starts at the window's left edge, so these are window coordinates. The rail's and
+   the peek's toggle sit at this same spot (Sidebar's header row). */
+.expand-btn { left: var(--toggle-left); top: var(--toggle-top); }
+
+/* The editor's top bar (DocToolbar) and the review panel's tab row: one 36px row, the same on every page. Its bottom
+   border is the canvas's line 45px down (window y), whether or not the sidebar is open. */
+.app-bar { height: var(--bar-h); }
 
 /* The peek (AppShell): a full-height panel flush to the window's left edge, square, on the dark glass of the menus
    (float-dark's colours and blur), with a 1px right edge and a soft shadow. Its colour tokens flip, so the sidebar's
@@ -114,6 +117,19 @@ body {
 }
 /* The peek's toggle sits at the panel's top edge: keep its focus ring inside the nav's clip. */
 .sidebar-peek :focus-visible { outline-offset: -2px; }
+
+/* While there is more of the list below, its last 40px fade out (a mask on the list itself, so the fade needs no
+   colour and reads the same on the rail and on the peek's glass). The profile below the list is not affected. */
+/* The sidebar's Add job box is a plain tinted box: focus shows as a slightly darker tint, not the blue ring. */
+.sidebar-add-box:focus-visible { outline: none; }
+.sidebar-scroll-fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+}
+/* The sidebar's one scroll container: a thin scrollbar that shows only while the pointer is over the list. */
+.sidebar-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.sidebar-scroll:hover { scrollbar-color: rgb(127 127 127 / 0.45) transparent; }
+.sidebar-scroll:focus-visible { outline-offset: -2px; }
 
 @layer components {
   .card { @apply bg-surface border border-border rounded-2xl; }
