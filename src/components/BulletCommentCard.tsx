@@ -16,15 +16,13 @@ export function BulletCommentCard(props: {
   quiet: boolean;
   /** Replace the bullet's text (Accept suggestion). */
   onAccept: (text: string) => void;
-  /** Replace the bullet's text with the master version. */
-  onRevert: (text: string) => void;
   onReject?: (bulletId: string) => void;
   onClose: () => void;
   /** Select a [placeholder] in the bullet (char offsets within the bullet text). */
   onSelectPlaceholder: (start: number, length: number) => void;
 }): ReactElement | null {
-  const { bulletId, info, showChanges, quiet, onAccept, onRevert, onReject, onClose, onSelectPlaceholder } = props;
-  const { view, fb, original, isNew, changed, suggestion, why, placeholders } = info;
+  const { bulletId, info, showChanges, quiet, onAccept, onReject, onClose, onSelectPlaceholder } = props;
+  const { view, fb, isNew, changed, suggestion, why, placeholders } = info;
   const placeholder = !quiet && placeholders.length > 0;
 
   if (!(view || changed || isNew || placeholder)) return null;
@@ -118,18 +116,6 @@ export function BulletCommentCard(props: {
         </p>
       )}
 
-      {showChanges && changed && (
-        <p>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            className={linkBtn}
-            onClick={() => onRevert(original!)}
-          >
-            Revert to master wording
-          </button>
-        </p>
-      )}
       {showChanges && isNew && !view && <p className={muted}>Added in this tailored copy (not in your master resume).</p>}
     </div>
   );

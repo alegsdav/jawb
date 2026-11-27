@@ -349,3 +349,24 @@ body {
     animation: none;
   }
 }
+
+/* ---------- Revert to master arrow (ResumeDocument: the selected bullet that differs from the master) ----------
+   A round back-arrow button in the page's right margin, centred on the bullet's first line. ResumeDocument positions it
+   in the page's own coordinates (.doc-page is position: relative), so it moves with the page and never reflows the text.
+   It is document UI: never printed. The tip is the app's dark float (.float-dark), to the left of the button. */
+.doc-revert { position: absolute; z-index: 2; width: 26px; height: 26px; }
+.doc-revert-btn {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 9999px;
+  color: var(--muted); background: transparent; cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.doc-revert-btn:hover { background: rgb(23 23 23 / 0.06); color: var(--fg); }
+.doc-revert-btn svg { width: 14px; height: 14px; }
+.doc-revert-tip {
+  position: absolute; right: calc(100% + 6px); top: 50%; transform: translateY(-50%);
+  padding: 4px 8px; border-radius: 6px; font-size: 12px; line-height: 1.2; white-space: nowrap;
+  box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.3); pointer-events: none;
+}
+@media print {
+  .doc-revert, .doc-revert-tip { display: none !important; }
+}
