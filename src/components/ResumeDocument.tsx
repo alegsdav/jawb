@@ -34,7 +34,7 @@ type Props = {
   showHighlights?: boolean;
   /** Bullet texts the copy is compared against ("changed from master"): the copy's baseline or the master. */
   baseline?: Map<string, string> | null;
-  /** Draw the change bar next to bullets that differ from the baseline. Default true. */
+  /** Whether "Revert to master" is offered on a selected bullet that differs from the baseline. Draws nothing. Default true. */
   showChanges?: boolean;
   /** Reject a bullet's pending suggestion. */
   onReject?: (bulletId: string) => void;
@@ -54,7 +54,7 @@ type Props = {
   commandsRef?: React.RefObject<DocCommands | null>;
   /** Called when the caret's formatting state changes. */
   onFormatStateChange?: (s: FormatState) => void;
-  /** Paragraph id to outline in blue: the bullet (or entry's title line) the coaching panel is on. Editor only, never saved or printed. */
+  /** Paragraph id to outline in navy: the bullet (or entry's title line) the coaching panel is on. Editor only, never saved or printed. */
   focusId?: string | null;
 };
 
