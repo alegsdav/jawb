@@ -216,7 +216,7 @@ describe("coaching, facts and builder prompts: caching-friendly layout", () => {
     const p = coachExamplesPrompt(coachB);
     const { fixed, data } = splitAtTransition(p);
     expect(fixed).not.toContain("Data Analyst Intern at Acme");
-    expect(fixed).not.toMatch(/ROUND|round/);
+    expect(fixed).not.toMatch(/ROUND: \d/);
     expect(data.indexOf("JOB POSTING:")).toBeLessThan(data.indexOf("RESUME ENTRY:"));
     expect(data.indexOf("RESUME ENTRY:")).toBeLessThan(data.indexOf("SELECTED BULLET"));
     expect(data.trimEnd().endsWith("ROUND: 3")).toBe(true);

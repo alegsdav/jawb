@@ -160,7 +160,7 @@ Return ONLY JSON: {"status": "open" | "closed" | "not_a_posting", "company": "",
 
 The page details follow.
 
-PAGE TITLE:${pageTitle.slice(0, 200) || "(none)"}
+PAGE TITLE: ${pageTitle.slice(0, 200) || "(none)"}
 PAGE TEXT:
 """
 ${pageText.slice(0, 6000)}
