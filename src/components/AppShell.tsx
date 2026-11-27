@@ -213,7 +213,7 @@ export function AppShell({
                   onPointerLeave={leave}
                   aria-label="Expand sidebar"
                   aria-expanded={false}
-                  className="expand-btn absolute z-20 hidden h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted hover:bg-fg/[0.06] hover:text-fg lg:flex"
+                  className="expand-btn absolute z-20 hidden h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted hover:text-fg lg:flex"
                 >
                   <SidebarIcon className="h-[18px] w-[18px] shrink-0" />
                 </button>
