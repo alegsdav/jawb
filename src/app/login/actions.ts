@@ -6,24 +6,25 @@ import { createClient } from "@/lib/supabase/server";
 import { authErrorMessage } from "@/lib/authErrors";
 import { isAllowedUser, NOT_ALLOWED_MESSAGE } from "@/lib/supabase/allowlist";
 
-type State = { message: string; ok?: boolean };
+/** `email` comes back on a failed sign-in, so the form (which React resets after its action) keeps what was typed. */
+type State = { message: string; ok?: boolean; email?: string };
 
 export async function signInWithPassword(_: State, form: FormData): Promise<State> {
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   const password = String(form.get("password") ?? "");
   if (!email) return { message: "Enter your email." };
-  if (!password) return { message: "Enter your password." };
+  if (!password) return { message: "Enter your password.", email };
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     console.error("sign-in failed:", error.message);
-    return { message: authErrorMessage(error, "sign-in") };
+    return { message: authErrorMessage(error, "sign-in"), email };
   }
   // Invited accounts and ALLOWED_EMAILS only (the same check middleware makes on every request).
   if (!isAllowedUser(data.user)) {
     await supabase.auth.signOut().catch(() => {});
-    return { message: NOT_ALLOWED_MESSAGE };
+    return { message: NOT_ALLOWED_MESSAGE, email };
   }
   redirect("/");
 }

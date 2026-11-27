@@ -8,7 +8,7 @@ export function authErrorMessage(
     return "Too many attempts. Wait a minute and try again.";
   }
   if (action === "sign-in" && /invalid login|invalid credentials/i.test(msg)) {
-    return 'Wrong email or password. No password yet? Use "Email me a sign-in link" below, then set one under Account.';
+    return "Wrong email or password. Check them and try again.";
   }
   if (/email not confirmed/i.test(msg)) return "Confirm your email first: check your inbox for the confirmation link.";
   if (action === "link" && /signups? not allowed|user not found|not found/i.test(msg)) {
