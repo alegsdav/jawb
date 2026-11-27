@@ -1,84 +1,91 @@
 "use client";
 
-import { Wordmark } from "@/components/icons";
-import Link from "next/link";
 import { useActionState } from "react";
 import { signUp, type SignupState } from "./actions";
 import { LoadingState } from "@/components/ui/loading-state";
+import { FIELD, LABEL, SUBMIT } from "@/components/AuthShell";
 
-/** Email, password and invite code. Errors are announced and point at the field they're about. */
+/**
+ * The sign-up form, rendered inside AuthShell by page.tsx. A failed attempt returns the email and invite code so they
+ * stay filled in (React resets the form after an action); the password is never returned, so it is retyped.
+ * Errors are announced and point at the field they're about.
+ */
 export function SignupForm({ initialCode = "" }: { initialCode?: string }) {
   const [state, action, pending] = useActionState<SignupState, FormData>(signUp, { message: "" });
   const invalid = (f: SignupState["field"]) => (state.field === f ? true : undefined);
+  const describedBy = (f: SignupState["field"], hint?: string) =>
+    [hint, state.field === f ? "signup-error" : undefined].filter(Boolean).join(" ") || undefined;
 
   return (
-    // Top-anchored so an error message grows the card downward and the fields and button stay put.
-    <main className="min-h-dvh grid items-start justify-items-center px-4 pt-[18vh]">
-      <div className="card w-full max-w-sm p-7 space-y-5">
-        <div className="space-y-3">
-          <Wordmark className="block text-[34px]" />
-          <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
-          <p className="text-sm text-muted">Jawb is invite-only. Use the code you were given.</p>
-        </div>
-        <form action={action} className="space-y-3" noValidate>
-          <div className="space-y-1">
-            <label htmlFor="signup-email" className="text-sm font-medium">Email</label>
+    <form action={action} noValidate className="flex w-full max-w-[360px] flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-[28px] font-semibold leading-[1.15] tracking-[-0.02em] lg:text-[32px]">Create your account</h1>
+        <p className="text-[15px] text-muted">Use the invite code you were given.</p>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <label className={LABEL}>
+          Email
+          <input
+            name="email"
+            type="email"
+            defaultValue={state.email ?? ""}
+            autoComplete="email"
+            required
+            placeholder="you@school.edu"
+            className={FIELD}
+            aria-invalid={invalid("email")}
+            aria-describedby={describedBy("email")}
+          />
+        </label>
+
+        <div className="flex flex-col gap-1.5">
+          <label className={LABEL}>
+            Password
             <input
-              id="signup-email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              className="input w-full"
-              aria-invalid={invalid("email")}
-              aria-describedby={state.field === "email" ? "signup-error" : undefined}
-            />
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="signup-password" className="text-sm font-medium">Password</label>
-            <input
-              id="signup-password"
               name="password"
               type="password"
               autoComplete="new-password"
               minLength={8}
               required
-              className="input w-full"
+              placeholder="Password"
+              className={FIELD}
               aria-invalid={invalid("password")}
-              aria-describedby="signup-password-hint"
+              aria-describedby={describedBy("password", "signup-password-hint")}
             />
-            <p id="signup-password-hint" className="text-xs text-muted">At least 8 characters.</p>
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="signup-code" className="text-sm font-medium">Invite code</label>
-            <input
-              id="signup-code"
-              name="code"
-              autoComplete="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              required
-              defaultValue={initialCode}
-              placeholder="ABCD-EFGH-IJKL-MNOP"
-              className="input w-full font-mono tracking-wide"
-              aria-invalid={invalid("code")}
-              aria-describedby={state.field === "code" ? "signup-error" : undefined}
-            />
-          </div>
-          <button disabled={pending} className="btn btn-primary w-full py-2.5">
-            {pending ? <LoadingState label="Creating your account" className="loading-on-fill" /> : "Create account"}
-          </button>
-          {state.message && (
-            <p id="signup-error" role="alert" className="text-sm text-bad">
-              {state.message}
-            </p>
-          )}
-        </form>
-        <p className="text-sm text-muted">
-          Already have an account?{" "}
-          <Link href="/login" className="underline underline-offset-2 hover:text-fg">Sign in</Link>
-        </p>
+          </label>
+          <p id="signup-password-hint" className="text-[12px] text-muted">
+            At least 8 characters.
+          </p>
+        </div>
+
+        <label className={LABEL}>
+          Invite code
+          <input
+            name="code"
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            required
+            defaultValue={state.code ?? initialCode}
+            placeholder="ABCD-EFGH-IJKL-MNOP"
+            className={`${FIELD} font-mono tracking-wide`}
+            aria-invalid={invalid("code")}
+            aria-describedby={describedBy("code")}
+          />
+        </label>
       </div>
-    </main>
+
+      <div className="flex flex-col gap-3">
+        <button type="submit" disabled={pending} className={SUBMIT}>
+          {pending ? <LoadingState label="Creating your account" className="loading-on-fill" /> : "Create account"}
+        </button>
+        {state.message && (
+          <p id="signup-error" role="alert" className="text-[14px] text-bad">
+            {state.message}
+          </p>
+        )}
+      </div>
+    </form>
   );
 }
